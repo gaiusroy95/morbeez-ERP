@@ -14,10 +14,15 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
 // Bounded context: Users — identity, authentication, and access; not
 // employment (Domain Model, Tier 00). Owns identity.app_user, role,
-// permission, role_permission, user_role, and auth_session. Other modules
-// depend on this one only through AuthContext (common/types) and the
-// JwtAuthGuard/PermissionsGuard in common/ — never by importing anything
-// from modules/users directly (Constitution I.3-I.4).
+// permission, role_permission, user_role, and auth_session. A module that
+// merely needs to know who's calling reads AuthContext (common/types) via
+// JwtAuthGuard/PermissionsGuard in common/ — it never imports this module
+// for that. TenantModule is the one deliberate exception: provisioning a
+// business account's first user is genuinely Users' business logic
+// (Constitution I.3), so Tenant imports this module and calls the two
+// services below — never their repositories, entities, or anything else
+// left unexported (Constitution I.4: through a public API, not by
+// reaching into internals).
 @Module({
   imports: [
     PassportModule,
@@ -36,6 +41,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     TokenService,
     JwtStrategy,
   ],
-  exports: [UsersService],
+  exports: [UsersService, AuthService],
 })
 export class UsersModule {}

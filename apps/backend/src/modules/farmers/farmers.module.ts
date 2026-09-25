@@ -1,14 +1,13 @@
 import { Module } from '@nestjs/common';
 import { FarmersController } from './farmers.controller';
 import { FarmersService } from './farmers.service';
+import { FarmersRepository } from './repositories/farmers.repository';
 
-// Bounded context: Farmers
-// Owns its own schema (database/schemas/) and communicates with other
-// modules only through published events or public APIs (Constitution I.3-I.4).
+// Bounded context: Farmers — who the wholesaler buys from (Domain Model,
+// Trading Partners tier). DatabaseModule and AuditModule are global.
 @Module({
-  imports: [],
   controllers: [FarmersController],
-  providers: [FarmersService],
+  providers: [FarmersService, FarmersRepository],
   exports: [FarmersService],
 })
 export class FarmersModule {}

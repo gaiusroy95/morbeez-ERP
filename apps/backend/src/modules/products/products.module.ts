@@ -1,14 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
+import { ProductsRepository } from './repositories/products.repository';
 
-// Bounded context: Products
-// Owns its own schema (database/schemas/) and communicates with other
-// modules only through published events or public APIs (Constitution I.3-I.4).
+// Bounded context: Products — the catalog: what, and in what units
+// (Domain Model, Trading Partners & Catalog tier; Constitution II.2).
 @Module({
-  imports: [],
   controllers: [ProductsController],
-  providers: [ProductsService],
+  providers: [ProductsService, ProductsRepository],
   exports: [ProductsService],
 })
 export class ProductsModule {}

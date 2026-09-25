@@ -5,6 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
@@ -83,6 +84,37 @@ export class UsersService {
 
   async assignRole(tenantId: string, userId: string, roleId: string): Promise<void> {
     await this.roles.assignToUser(tenantId, userId, roleId);
+  }
+
+  /**
+   * Creates the first user of a brand-new tenant: an "Owner" role carrying
+   * every permission that currently exists, assigned to a new user with
+   * the given credentials. Called by TenantService.createBusinessAccount()
+   * as one step of its own transaction — takes the open `client` rather
+   * than opening its own, so tenant-row creation and owner-provisioning
+   * either both succeed or both roll back together. Users owns "what an
+   * Owner is"; Tenant owns "when a business account gets one"
+   * (Constitution I.3 — the business logic stays in the module whose
+   * concern it actually is, even when another module orchestrates the
+   * transaction).
+   */
+  async provisionOwner(
+    client: PoolClient,
+    tenantId: string,
+    email: string,
+    plaintextPassword: string,
+  ): Promise<PublicUser> {
+    const passwordHash = await this.password.hash(plaintextPassword);
+    const user = await this.users.createWithClient(client, tenantId, email, passwordHash);
+
+    const ownerRole = await this.roles.createWithClient(client, tenantId, 'Owner');
+    const permissionCodes = await this.roles.listAllPermissionCodesWithClient(client);
+    for (const code of permissionCodes) {
+      await this.roles.assignPermissionWithClient(client, ownerRole.id, code);
+    }
+    await this.roles.assignToUserWithClient(client, user.id, ownerRole.id);
+
+    return toPublicUser(user);
   }
 }
 

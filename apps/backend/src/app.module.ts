@@ -6,6 +6,7 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { DatabaseModule } from './infra/database/database.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { LoggerModule } from './infra/logging/logger.module';
+import { AuditModule } from './infra/audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { UsersModule } from './modules/users/users.module';
@@ -31,6 +32,7 @@ import { AiModule } from './modules/ai/ai.module';
     LoggerModule,
     DatabaseModule,
     RedisModule,
+    AuditModule,
     HealthModule,
     TenantModule,
     UsersModule,

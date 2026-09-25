@@ -9,6 +9,7 @@
     "start:dev": "nest start --watch",
     "start:worker": "ts-node worker/main.ts",
     "test": "jest",
+    "test:integration": "jest --config ./test/jest-integration.json --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "lint": "eslint \"src/**/*.ts\"",
     "migrate:up": "node-pg-migrate --migration-file-language js --migrations-dir ../../database/migrations up",
@@ -52,5 +53,13 @@
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",
     "typescript": "^5.4.0"
+  },
+  "jest": {
+    "rootDir": "src",
+    "testRegex": ".spec.ts$",
+    "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "coverageDirectory": "../coverage"
   }
 }

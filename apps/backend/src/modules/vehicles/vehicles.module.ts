@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { VehiclesController } from './vehicles.controller';
 import { VehiclesService } from './vehicles.service';
+import { VehiclesRepository } from './repositories/vehicles.repository';
 
-// Bounded context: Vehicles
-// Owns its own schema (database/schemas/) and communicates with other
-// modules only through published events or public APIs (Constitution I.3-I.4).
+// Bounded context: Vehicles — the fleet (Domain Model, Trading Partners
+// & Catalog tier). Financial treatment (depreciation, disposal) belongs
+// to Accounting, not here.
 @Module({
-  imports: [],
   controllers: [VehiclesController],
-  providers: [VehiclesService],
+  providers: [VehiclesService, VehiclesRepository],
   exports: [VehiclesService],
 })
 export class VehiclesModule {}

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
 import { RoleRecord } from '../entities/role.entity';
 
@@ -43,77 +44,101 @@ export class RolesRepository {
     });
   }
 
-  async create(tenantId: string, name: string): Promise<RoleRecord> {
-    return this.db.withTenant(tenantId, async (client) => {
-      const result = await client.query<RoleRow>(
-        `INSERT INTO identity.role (tenant_id, name) VALUES ($1, $2) RETURNING *`,
-        [tenantId, name],
-      );
-      return toRoleRecord(result.rows[0]);
-    });
+  create(tenantId: string, name: string): Promise<RoleRecord> {
+    return this.db.withTenant(tenantId, (client) =>
+      this.createWithClient(client, tenantId, name),
+    );
+  }
+
+  async createWithClient(
+    client: PoolClient,
+    tenantId: string,
+    name: string,
+  ): Promise<RoleRecord> {
+    const result = await client.query<RoleRow>(
+      `INSERT INTO identity.role (tenant_id, name) VALUES ($1, $2) RETURNING *`,
+      [tenantId, name],
+    );
+    return toRoleRecord(result.rows[0]);
+  }
+
+  /** All permission codes in the global catalog — used to grant a brand-new "Owner" role everything that currently exists. */
+  async listAllPermissionCodesWithClient(client: PoolClient): Promise<string[]> {
+    const result = await client.query<{ code: string }>(
+      'SELECT code FROM identity.permission',
+    );
+    return result.rows.map((r) => r.code);
   }
 
   /**
    * Assigns a permission code to a role. The existence check below is not
    * just validation — it's the actual authorization boundary: it runs
-   * inside withTenant(), so RLS on identity.role means a role_id from a
-   * different tenant simply won't be found, and the assignment fails
-   * before ever reaching role_permission (which has no RLS of its own to
-   * fall back on).
+   * inside a tenant-scoped transaction, so RLS on identity.role means a
+   * role_id from a different tenant simply won't be found, and the
+   * assignment fails before ever reaching role_permission (which has no
+   * RLS of its own to fall back on).
    */
-  async assignPermission(
-    tenantId: string,
+  assignPermission(tenantId: string, roleId: string, permissionCode: string): Promise<void> {
+    return this.db.withTenant(tenantId, (client) =>
+      this.assignPermissionWithClient(client, roleId, permissionCode),
+    );
+  }
+
+  async assignPermissionWithClient(
+    client: PoolClient,
     roleId: string,
     permissionCode: string,
   ): Promise<void> {
-    await this.db.withTenant(tenantId, async (client) => {
-      const role = await client.query('SELECT 1 FROM identity.role WHERE id = $1', [
-        roleId,
-      ]);
-      if (role.rowCount === 0) {
-        throw new NotFoundException(`Role ${roleId} not found in this tenant`);
-      }
+    const role = await client.query('SELECT 1 FROM identity.role WHERE id = $1', [roleId]);
+    if (role.rowCount === 0) {
+      throw new NotFoundException(`Role ${roleId} not found in this tenant`);
+    }
 
-      const permission = await client.query<{ id: string }>(
-        'SELECT id FROM identity.permission WHERE code = $1',
-        [permissionCode],
-      );
-      if (permission.rowCount === 0) {
-        throw new NotFoundException(`Permission ${permissionCode} does not exist`);
-      }
+    const permission = await client.query<{ id: string }>(
+      'SELECT id FROM identity.permission WHERE code = $1',
+      [permissionCode],
+    );
+    if (permission.rowCount === 0) {
+      throw new NotFoundException(`Permission ${permissionCode} does not exist`);
+    }
 
-      await client.query(
-        `INSERT INTO identity.role_permission (role_id, permission_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [roleId, permission.rows[0].id],
-      );
-    });
+    await client.query(
+      `INSERT INTO identity.role_permission (role_id, permission_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [roleId, permission.rows[0].id],
+    );
   }
 
   /** Same authorization-by-RLS pattern as assignPermission — see its comment. */
-  async assignToUser(tenantId: string, userId: string, roleId: string): Promise<void> {
-    await this.db.withTenant(tenantId, async (client) => {
-      const user = await client.query('SELECT 1 FROM identity.app_user WHERE id = $1', [
-        userId,
-      ]);
-      if (user.rowCount === 0) {
-        throw new NotFoundException(`User ${userId} not found in this tenant`);
-      }
+  assignToUser(tenantId: string, userId: string, roleId: string): Promise<void> {
+    return this.db.withTenant(tenantId, (client) =>
+      this.assignToUserWithClient(client, userId, roleId),
+    );
+  }
 
-      const role = await client.query('SELECT 1 FROM identity.role WHERE id = $1', [
-        roleId,
-      ]);
-      if (role.rowCount === 0) {
-        throw new NotFoundException(`Role ${roleId} not found in this tenant`);
-      }
+  async assignToUserWithClient(
+    client: PoolClient,
+    userId: string,
+    roleId: string,
+  ): Promise<void> {
+    const user = await client.query('SELECT 1 FROM identity.app_user WHERE id = $1', [
+      userId,
+    ]);
+    if (user.rowCount === 0) {
+      throw new NotFoundException(`User ${userId} not found in this tenant`);
+    }
 
-      await client.query(
-        `INSERT INTO identity.user_role (user_id, role_id)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [userId, roleId],
-      );
-    });
+    const role = await client.query('SELECT 1 FROM identity.role WHERE id = $1', [roleId]);
+    if (role.rowCount === 0) {
+      throw new NotFoundException(`Role ${roleId} not found in this tenant`);
+    }
+
+    await client.query(
+      `INSERT INTO identity.user_role (user_id, role_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [userId, roleId],
+    );
   }
 }
