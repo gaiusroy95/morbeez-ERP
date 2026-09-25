@@ -86,6 +86,11 @@ export class UsersService {
     await this.roles.assignToUser(tenantId, userId, roleId);
   }
 
+  /** Which roles a user directly holds — used by ApprovalsService to resolve approval authority (Approvals imports UsersModule for this, never RolesRepository directly; Constitution I.3-I.4). */
+  getRoleIdsForUserWithClient(client: PoolClient, userId: string): Promise<string[]> {
+    return this.roles.getRoleIdsForUserWithClient(client, userId);
+  }
+
   /**
    * Creates the first user of a brand-new tenant: an "Owner" role carrying
    * every permission that currently exists, assigned to a new user with

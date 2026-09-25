@@ -70,6 +70,15 @@ export class RolesRepository {
     return result.rows.map((r) => r.code);
   }
 
+  /** The role ids a user directly holds (identity.user_role) — not counting any role granted only via a delegation (approvals.approval_delegation is a different module's concern). */
+  async getRoleIdsForUserWithClient(client: PoolClient, userId: string): Promise<string[]> {
+    const result = await client.query<{ role_id: string }>(
+      'SELECT role_id FROM identity.user_role WHERE user_id = $1',
+      [userId],
+    );
+    return result.rows.map((r) => r.role_id);
+  }
+
   /**
    * Assigns a permission code to a role. The existence check below is not
    * just validation — it's the actual authorization boundary: it runs

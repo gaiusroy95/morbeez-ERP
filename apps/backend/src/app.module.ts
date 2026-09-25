@@ -10,6 +10,7 @@ import { AuditModule } from './infra/audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { UsersModule } from './modules/users/users.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { FarmersModule } from './modules/farmers/farmers.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -36,6 +37,7 @@ import { AiModule } from './modules/ai/ai.module';
     HealthModule,
     TenantModule,
     UsersModule,
+    ApprovalsModule,
     CustomersModule,
     FarmersModule,
     ProductsModule,
