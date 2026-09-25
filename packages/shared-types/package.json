@@ -1,0 +1,8 @@
+{
+  "name": "@morbeez/shared-types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DTOs and request/response types shared between the backend and the owner app (Technology Stack, FE.1). Never imported by driver-app.",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

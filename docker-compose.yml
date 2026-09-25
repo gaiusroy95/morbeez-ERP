@@ -1,0 +1,78 @@
+name: morbeez
+
+# Local development only. Production runs on ECS Fargate against managed
+# RDS/ElastiCache (Technology Stack, Section 05) — this file exists so the
+# stack runs on a laptop with no AWS account involved.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: morbeez-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-morbeez}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-morbeez_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-morbeez}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-morbeez}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: morbeez-redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: morbeez-backend
+    env_file: apps/backend/.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-morbeez}:${POSTGRES_PASSWORD:-morbeez_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: morbeez-worker
+    command: ["node", "dist/worker/main.js"]
+    env_file: apps/backend/.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-morbeez}:${POSTGRES_PASSWORD:-morbeez_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

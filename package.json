@@ -1,0 +1,25 @@
+{
+  "name": "morbeez",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Morbeez ERP — multi-tenant SaaS for vegetable wholesalers. Monorepo root.",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "docker:up": "docker compose up -d postgres redis",
+    "docker:down": "docker compose down",
+    "db:migrate": "pnpm --filter @morbeez/backend migrate:up",
+    "db:migrate:down": "pnpm --filter @morbeez/backend migrate:down",
+    "db:seed": "pnpm --filter @morbeez/backend seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

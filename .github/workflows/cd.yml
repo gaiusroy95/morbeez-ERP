@@ -1,0 +1,49 @@
+name: CD
+
+# Foundation only — the build/push stages are real; the deploy stage is a
+# placeholder until the Terraform in infrastructure/terraform/environments
+# is actually applied and ECR/ECS targets exist to deploy to
+# (System Architecture, CLOUD.1-CLOUD.2). Wiring this up for real is a
+# separate, later piece of work — this file exists so the shape is right
+# and CI's green-pipeline requirement (Constitution VII.1) has somewhere to
+# hand off to.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # TODO: configure-aws-credentials via OIDC once the AWS account and
+      # IAM role exist (no long-lived credentials — Constitution V.3).
+      # - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          push: false
+          tags: morbeez/backend:${{ github.sha }}
+
+      # TODO: push to ECR once the registry exists.
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy
+        run: |
+          echo "Deployment target not yet provisioned."
+          echo "Blocked on: infrastructure/terraform/environments/prod being applied."
+          exit 0

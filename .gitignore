@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+.next/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Android
+apps/driver-app/**/.gradle/
+apps/driver-app/**/build/
+apps/driver-app/local.properties
+*.apk
+*.aab
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Env / secrets — never committed (Constitution V.3)
+.env
+.env.local
+*.pem
+*.key
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

@@ -1,0 +1,8 @@
+{
+  "name": "@morbeez/event-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Versioned schemas for every event in the Event Catalog (System Architecture, EVT.4) — the source consumer contract tests run against (Constitution VI.4).",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
