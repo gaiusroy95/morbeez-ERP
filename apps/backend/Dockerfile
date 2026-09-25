@@ -9,6 +9,10 @@ RUN corepack enable
 
 # ---- deps: install once, cached across builds ----
 FROM base AS deps
+# argon2 (password hashing, Users module) ships native bindings — alpine
+# needs a compiler toolchain to build them at install time. Not needed at
+# runtime, so it never reaches the final image.
+RUN apk add --no-cache python3 make g++
 COPY package.json pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
 COPY packages ./packages
