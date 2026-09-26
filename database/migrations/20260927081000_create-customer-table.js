@@ -35,17 +35,14 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.addConstraint('customer', 'customer_credit_limit_nonnegative', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'customer' }, 'customer_credit_limit_nonnegative', {
     check: 'credit_limit >= 0',
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('customer', 'customer_payment_terms_range', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'customer' }, 'customer_payment_terms_range', {
     check: 'payment_terms_days >= 0 AND payment_terms_days <= 180',
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('customer', 'customer_status_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'customer' }, 'customer_status_valid', {
     check: "status IN ('active', 'archived')",
-    schema: 'trading_partners',
   });
 
   pgm.createIndex({ schema: 'trading_partners', name: 'customer' }, ['tenant_id', 'name']);

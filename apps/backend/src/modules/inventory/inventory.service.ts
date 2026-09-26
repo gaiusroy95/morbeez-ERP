@@ -8,7 +8,7 @@ import { LocationsRepository } from './repositories/locations.repository';
 import { InventoryMovementsRepository } from './repositories/inventory-movements.repository';
 import { LocationRecord, LocationType } from './entities/location.entity';
 import { InventoryMovementRecord, MovementType, StockSummary } from './entities/inventory-movement.entity';
-import { LotRecord } from '../procurement/entities/lot.entity';
+import { LotRecord, ProductStockRow } from '../procurement/entities/lot.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
@@ -158,6 +158,11 @@ export class InventoryService {
       reserved: reserved.toFixed(3),
       available: (physical - reserved).toFixed(3),
     };
+  }
+
+  /** Stock for every product at once — the Inventory overview, one query rather than one per product. */
+  getStockOverview(tenantId: string): Promise<ProductStockRow[]> {
+    return this.procurement.stockByProduct(tenantId);
   }
 
   async listLotsForProduct(tenantId: string, productId: string): Promise<LotRecord[]> {

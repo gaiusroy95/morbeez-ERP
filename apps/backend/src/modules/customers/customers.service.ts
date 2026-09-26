@@ -31,7 +31,7 @@ export class CustomersService {
     return this.db.withTenant(tenantId, async (client) => {
       const customer = await this.customers.createWithClient(client, tenantId, actorUserId, {
         name: dto.name,
-        contact: dto.contact ?? {},
+        contact: { ...dto.contact },
         creditLimit: dto.creditLimit ?? 0,
         paymentTermsDays: dto.paymentTermsDays ?? 0,
       });
@@ -59,7 +59,7 @@ export class CustomersService {
 
       const after = await this.customers.updateWithClient(client, id, dto.version, {
         name: dto.name,
-        contact: dto.contact,
+        contact: dto.contact && { ...dto.contact },
         creditLimit: dto.creditLimit,
         paymentTermsDays: dto.paymentTermsDays,
       });

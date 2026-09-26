@@ -1,5 +1,5 @@
-// Route-level code-split per bounded context (System Architecture, FE.4) —
-// this bundle loads only when a user opens Workforce.
-export default function WorkforcePage() {
-  return null;
+import { ModulePlaceholder } from '@/components/layout/ModulePlaceholder';
+
+export default function Page() {
+  return <ModulePlaceholder title="Workforce" description="Drivers, warehouse staff, and everyone else on the team." />;
 }

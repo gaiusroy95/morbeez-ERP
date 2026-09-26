@@ -42,13 +42,11 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.addConstraint('employee', 'employee_role_type_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'employee' }, 'employee_role_type_valid', {
     check: `role_type IN (${VALID_ROLE_TYPES.map((v) => `'${v}'`).join(', ')})`,
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('employee', 'employee_status_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'employee' }, 'employee_status_valid', {
     check: "status IN ('active', 'archived')",
-    schema: 'trading_partners',
   });
 
   pgm.createIndex({ schema: 'trading_partners', name: 'employee' }, ['tenant_id', 'role_type']);

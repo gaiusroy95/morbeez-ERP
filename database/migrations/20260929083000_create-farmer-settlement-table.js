@@ -47,19 +47,16 @@ exports.up = (pgm) => {
       settled_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('farmer_settlement', 'farmer_settlement_amount_positive', {
+  pgm.addConstraint({ schema: 'money', name: 'farmer_settlement' }, 'farmer_settlement_amount_positive', {
     check: 'amount > 0',
-    schema: 'money',
   });
-  pgm.addConstraint('farmer_settlement', 'farmer_settlement_method_valid', {
+  pgm.addConstraint({ schema: 'money', name: 'farmer_settlement' }, 'farmer_settlement_method_valid', {
     check: `method IN (${VALID_METHODS.map((m) => `'${m}'`).join(', ')})`,
-    schema: 'money',
   });
   // One settlement per lot — a lot's cost is fixed once at grading
   // (Accounting Engine, LOT.2), and it's paid for once, not incrementally.
-  pgm.addConstraint('farmer_settlement', 'farmer_settlement_one_per_lot', {
+  pgm.addConstraint({ schema: 'money', name: 'farmer_settlement' }, 'farmer_settlement_one_per_lot', {
     unique: ['lot_id'],
-    schema: 'money',
   });
   pgm.createIndex({ schema: 'money', name: 'farmer_settlement' }, ['tenant_id', 'farmer_id']);
   pgm.sql('ALTER TABLE money.farmer_settlement ENABLE ROW LEVEL SECURITY');

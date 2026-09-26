@@ -31,13 +31,11 @@ exports.up = (pgm) => {
       reconciled_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('trip_reconciliation', 'trip_reconciliation_one_per_trip', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_reconciliation' }, 'trip_reconciliation_one_per_trip', {
     unique: ['trip_id'],
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_reconciliation', 'trip_reconciliation_amounts_nonnegative', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_reconciliation' }, 'trip_reconciliation_amounts_nonnegative', {
     check: 'advance_amount >= 0 AND total_expenses >= 0 AND cash_returned >= 0',
-    schema: 'fulfilment',
   });
   // Insert + read only — same posture as money.farmer_settlement.
   pgm.sql('REVOKE UPDATE, DELETE ON fulfilment.trip_reconciliation FROM morbeez_app');

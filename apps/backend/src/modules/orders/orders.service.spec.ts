@@ -81,13 +81,18 @@ describe('OrdersService', () => {
             setApprovalRequestWithClient: jest.fn(),
             confirmWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
+            deliverWithClient: jest.fn(),
           },
         },
         { provide: CustomersService, useValue: { getById: jest.fn() } },
         { provide: ProductsService, useValue: { getById: jest.fn() } },
         {
           provide: ProcurementService,
-          useValue: { reserveLotsForOrderLine: jest.fn(), releaseLotsForOrderLine: jest.fn() },
+          useValue: {
+            reserveLotsForOrderLine: jest.fn(),
+            releaseLotsForOrderLine: jest.fn(),
+            consumeLotsForOrderLine: jest.fn(),
+          },
         },
         { provide: ApprovalsService, useValue: { evaluate: jest.fn(), getRequest: jest.fn() } },
         {
@@ -263,5 +268,16 @@ describe('OrdersService', () => {
     await service.cancelOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
     expect(procurement.releaseLotsForOrderLine).not.toHaveBeenCalled();
+  });
+
+  it('markDelivered consumes the lots reserved for every line once the order is delivered', async () => {
+    const confirmed: OrderRecord = { ...baseOrder, status: 'confirmed' };
+    orders.findByIdWithClient.mockResolvedValue(confirmed);
+    orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
+
+    const result = await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
+
+    expect(result.status).toBe('delivered');
+    expect(procurement.consumeLotsForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', 'line-1');
   });
 });

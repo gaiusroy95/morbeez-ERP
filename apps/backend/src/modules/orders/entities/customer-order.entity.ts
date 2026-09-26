@@ -1,10 +1,8 @@
 // 'delivered' added for Logistics — a confirmed order's terminal state
-// once a Trip's delivery stop for it completes. Inventory consumption and
-// any COGS-at-delivery journal entry (Accounting Engine) are deliberately
-// not triggered by this transition yet: this only records the operational
-// fact that the order reached the customer, the same scope boundary
-// Procurement's farmer_settlement drew around itself before a real
-// Accounting module existed to post against.
+// once a Trip's delivery stop for it completes. Delivery consumes the lots
+// reserved for the order (reserved -> delivered, OrdersService.markDelivered).
+// A COGS-at-delivery journal entry (Accounting Engine) is not posted yet —
+// there is no Accounting module to post against.
 export type OrderStatus = 'placed' | 'confirmed' | 'cancelled' | 'delivered';
 
 export interface OrderLineRecord {
@@ -26,4 +24,5 @@ export interface OrderRecord {
   updatedAt: Date;
   createdBy: string;
   lines?: OrderLineRecord[];
+  totalValue?: string; // list rows only: sum(quantity * unit_price)
 }

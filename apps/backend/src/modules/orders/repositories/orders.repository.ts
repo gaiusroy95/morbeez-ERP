@@ -15,6 +15,7 @@ interface OrderRow {
   created_at: Date;
   updated_at: Date;
   created_by: string;
+  total_value?: string;
 }
 
 interface OrderLineRow {
@@ -37,6 +38,7 @@ function toRecord(row: OrderRow, lines?: OrderLineRow[]): OrderRecord {
     updatedAt: row.updated_at,
     createdBy: row.created_by,
     lines: lines?.map(toLineRecord),
+    ...(row.total_value !== undefined && { totalValue: row.total_value }),
   };
 }
 
@@ -66,7 +68,10 @@ export class OrdersRepository {
     return this.db.withTenant(tenantId, async (client) => {
       const [rows, count] = await Promise.all([
         client.query<OrderRow>(
-          `SELECT * FROM commerce.customer_order
+          `SELECT o.*,
+                  (SELECT ROUND(COALESCE(SUM(ol.quantity * ol.unit_price), 0), 2)::text
+                     FROM commerce.customer_order_line ol WHERE ol.order_id = o.id) AS total_value
+           FROM commerce.customer_order o
            WHERE ($3::text IS NULL OR status = $3)
            ORDER BY created_at DESC
            LIMIT $1 OFFSET $2`,

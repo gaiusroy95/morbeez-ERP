@@ -1,0 +1,24 @@
+// Mirrors apps/backend/src/modules/orders/entities/customer-order.entity.ts.
+import type { IsoDateTime } from '../common';
+
+export type OrderStatus = 'placed' | 'confirmed' | 'cancelled' | 'delivered';
+
+export interface OrderLineRecord {
+  id: string;
+  orderId: string;
+  productId: string;
+  quantity: string;
+  unitPrice: string;
+}
+
+export interface OrderRecord {
+  id: string;
+  customerId: string;
+  status: OrderStatus;
+  approvalRequestId: string | null;
+  version: number;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  lines?: OrderLineRecord[]; // detail only
+  totalValue?: string; // list rows only
+}

@@ -49,13 +49,11 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('trip', 'trip_status_valid', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip' }, 'trip_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip', 'trip_advance_amount_nonnegative', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip' }, 'trip_advance_amount_nonnegative', {
     check: 'advance_amount >= 0',
-    schema: 'fulfilment',
   });
   pgm.createIndex({ schema: 'fulfilment', name: 'trip' }, ['tenant_id', 'status']);
   pgm.createIndex({ schema: 'fulfilment', name: 'trip' }, ['tenant_id', 'vehicle_id']);

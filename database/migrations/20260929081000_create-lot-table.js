@@ -67,23 +67,19 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('lot', 'lot_status_valid', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'commerce',
   });
-  pgm.addConstraint('lot', 'lot_received_quantity_positive', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_received_quantity_positive', {
     check: 'received_quantity > 0',
-    schema: 'commerce',
   });
-  pgm.addConstraint('lot', 'lot_grading_reconciles', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_grading_reconciles', {
     // Only enforced once graded — the whole point of LOT.2's cost-fixed
     // discipline is that once these numbers exist, they're right.
     check: 'graded_at IS NULL OR (accepted_quantity + rejected_quantity = received_quantity)',
-    schema: 'commerce',
   });
-  pgm.addConstraint('lot', 'lot_unit_cost_set_iff_graded', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_unit_cost_set_iff_graded', {
     check: "(graded_at IS NULL AND unit_cost IS NULL) OR (graded_at IS NOT NULL AND (unit_cost IS NOT NULL OR status = 'rejected'))",
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'lot' }, ['tenant_id', 'status']);
   pgm.createIndex({ schema: 'commerce', name: 'lot' }, ['tenant_id', 'product_id', 'graded_at']);

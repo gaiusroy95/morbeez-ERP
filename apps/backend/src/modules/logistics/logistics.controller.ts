@@ -11,14 +11,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ListTripsQueryDto } from './dto/list-trips-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { LogisticsService, UploadedPhoto } from './logistics.service';
 import { CreateTripDto } from './dto/create-trip.dto';
@@ -56,10 +55,9 @@ export class LogisticsController {
   @RequirePermissions('logistics:dispatch')
   listTrips(
     @CurrentUser() user: AuthContext,
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: TripStatus,
+    @Query() query: ListTripsQueryDto,
   ): Promise<PaginatedResult<TripRecord>> {
-    return this.logisticsService.listTrips(user.tenantId, status, query.page ?? 1, query.pageSize ?? 25);
+    return this.logisticsService.listTrips(user.tenantId, query.status, query.page ?? 1, query.pageSize ?? 25);
   }
 
   /** A driver's own trips — never a client-supplied filter (Driver App Architecture, DRV.14). */
@@ -67,10 +65,9 @@ export class LogisticsController {
   @RequirePermissions('logistics:read')
   listMyTrips(
     @CurrentUser() user: AuthContext,
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: TripStatus,
+    @Query() query: ListTripsQueryDto,
   ): Promise<PaginatedResult<TripRecord>> {
-    return this.logisticsService.listMyTrips(user.tenantId, user.userId, status, query.page ?? 1, query.pageSize ?? 25);
+    return this.logisticsService.listMyTrips(user.tenantId, user.userId, query.status, query.page ?? 1, query.pageSize ?? 25);
   }
 
   @Get(':id')
@@ -196,7 +193,9 @@ export class LogisticsController {
   @Post(':id/stops/:stopId/photos')
   @RequirePermissions('logistics:write')
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: MAX_PHOTO_BYTES } }))
+  // No `storage`/`dest` means multer keeps the upload in memory, so
+  // file.buffer is populated for LogisticsService.addPhoto to write.
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PHOTO_BYTES } }))
   uploadPhoto(
     @CurrentUser() user: AuthContext,
     @Param('id') tripId: string,

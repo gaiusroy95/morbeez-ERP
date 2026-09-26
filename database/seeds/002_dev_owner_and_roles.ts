@@ -15,7 +15,7 @@ const OWNER_PASSWORD = 'dev-only-change-me-123';
 // Must match apps/backend/src/modules/users/security/password.service.ts —
 // duplicated here because the seed script runs outside the Nest DI
 // container, not because the policy is meant to diverge.
-const HASH_OPTIONS: argon2.Options & { type: argon2.argon2id } = {
+const HASH_OPTIONS: argon2.Options & { type: typeof argon2.argon2id } = {
   type: argon2.argon2id,
   memoryCost: 19456,
   timeCost: 2,

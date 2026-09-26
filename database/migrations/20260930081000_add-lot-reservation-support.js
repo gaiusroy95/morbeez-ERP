@@ -24,24 +24,21 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.dropConstraint('lot', 'lot_status_valid', { schema: 'commerce' });
-  pgm.addConstraint('lot', 'lot_status_valid', {
+  pgm.dropConstraint({ schema: 'commerce', name: 'lot' }, 'lot_status_valid');
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'commerce',
   });
-  pgm.addConstraint('lot', 'lot_reserved_iff_flagged', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_reserved_iff_flagged', {
     check: "(status = 'reserved') = (reserved_for_order_line_id IS NOT NULL)",
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'lot' }, 'reserved_for_order_line_id');
 };
 
 exports.down = (pgm) => {
-  pgm.dropConstraint('lot', 'lot_reserved_iff_flagged', { schema: 'commerce' });
-  pgm.dropConstraint('lot', 'lot_status_valid', { schema: 'commerce' });
-  pgm.addConstraint('lot', 'lot_status_valid', {
+  pgm.dropConstraint({ schema: 'commerce', name: 'lot' }, 'lot_reserved_iff_flagged');
+  pgm.dropConstraint({ schema: 'commerce', name: 'lot' }, 'lot_status_valid');
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_status_valid', {
     check: "status IN ('received_ungraded', 'available', 'rejected')",
-    schema: 'commerce',
   });
   pgm.dropColumn({ schema: 'commerce', name: 'lot' }, 'reserved_for_order_line_id');
 };

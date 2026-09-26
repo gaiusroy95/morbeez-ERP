@@ -47,9 +47,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('customer_order', 'customer_order_status_valid', {
+  pgm.addConstraint({ schema: 'commerce', name: 'customer_order' }, 'customer_order_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'customer_order' }, ['tenant_id', 'status']);
   pgm.createIndex({ schema: 'commerce', name: 'customer_order' }, ['tenant_id', 'customer_id']);
@@ -81,13 +80,11 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('customer_order_line', 'customer_order_line_quantity_positive', {
+  pgm.addConstraint({ schema: 'commerce', name: 'customer_order_line' }, 'customer_order_line_quantity_positive', {
     check: 'quantity > 0',
-    schema: 'commerce',
   });
-  pgm.addConstraint('customer_order_line', 'customer_order_line_unit_price_nonnegative', {
+  pgm.addConstraint({ schema: 'commerce', name: 'customer_order_line' }, 'customer_order_line_unit_price_nonnegative', {
     check: 'unit_price >= 0',
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'customer_order_line' }, 'order_id');
   // No RLS of its own — reachable only via its parent order (same pattern

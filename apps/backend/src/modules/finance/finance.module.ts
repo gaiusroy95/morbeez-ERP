@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
+import { FinanceRepository } from './repositories/finance.repository';
 
-// Bounded context: Finance
-// Owns its own schema (database/schemas/) and communicates with other
-// modules only through published events or public APIs (Constitution I.3-I.4).
+// Bounded context: Finance. For now a read model over collections,
+// settlements, trip expenses, and reconciliations (System Architecture
+// DB.4) — it owns no tables and never writes; see FinanceRepository.
 @Module({
-  imports: [],
   controllers: [FinanceController],
-  providers: [FinanceService],
+  providers: [FinanceService, FinanceRepository],
   exports: [FinanceService],
 })
 export class FinanceModule {}

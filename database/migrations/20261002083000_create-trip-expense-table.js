@@ -34,13 +34,11 @@ exports.up = (pgm) => {
       recorded_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('trip_expense', 'trip_expense_category_valid', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_expense' }, 'trip_expense_category_valid', {
     check: `category IN (${VALID_CATEGORIES.map((c) => `'${c}'`).join(', ')})`,
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_expense', 'trip_expense_amount_positive', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_expense' }, 'trip_expense_amount_positive', {
     check: 'amount > 0',
-    schema: 'fulfilment',
   });
   pgm.createIndex({ schema: 'fulfilment', name: 'trip_expense' }, 'trip_id');
 };

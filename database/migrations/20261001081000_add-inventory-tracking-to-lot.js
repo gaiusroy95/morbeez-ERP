@@ -31,19 +31,17 @@ exports.up = (pgm) => {
     WHERE graded_at IS NOT NULL AND current_quantity IS NULL
   `);
 
-  pgm.addConstraint('lot', 'lot_current_quantity_set_iff_graded', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_current_quantity_set_iff_graded', {
     check: '(graded_at IS NULL AND current_quantity IS NULL) OR (graded_at IS NOT NULL AND current_quantity IS NOT NULL)',
-    schema: 'commerce',
   });
-  pgm.addConstraint('lot', 'lot_current_quantity_range', {
+  pgm.addConstraint({ schema: 'commerce', name: 'lot' }, 'lot_current_quantity_range', {
     check: 'current_quantity IS NULL OR (current_quantity >= 0 AND current_quantity <= accepted_quantity)',
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'lot' }, 'current_location_id');
 };
 
 exports.down = (pgm) => {
-  pgm.dropConstraint('lot', 'lot_current_quantity_range', { schema: 'commerce' });
-  pgm.dropConstraint('lot', 'lot_current_quantity_set_iff_graded', { schema: 'commerce' });
+  pgm.dropConstraint({ schema: 'commerce', name: 'lot' }, 'lot_current_quantity_range');
+  pgm.dropConstraint({ schema: 'commerce', name: 'lot' }, 'lot_current_quantity_set_iff_graded');
   pgm.dropColumns({ schema: 'commerce', name: 'lot' }, ['current_quantity', 'current_location_id']);
 };

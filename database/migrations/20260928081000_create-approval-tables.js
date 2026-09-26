@@ -43,13 +43,11 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('approval_rule', 'approval_rule_tenant_action_unique', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_rule' }, 'approval_rule_tenant_action_unique', {
     unique: ['tenant_id', 'action_type'],
-    schema: 'approvals',
   });
-  pgm.addConstraint('approval_rule', 'approval_rule_threshold_nonnegative', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_rule' }, 'approval_rule_threshold_nonnegative', {
     check: 'threshold_amount >= 0',
-    schema: 'approvals',
   });
   pgm.sql('ALTER TABLE approvals.approval_rule ENABLE ROW LEVEL SECURITY');
   pgm.sql('ALTER TABLE approvals.approval_rule FORCE ROW LEVEL SECURITY');
@@ -91,9 +89,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('approval_role_limit', 'approval_role_limit_max_amount_nonnegative', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_role_limit' }, 'approval_role_limit_max_amount_nonnegative', {
     check: 'max_amount IS NULL OR max_amount >= 0',
-    schema: 'approvals',
   });
   // Two partial unique indexes rather than one plain unique constraint —
   // Postgres treats every NULL as distinct, so a plain
@@ -158,16 +155,14 @@ exports.up = (pgm) => {
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('approval_request', 'approval_request_status_valid', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_request' }, 'approval_request_status_valid', {
     check: "status IN ('pending', 'approved', 'rejected', 'cancelled')",
-    schema: 'approvals',
   });
-  pgm.addConstraint('approval_request', 'approval_request_decider_differs_from_requester', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_request' }, 'approval_request_decider_differs_from_requester', {
     // Segregation of duties, enforced at the database, not just in the
     // service (Accounting Engine, CN.4's spirit, generalized) — nothing
     // can ever record a request approved by the person who filed it.
     check: 'decided_by IS NULL OR decided_by <> requested_by',
-    schema: 'approvals',
   });
   pgm.createIndex(
     { schema: 'approvals', name: 'approval_request' },
@@ -225,16 +220,14 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('approval_delegation', 'approval_delegation_window_valid', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_delegation' }, 'approval_delegation_window_valid', {
     // Time-boxed by construction — no such thing as a permanent
     // delegation in this framework, and 180 days is a deliberate ceiling
     // against one disguised as "long," not just "must end eventually."
     check: "ends_at > starts_at AND ends_at <= starts_at + interval '180 days'",
-    schema: 'approvals',
   });
-  pgm.addConstraint('approval_delegation', 'approval_delegation_not_to_self', {
+  pgm.addConstraint({ schema: 'approvals', name: 'approval_delegation' }, 'approval_delegation_not_to_self', {
     check: 'delegate_user_id <> delegator_user_id',
-    schema: 'approvals',
   });
   pgm.createIndex(
     { schema: 'approvals', name: 'approval_delegation' },
@@ -260,6 +253,9 @@ exports.up = (pgm) => {
 };
 
 exports.down = (pgm) => {
+  // The cross-table FK added last in `up` goes first here, or the
+  // delegation table can't be dropped while approval_request depends on it.
+  pgm.sql('ALTER TABLE approvals.approval_request DROP CONSTRAINT approval_request_delegation_fk');
   pgm.dropTable({ schema: 'approvals', name: 'approval_delegation' });
   pgm.dropTable({ schema: 'approvals', name: 'approval_request' });
   pgm.dropTable({ schema: 'approvals', name: 'approval_role_limit' });

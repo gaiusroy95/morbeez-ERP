@@ -31,9 +31,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('trip_stop_pod', 'trip_stop_pod_one_per_stop', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop_pod' }, 'trip_stop_pod_one_per_stop', {
     unique: ['trip_stop_id'],
-    schema: 'fulfilment',
   });
   // Insert + read only — same posture as money.farmer_settlement.
   pgm.sql('REVOKE UPDATE, DELETE ON fulfilment.trip_stop_pod FROM morbeez_app');

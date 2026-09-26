@@ -16,6 +16,9 @@
 exports.shorthands = undefined;
 
 exports.up = (pgm) => {
+  // Case-insensitive email comparison/uniqueness — must exist before
+  // app_user's email column below is created with this type.
+  pgm.sql('CREATE EXTENSION IF NOT EXISTS citext');
   pgm.createTable(
     { schema: 'identity', name: 'permission' },
     {
@@ -43,9 +46,8 @@ exports.up = (pgm) => {
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('role', 'role_tenant_name_unique', {
+  pgm.addConstraint({ schema: 'identity', name: 'role' }, 'role_tenant_name_unique', {
     unique: ['tenant_id', 'name'],
-    schema: 'identity',
   });
   pgm.createIndex({ schema: 'identity', name: 'role' }, 'tenant_id');
   pgm.sql('ALTER TABLE identity.role ENABLE ROW LEVEL SECURITY');
@@ -71,9 +73,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('role_permission', 'role_permission_pk', {
+  pgm.addConstraint({ schema: 'identity', name: 'role_permission' }, 'role_permission_pk', {
     primaryKey: ['role_id', 'permission_id'],
-    schema: 'identity',
   });
   // No tenant_id, no RLS of its own — a mapping row is only ever reachable
   // by first joining through identity.role, which is itself RLS-protected.
@@ -95,10 +96,8 @@ exports.up = (pgm) => {
       updated_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.sql('CREATE EXTENSION IF NOT EXISTS citext'); // case-insensitive email comparison/uniqueness
-  pgm.addConstraint('app_user', 'app_user_tenant_email_unique', {
+  pgm.addConstraint({ schema: 'identity', name: 'app_user' }, 'app_user_tenant_email_unique', {
     unique: ['tenant_id', 'email'],
-    schema: 'identity',
   });
   pgm.createIndex({ schema: 'identity', name: 'app_user' }, 'tenant_id');
   pgm.sql('ALTER TABLE identity.app_user ENABLE ROW LEVEL SECURITY');
@@ -124,9 +123,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('user_role', 'user_role_pk', {
+  pgm.addConstraint({ schema: 'identity', name: 'user_role' }, 'user_role_pk', {
     primaryKey: ['user_id', 'role_id'],
-    schema: 'identity',
   });
 
   pgm.createTable(

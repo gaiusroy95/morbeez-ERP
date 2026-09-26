@@ -23,6 +23,7 @@ import { AccountingModule } from './modules/accounting/accounting.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { AiModule } from './modules/ai/ai.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 // The modular monolith root. Each import below is a bounded context
 // (Domain Model) with its own module boundary enforced by Nest's DI
@@ -50,6 +51,7 @@ import { AiModule } from './modules/ai/ai.module';
     WorkforceModule,
     VehiclesModule,
     AiModule,
+    DashboardModule,
   ],
   providers: [
     // Validation: every request DTO is checked before it reaches a

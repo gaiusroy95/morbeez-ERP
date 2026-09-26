@@ -5,7 +5,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -23,10 +23,9 @@ export class OrdersController {
   @RequirePermissions('orders:read')
   list(
     @CurrentUser() user: AuthContext,
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: OrderStatus,
+    @Query() query: ListOrdersQueryDto,
   ): Promise<PaginatedResult<OrderRecord>> {
-    return this.ordersService.listOrders(user.tenantId, status, query.page ?? 1, query.pageSize ?? 25);
+    return this.ordersService.listOrders(user.tenantId, query.status, query.page ?? 1, query.pageSize ?? 25);
   }
 
   @Get(':id')

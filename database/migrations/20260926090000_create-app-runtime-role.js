@@ -92,5 +92,8 @@ exports.down = (pgm) => {
     pgm.sql(`REVOKE ALL ON ALL TABLES IN SCHEMA ${schema} FROM morbeez_app`);
     pgm.sql(`REVOKE ALL ON SCHEMA ${schema} FROM morbeez_app`);
   }
+  pgm.sql('REVOKE EXECUTE ON FUNCTION identity.find_session_by_token_hash(text) FROM morbeez_app');
+  pgm.sql('REVOKE EXECUTE ON FUNCTION identity.find_user_for_login(citext) FROM morbeez_app');
+  pgm.sql('REVOKE EXECUTE ON FUNCTION current_tenant_id() FROM morbeez_app');
   pgm.sql('DROP ROLE IF EXISTS morbeez_app');
 };

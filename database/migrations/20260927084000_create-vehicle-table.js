@@ -40,21 +40,17 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.addConstraint('vehicle', 'vehicle_tenant_registration_unique', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'vehicle' }, 'vehicle_tenant_registration_unique', {
     unique: ['tenant_id', 'registration_number'],
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('vehicle', 'vehicle_capacity_positive', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'vehicle' }, 'vehicle_capacity_positive', {
     check: 'capacity_kg > 0',
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('vehicle', 'vehicle_fuel_type_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'vehicle' }, 'vehicle_fuel_type_valid', {
     check: `fuel_type IN (${VALID_FUEL_TYPES.map((v) => `'${v}'`).join(', ')})`,
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('vehicle', 'vehicle_status_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'vehicle' }, 'vehicle_status_valid', {
     check: `status IN (${VALID_STATUSES.map((v) => `'${v}'`).join(', ')})`,
-    schema: 'trading_partners',
   });
 
   pgm.createIndex({ schema: 'trading_partners', name: 'vehicle' }, ['tenant_id', 'status']);

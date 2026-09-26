@@ -3,7 +3,21 @@
 // lot costing, Accounting Engine LOT.2). Anticipated in this table's own
 // original migration comment: "reserved/... are transitions later modules
 // (Orders, ...) will add once they exist."
-export type LotStatus = 'received_ungraded' | 'available' | 'reserved' | 'rejected';
+// 'delivered' is terminal: the order a lot was reserved for has reached the
+// customer. It keeps reservedForOrderLineId — cost of goods reads it.
+export type LotStatus = 'received_ungraded' | 'available' | 'reserved' | 'delivered' | 'rejected';
+
+export interface ProductStockRow {
+  productId: string;
+  available: string;
+  reserved: string;
+  physical: string;
+  valueAtCost: string;
+  availableLots: number;
+  ungradedLots: number;
+  ungradedQuantity: string;
+  oldestAvailableReceivedAt: Date | null;
+}
 
 export interface LotRecord {
   id: string;

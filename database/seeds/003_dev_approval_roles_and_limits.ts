@@ -23,13 +23,23 @@ const OPS_MANAGER_PERMISSIONS = [
   'products:read',
   'products:write',
   'approvals:read',
+  // Operational visibility, deliberately without dashboard:profit — the
+  // split that permission pair exists to demonstrate.
+  'dashboard:read',
 ];
 
 const ACCOUNTANT_EMAIL = 'accountant@dev.morbeez.local';
 const ACCOUNTANT_PASSWORD = 'dev-only-change-me-123';
-const ACCOUNTANT_PERMISSIONS = ['farmers:read', 'farmers:write', 'customers:read', 'approvals:read'];
+const ACCOUNTANT_PERMISSIONS = [
+  'farmers:read',
+  'farmers:write',
+  'customers:read',
+  'approvals:read',
+  // Receivables, payables, cash flow, trip cash — read-only.
+  'finance:read',
+];
 
-const HASH_OPTIONS: argon2.Options & { type: argon2.argon2id } = {
+const HASH_OPTIONS: argon2.Options & { type: typeof argon2.argon2id } = {
   type: argon2.argon2id,
   memoryCost: 19456,
   timeCost: 2,

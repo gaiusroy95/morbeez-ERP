@@ -41,17 +41,14 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('location', 'location_type_valid', {
+  pgm.addConstraint({ schema: 'stock', name: 'location' }, 'location_type_valid', {
     check: `type IN (${VALID_TYPES.map((t) => `'${t}'`).join(', ')})`,
-    schema: 'stock',
   });
-  pgm.addConstraint('location', 'location_status_valid', {
+  pgm.addConstraint({ schema: 'stock', name: 'location' }, 'location_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'stock',
   });
-  pgm.addConstraint('location', 'location_vehicle_iff_type_vehicle', {
+  pgm.addConstraint({ schema: 'stock', name: 'location' }, 'location_vehicle_iff_type_vehicle', {
     check: "(type = 'vehicle') = (vehicle_id IS NOT NULL)",
-    schema: 'stock',
   });
   pgm.createIndex({ schema: 'stock', name: 'location' }, ['tenant_id', 'status']);
   pgm.sql('ALTER TABLE stock.location ENABLE ROW LEVEL SECURITY');

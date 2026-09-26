@@ -14,7 +14,7 @@ import { LotsRepository } from './repositories/lots.repository';
 import { FarmerSettlementsRepository } from './repositories/farmer-settlements.repository';
 import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
-import { LotRecord } from './entities/lot.entity';
+import { LotRecord, ProductStockRow } from './entities/lot.entity';
 import { FarmerSettlementRecord } from './entities/farmer-settlement.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -578,6 +578,34 @@ export class ProcurementService {
         });
       }
     });
+  }
+
+  /**
+   * Called by Orders once an order is delivered: its reserved lots have
+   * left the warehouse. They move to 'delivered' and keep their link to the
+   * order line, which is how cost of goods finds them.
+   */
+  async consumeLotsForOrderLine(tenantId: string, actorUserId: string, orderLineId: string): Promise<void> {
+    await this.db.withTenant(tenantId, async (client) => {
+      const lots = await this.lots.listReservedForOrderLineWithClient(client, orderLineId);
+      for (const lot of lots.filter((l) => l.status === 'reserved')) {
+        const after = await this.lots.consumeWithClient(client, lot.id, lot.version);
+        await this.audit.record(client, {
+          tenantId,
+          actorUserId,
+          action: 'update',
+          entityType: LOT_ENTITY,
+          entityId: lot.id,
+          before: lot as unknown as Record<string, unknown>,
+          after: after as unknown as Record<string, unknown>,
+        });
+      }
+    });
+  }
+
+  /** Stock for every product in one read — for Inventory's overview. */
+  stockByProduct(tenantId: string): Promise<ProductStockRow[]> {
+    return this.lots.stockByProduct(tenantId);
   }
 
   // ---- Lot custody for the Inventory Engine (called by Inventory —

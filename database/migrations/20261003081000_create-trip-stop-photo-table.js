@@ -36,13 +36,11 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('trip_stop_photo', 'trip_stop_photo_type_valid', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop_photo' }, 'trip_stop_photo_type_valid', {
     check: `photo_type IN (${VALID_PHOTO_TYPES.map((t) => `'${t}'`).join(', ')})`,
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_stop_photo', 'trip_stop_photo_size_positive', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop_photo' }, 'trip_stop_photo_size_positive', {
     check: 'size_bytes > 0',
-    schema: 'fulfilment',
   });
   pgm.createIndex({ schema: 'fulfilment', name: 'trip_stop_photo' }, ['trip_stop_id', 'photo_type']);
 };

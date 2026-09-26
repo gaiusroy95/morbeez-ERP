@@ -47,9 +47,8 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('purchase_order', 'purchase_order_status_valid', {
+  pgm.addConstraint({ schema: 'commerce', name: 'purchase_order' }, 'purchase_order_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'purchase_order' }, ['tenant_id', 'status']);
   pgm.createIndex({ schema: 'commerce', name: 'purchase_order' }, ['tenant_id', 'farmer_id']);
@@ -85,13 +84,11 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('purchase_order_line', 'purchase_order_line_quantity_positive', {
+  pgm.addConstraint({ schema: 'commerce', name: 'purchase_order_line' }, 'purchase_order_line_quantity_positive', {
     check: 'expected_quantity > 0',
-    schema: 'commerce',
   });
-  pgm.addConstraint('purchase_order_line', 'purchase_order_line_price_nonnegative', {
+  pgm.addConstraint({ schema: 'commerce', name: 'purchase_order_line' }, 'purchase_order_line_price_nonnegative', {
     check: 'indicative_price >= 0',
-    schema: 'commerce',
   });
   pgm.createIndex(
     { schema: 'commerce', name: 'purchase_order_line' },

@@ -5,7 +5,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ListPurchaseOrdersQueryDto } from './dto/list-purchase-orders-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { ProcurementService } from './procurement.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -34,12 +34,11 @@ export class ProcurementController {
   @RequirePermissions('procurement:read')
   listPurchaseOrders(
     @CurrentUser() user: AuthContext,
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: PurchaseOrderStatus,
+    @Query() query: ListPurchaseOrdersQueryDto,
   ): Promise<PaginatedResult<PurchaseOrderRecord>> {
     return this.procurementService.listPurchaseOrders(
       user.tenantId,
-      status,
+      query.status,
       query.page ?? 1,
       query.pageSize ?? 25,
     );

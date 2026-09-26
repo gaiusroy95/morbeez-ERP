@@ -15,7 +15,7 @@ import { RecordRejectionDto } from './dto/record-rejection.dto';
 import { TransferLotDto } from './dto/transfer-lot.dto';
 import { LocationRecord } from './entities/location.entity';
 import { InventoryMovementRecord, StockSummary } from './entities/inventory-movement.entity';
-import { LotRecord } from '../procurement/entities/lot.entity';
+import { LotRecord, ProductStockRow } from '../procurement/entities/lot.entity';
 
 @ApiTags('inventory')
 @ApiBearerAuth()
@@ -70,6 +70,12 @@ export class InventoryController {
   }
 
   // ---- Lot tracking ----
+
+  @Get('stock')
+  @RequirePermissions('inventory:read')
+  getStockOverview(@CurrentUser() user: AuthContext): Promise<ProductStockRow[]> {
+    return this.inventoryService.getStockOverview(user.tenantId);
+  }
 
   @Get('products/:productId/stock-summary')
   @RequirePermissions('inventory:read')

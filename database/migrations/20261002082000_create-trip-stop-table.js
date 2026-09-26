@@ -40,22 +40,18 @@ exports.up = (pgm) => {
       created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('trip_stop', 'trip_stop_type_valid', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop' }, 'trip_stop_type_valid', {
     check: `stop_type IN (${VALID_STOP_TYPES.map((t) => `'${t}'`).join(', ')})`,
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_stop', 'trip_stop_status_valid', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop' }, 'trip_stop_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_stop', 'trip_stop_pickup_xor_order', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop' }, 'trip_stop_pickup_xor_order', {
     check: "(stop_type = 'pickup' AND pickup_id IS NOT NULL AND order_id IS NULL) OR " +
       "(stop_type = 'delivery' AND order_id IS NOT NULL AND pickup_id IS NULL)",
-    schema: 'fulfilment',
   });
-  pgm.addConstraint('trip_stop', 'trip_stop_sequence_unique_per_trip', {
+  pgm.addConstraint({ schema: 'fulfilment', name: 'trip_stop' }, 'trip_stop_sequence_unique_per_trip', {
     unique: ['trip_id', 'sequence_number'],
-    schema: 'fulfilment',
   });
   pgm.createIndex({ schema: 'fulfilment', name: 'trip_stop' }, 'trip_id');
 };

@@ -58,13 +58,11 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('pickup', 'pickup_status_valid', {
+  pgm.addConstraint({ schema: 'commerce', name: 'pickup' }, 'pickup_status_valid', {
     check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
-    schema: 'commerce',
   });
-  pgm.addConstraint('pickup', 'pickup_completed_requires_vehicle_and_driver', {
+  pgm.addConstraint({ schema: 'commerce', name: 'pickup' }, 'pickup_completed_requires_vehicle_and_driver', {
     check: "status <> 'completed' OR (vehicle_id IS NOT NULL AND driver_employee_id IS NOT NULL AND picked_up_at IS NOT NULL)",
-    schema: 'commerce',
   });
   pgm.createIndex({ schema: 'commerce', name: 'pickup' }, ['tenant_id', 'status']);
   pgm.createIndex({ schema: 'commerce', name: 'pickup' }, 'purchase_order_id');

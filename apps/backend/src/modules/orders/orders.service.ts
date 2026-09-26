@@ -215,8 +215,8 @@ export class OrdersService {
    * OrdersRepository directly (Constitution I.3-I.4). No inventory or
    * accounting side effect yet; see the OrderStatus comment on 'delivered'.
    */
-  markDelivered(tenantId: string, actorUserId: string, id: string, expectedVersion: number): Promise<OrderRecord> {
-    return this.db.withTenant(tenantId, async (client) => {
+  async markDelivered(tenantId: string, actorUserId: string, id: string, expectedVersion: number): Promise<OrderRecord> {
+    const delivered = await this.db.withTenant(tenantId, async (client) => {
       const before = await this.orders.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Order not found');
 
@@ -230,8 +230,16 @@ export class OrdersService {
         before: before as unknown as Record<string, unknown>,
         after: after as unknown as Record<string, unknown>,
       });
-      return after;
+      return { after, lines: before.lines ?? [] };
     });
+
+    // The goods have left: consume the lots reserved for each line. A
+    // separate transaction per line, the same cross-module pattern as
+    // reservation itself.
+    for (const line of delivered.lines) {
+      await this.procurement.consumeLotsForOrderLine(tenantId, actorUserId, line.id);
+    }
+    return delivered.after;
   }
 
   /**

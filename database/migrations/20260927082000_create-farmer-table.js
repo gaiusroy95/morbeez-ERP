@@ -38,13 +38,11 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.addConstraint('farmer', 'farmer_reliability_rating_range', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'farmer' }, 'farmer_reliability_rating_range', {
     check: 'reliability_rating IS NULL OR (reliability_rating >= 0 AND reliability_rating <= 5)',
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('farmer', 'farmer_status_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'farmer' }, 'farmer_status_valid', {
     check: "status IN ('active', 'archived')",
-    schema: 'trading_partners',
   });
 
   pgm.createIndex({ schema: 'trading_partners', name: 'farmer' }, ['tenant_id', 'name']);

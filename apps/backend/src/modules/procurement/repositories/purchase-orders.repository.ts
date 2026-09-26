@@ -16,6 +16,7 @@ interface PurchaseOrderRow {
   created_at: Date;
   updated_at: Date;
   created_by: string;
+  expected_value?: string;
 }
 
 interface PurchaseOrderLineRow {
@@ -39,6 +40,7 @@ function toRecord(row: PurchaseOrderRow, lines?: PurchaseOrderLineRow[]): Purcha
     updatedAt: row.updated_at,
     createdBy: row.created_by,
     lines: lines?.map(toLineRecord),
+    ...(row.expected_value !== undefined && { expectedValue: row.expected_value }),
   };
 }
 
@@ -68,7 +70,10 @@ export class PurchaseOrdersRepository {
     return this.db.withTenant(tenantId, async (client) => {
       const [rows, count] = await Promise.all([
         client.query<PurchaseOrderRow>(
-          `SELECT * FROM commerce.purchase_order
+          `SELECT po.*,
+                  (SELECT ROUND(COALESCE(SUM(pl.expected_quantity * pl.indicative_price), 0), 2)::text
+                     FROM commerce.purchase_order_line pl WHERE pl.purchase_order_id = po.id) AS expected_value
+           FROM commerce.purchase_order po
            WHERE ($3::text IS NULL OR status = $3)
            ORDER BY created_at DESC
            LIMIT $1 OFFSET $2`,

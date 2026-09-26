@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
-import { LotRecord, LotStatus } from '../entities/lot.entity';
+import { LotRecord, LotStatus, ProductStockRow } from '../entities/lot.entity';
 
 interface LotRow {
   id: string;
@@ -252,6 +252,58 @@ export class LotsRepository {
     );
     if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
     return toRecord(result.rows[0]);
+  }
+
+  /** reserved -> delivered once the order the lot was reserved for reaches the customer. */
+  async consumeWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<LotRecord> {
+    const result = await client.query<LotRow>(
+      `UPDATE commerce.lot SET status = 'delivered', version = version + 1, updated_at = now()
+       WHERE id = $1 AND version = $2 AND status = 'reserved'
+       RETURNING *`,
+      [id, expectedVersion],
+    );
+    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
+    return toRecord(result.rows[0]);
+  }
+
+  /** One row per product that has ever had a lot — the whole stock picture in one query. */
+  stockByProduct(tenantId: string): Promise<ProductStockRow[]> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const result = await client.query<{
+        product_id: string;
+        available: string;
+        reserved: string;
+        physical: string;
+        value_at_cost: string;
+        available_lots: number;
+        ungraded_lots: number;
+        ungraded_quantity: string;
+        oldest_available_received_at: Date | null;
+      }>(
+        `SELECT product_id,
+                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status = 'available'), 0), 3)::text AS available,
+                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status = 'reserved'), 0), 3)::text AS reserved,
+                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status IN ('available', 'reserved')), 0), 3)::text AS physical,
+                ROUND(COALESCE(SUM(current_quantity * unit_cost) FILTER (WHERE status IN ('available', 'reserved')), 0), 2)::text AS value_at_cost,
+                (count(*) FILTER (WHERE status = 'available' AND current_quantity > 0))::int AS available_lots,
+                (count(*) FILTER (WHERE status = 'received_ungraded'))::int AS ungraded_lots,
+                ROUND(COALESCE(SUM(received_quantity) FILTER (WHERE status = 'received_ungraded'), 0), 3)::text AS ungraded_quantity,
+                min(received_at) FILTER (WHERE status = 'available' AND current_quantity > 0) AS oldest_available_received_at
+         FROM commerce.lot
+         GROUP BY product_id`,
+      );
+      return result.rows.map((row) => ({
+        productId: row.product_id,
+        available: row.available,
+        reserved: row.reserved,
+        physical: row.physical,
+        valueAtCost: row.value_at_cost,
+        availableLots: row.available_lots,
+        ungradedLots: row.ungraded_lots,
+        ungradedQuantity: row.ungraded_quantity,
+        oldestAvailableReceivedAt: row.oldest_available_received_at,
+      }));
+    });
   }
 
   /** Every graded lot for this product, any status — the raw data the Inventory Engine's stock summary is computed from. */

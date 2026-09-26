@@ -47,13 +47,11 @@ exports.up = (pgm) => {
       collected_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
     },
   );
-  pgm.addConstraint('customer_collection', 'customer_collection_amount_positive', {
+  pgm.addConstraint({ schema: 'money', name: 'customer_collection' }, 'customer_collection_amount_positive', {
     check: 'amount > 0',
-    schema: 'money',
   });
-  pgm.addConstraint('customer_collection', 'customer_collection_method_valid', {
+  pgm.addConstraint({ schema: 'money', name: 'customer_collection' }, 'customer_collection_method_valid', {
     check: `method IN (${VALID_METHODS.map((m) => `'${m}'`).join(', ')})`,
-    schema: 'money',
   });
   pgm.createIndex({ schema: 'money', name: 'customer_collection' }, ['tenant_id', 'order_id']);
   pgm.createIndex({ schema: 'money', name: 'customer_collection' }, 'trip_stop_id');

@@ -7,7 +7,7 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "start:worker": "ts-node worker/main.ts",
+    "start:worker": "node -r ts-node/register worker/main.ts",
     "test": "jest",
     "test:integration": "jest --config ./test/jest-integration.json --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
@@ -15,7 +15,7 @@
     "migrate:up": "node-pg-migrate --migration-file-language js --migrations-dir ../../database/migrations up",
     "migrate:down": "node-pg-migrate --migration-file-language js --migrations-dir ../../database/migrations down",
     "migrate:create": "node-pg-migrate --migration-file-language js --migrations-dir ../../database/migrations create",
-    "seed": "ts-node ../../database/seeds/run.ts"
+    "seed": "node -r ts-node/register ../../database/seeds/run.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

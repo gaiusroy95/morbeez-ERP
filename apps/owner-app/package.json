@@ -2,7 +2,7 @@
   "name": "@morbeez/owner-app",
   "version": "0.0.0",
   "private": true,
-  "description": "Morbeez ERP web application — owners, procurement, inventory, finance, and accounting staff. Structure only.",
+  "description": "Morbeez ERP web application — owners, procurement, inventory, finance, and accounting staff. App shell, sign-in, and the owner dashboard are built; other module screens are placeholders.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

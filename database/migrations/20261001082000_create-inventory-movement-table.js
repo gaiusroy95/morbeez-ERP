@@ -59,17 +59,14 @@ exports.up = (pgm) => {
       },
     },
   );
-  pgm.addConstraint('inventory_movement', 'inventory_movement_type_valid', {
+  pgm.addConstraint({ schema: 'stock', name: 'inventory_movement' }, 'inventory_movement_type_valid', {
     check: `movement_type IN (${VALID_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')})`,
-    schema: 'stock',
   });
-  pgm.addConstraint('inventory_movement', 'inventory_movement_quantity_positive', {
+  pgm.addConstraint({ schema: 'stock', name: 'inventory_movement' }, 'inventory_movement_quantity_positive', {
     check: 'quantity > 0',
-    schema: 'stock',
   });
-  pgm.addConstraint('inventory_movement', 'inventory_movement_transfer_has_locations', {
+  pgm.addConstraint({ schema: 'stock', name: 'inventory_movement' }, 'inventory_movement_transfer_has_locations', {
     check: "movement_type <> 'transferred' OR (from_location_id IS NOT NULL OR to_location_id IS NOT NULL)",
-    schema: 'stock',
   });
   pgm.createIndex({ schema: 'stock', name: 'inventory_movement' }, ['tenant_id', 'lot_id']);
   pgm.createIndex({ schema: 'stock', name: 'inventory_movement' }, ['tenant_id', 'product_id', 'created_at']);

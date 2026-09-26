@@ -39,17 +39,14 @@ exports.up = (pgm) => {
     },
   );
 
-  pgm.addConstraint('product', 'product_base_uom_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'product' }, 'product_base_uom_valid', {
     check: `base_uom IN (${VALID_UOMS.map((u) => `'${u}'`).join(', ')})`,
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('product', 'product_base_price_nonnegative', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'product' }, 'product_base_price_nonnegative', {
     check: 'base_price >= 0',
-    schema: 'trading_partners',
   });
-  pgm.addConstraint('product', 'product_status_valid', {
+  pgm.addConstraint({ schema: 'trading_partners', name: 'product' }, 'product_status_valid', {
     check: "status IN ('active', 'archived')",
-    schema: 'trading_partners',
   });
 
   pgm.createIndex({ schema: 'trading_partners', name: 'product' }, ['tenant_id', 'name']);

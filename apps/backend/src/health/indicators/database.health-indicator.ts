@@ -1,21 +1,21 @@
 import { Injectable } from '@nestjs/common';
-import { HealthIndicatorResult, HealthIndicatorService } from '@nestjs/terminus';
+import { HealthCheckError, HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
 import { DatabaseService } from '../../infra/database/database.service';
 
+// @nestjs/terminus 10 API (the project is on Nest 10): extend
+// HealthIndicator and throw HealthCheckError to report "down".
 @Injectable()
-export class DatabaseHealthIndicator {
-  constructor(
-    private readonly db: DatabaseService,
-    private readonly indicatorService: HealthIndicatorService,
-  ) {}
+export class DatabaseHealthIndicator extends HealthIndicator {
+  constructor(private readonly db: DatabaseService) {
+    super();
+  }
 
   async check(key = 'database'): Promise<HealthIndicatorResult> {
-    const indicator = this.indicatorService.check(key);
     try {
       await this.db.isHealthy();
-      return indicator.up();
+      return this.getStatus(key, true);
     } catch (err) {
-      return indicator.down({ message: (err as Error).message });
+      throw new HealthCheckError('Database check failed', this.getStatus(key, false, { message: (err as Error).message }));
     }
   }
 }

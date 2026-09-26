@@ -31,7 +31,7 @@ export class FarmersService {
     return this.db.withTenant(tenantId, async (client) => {
       const farmer = await this.farmers.createWithClient(client, tenantId, actorUserId, {
         name: dto.name,
-        contact: dto.contact ?? {},
+        contact: { ...dto.contact },
         bankDetails: dto.bankDetails,
       });
       // bank_details never appears in the audit entry itself, even
@@ -62,7 +62,7 @@ export class FarmersService {
 
       const after = await this.farmers.updateWithClient(client, id, dto.version, {
         name: dto.name,
-        contact: dto.contact,
+        contact: dto.contact && { ...dto.contact },
         bankDetails: dto.bankDetails,
         reliabilityRating: dto.reliabilityRating,
       });

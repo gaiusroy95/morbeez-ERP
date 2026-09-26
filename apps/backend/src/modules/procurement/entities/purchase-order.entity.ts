@@ -26,4 +26,7 @@ export interface PurchaseOrderRecord {
   updatedAt: Date;
   createdBy: string;
   lines?: PurchaseOrderLineRecord[];
+  // List rows only: sum(expected_quantity * indicative_price) — what the PO
+  // was expected to cost, not what grading fixed.
+  expectedValue?: string;
 }

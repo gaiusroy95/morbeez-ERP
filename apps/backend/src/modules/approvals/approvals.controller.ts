@@ -5,7 +5,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { ListApprovalRequestsQueryDto } from './dto/list-approval-requests-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { ApprovalsService } from './approvals.service';
 import { UpsertApprovalRuleDto } from './dto/upsert-approval-rule.dto';
@@ -69,12 +69,11 @@ export class ApprovalsController {
   @Get('approval-requests')
   listRequests(
     @CurrentUser() user: AuthContext,
-    @Query() query: PaginationQueryDto,
-    @Query('status') status?: ApprovalRequestStatus,
+    @Query() query: ListApprovalRequestsQueryDto,
   ): Promise<PaginatedResult<ApprovalRequestRecord>> {
     return this.approvalsService.listRequests(
       user.tenantId,
-      status,
+      query.status,
       query.page ?? 1,
       query.pageSize ?? 25,
     );
