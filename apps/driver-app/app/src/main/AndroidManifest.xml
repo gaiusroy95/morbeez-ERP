@@ -3,11 +3,14 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:name=".MorbeezDriverApp"
         android:label="Morbeez Driver"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:theme="@style/Theme.MorbeezDriver">
 
         <activity
             android:name=".MainActivity"
@@ -17,6 +20,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Scoped access for the camera intent to write a captured photo
+             into the app's own storage before it's attached to a stop
+             (Driver App Architecture, DRV.19 — Photos/POD). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.morbeez.driver.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

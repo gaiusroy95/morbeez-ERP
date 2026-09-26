@@ -52,8 +52,11 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://morbeez:morbeez_ci@localhost:5432/morbeez
+      APP_DATABASE_URL: postgres://morbeez_app:morbeez_app_ci@localhost:5432/morbeez
+      APP_DB_PASSWORD: morbeez_app_ci
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: ci_test_secret_not_for_real_use
+      FIELD_ENCRYPTION_KEY: ci_test_encryption_key_not_real
       NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +71,42 @@ jobs:
       - name: Run migrations against the CI database
         run: pnpm --filter @morbeez/backend migrate:up
       - run: pnpm run test
+
+  test-tenant-isolation:
+    # Real Postgres, real RLS, connecting as the same restricted role the
+    # production app uses — this is what actually proves tenant isolation,
+    # not just documents the intent (see test/integration).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: morbeez
+          POSTGRES_PASSWORD: morbeez_ci
+          POSTGRES_DB: morbeez
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U morbeez"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://morbeez:morbeez_ci@localhost:5432/morbeez
+      APP_DATABASE_URL: postgres://morbeez_app:morbeez_app_ci@localhost:5432/morbeez
+      APP_DB_PASSWORD: morbeez_app_ci
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @morbeez/backend migrate:up
+      - run: pnpm --filter @morbeez/backend test:integration
 
   migration-reversibility:
     # A migration that can't roll back isn't backward-compatible

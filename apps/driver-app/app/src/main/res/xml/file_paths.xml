@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where a captured photo is written before it's attached to a stop
+         and queued for upload (Driver App Architecture, Photos/POD). -->
+    <cache-path name="captured_photos" path="photos/" />
+</paths>

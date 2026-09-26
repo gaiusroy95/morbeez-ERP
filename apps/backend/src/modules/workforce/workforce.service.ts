@@ -27,6 +27,12 @@ export class WorkforceService {
     return employee;
   }
 
+  /** Called by Logistics to resolve which employee a logged-in driver actually is — null if this login has no linked employee record. */
+  async getEmployeeIdForUser(tenantId: string, userId: string): Promise<string | null> {
+    const employee = await this.employees.findByUserId(tenantId, userId);
+    return employee?.id ?? null;
+  }
+
   create(tenantId: string, actorUserId: string, dto: CreateEmployeeDto): Promise<EmployeeRecord> {
     return this.db.withTenant(tenantId, async (client) => {
       const employee = await this.employees.createWithClient(client, tenantId, actorUserId, {

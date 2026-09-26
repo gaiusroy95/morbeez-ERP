@@ -47,7 +47,13 @@ services:
     container_name: morbeez-backend
     env_file: apps/backend/.env
     environment:
+      # Owner — only meaningful here for tooling parity; the running app
+      # itself never uses this connection (DatabaseService reads
+      # APP_DATABASE_URL exclusively).
       DATABASE_URL: postgres://${POSTGRES_USER:-morbeez}:${POSTGRES_PASSWORD:-morbeez_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
+      # morbeez_app — DML-only, RLS-enforced (database/migrations,
+      # create-app-runtime-role). What the app actually connects with.
+      APP_DATABASE_URL: postgres://morbeez_app:${APP_DB_PASSWORD:-morbeez_app_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
       REDIS_URL: redis://redis:6379
     ports:
       - "${BACKEND_PORT:-3000}:3000"
@@ -66,6 +72,7 @@ services:
     env_file: apps/backend/.env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-morbeez}:${POSTGRES_PASSWORD:-morbeez_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
+      APP_DATABASE_URL: postgres://morbeez_app:${APP_DB_PASSWORD:-morbeez_app_dev_only}@postgres:5432/${POSTGRES_DB:-morbeez}
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:

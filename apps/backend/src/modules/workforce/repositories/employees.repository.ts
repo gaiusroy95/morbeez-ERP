@@ -76,6 +76,17 @@ export class EmployeesRepository {
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
+  /** Reverse lookup for Logistics' trip-ownership check — userId is nullable on this table, so this can legitimately return null. */
+  findByUserId(tenantId: string, userId: string): Promise<EmployeeRecord | null> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const result = await client.query<EmployeeRow>(
+        'SELECT * FROM trading_partners.employee WHERE user_id = $1',
+        [userId],
+      );
+      return result.rows[0] ? toRecord(result.rows[0]) : null;
+    });
+  }
+
   /**
    * The existence check IS the authorization boundary, same pattern as
    * RolesRepository.assignToUserWithClient — it runs inside the caller's

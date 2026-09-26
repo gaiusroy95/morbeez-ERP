@@ -1,0 +1,26 @@
+/* eslint-disable camelcase */
+
+// Widens commerce.customer_order's status machine for Logistics — a
+// confirmed order's delivery stop on some Trip completing is what drives
+// this transition (OrdersService.markDelivered, called from
+// LogisticsService, never directly by a client — Constitution I.3-I.4).
+
+exports.shorthands = undefined;
+
+const VALID_STATUSES = ['placed', 'confirmed', 'cancelled', 'delivered'];
+
+exports.up = (pgm) => {
+  pgm.dropConstraint('customer_order', 'customer_order_status_valid', { schema: 'commerce' });
+  pgm.addConstraint('customer_order', 'customer_order_status_valid', {
+    check: `status IN (${VALID_STATUSES.map((s) => `'${s}'`).join(', ')})`,
+    schema: 'commerce',
+  });
+};
+
+exports.down = (pgm) => {
+  pgm.dropConstraint('customer_order', 'customer_order_status_valid', { schema: 'commerce' });
+  pgm.addConstraint('customer_order', 'customer_order_status_valid', {
+    check: "status IN ('placed', 'confirmed', 'cancelled')",
+    schema: 'commerce',
+  });
+};

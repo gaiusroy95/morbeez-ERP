@@ -53,6 +53,13 @@ export const envSchema = z
     // Database pool sizing — conservative defaults for a single small
     // instance; production tunes this per the managed RDS instance class.
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+
+    // Local disk storage for driver-app photo uploads (Trip stop photos,
+    // proof-of-delivery images) — a dev-appropriate stand-in for the
+    // S3-compatible object storage Technology Stack §04/05 specifies for
+    // production; swapping the storage backend is a change to where
+    // TripStopPhotosRepository writes bytes, not to its API contract.
+    UPLOADS_DIR: z.string().default('./uploads'),
   })
   // Order matters: check the raw (pre-default) value first, so production's
   // requirement can't be satisfied by the default that's about to be
