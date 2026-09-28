@@ -1,9 +1,9 @@
 export type CollectionMethod = 'cash' | 'upi' | 'bank_transfer' | 'cheque';
 
-// An operational fact — cash/payment collected at delivery — not a
-// double-entry posting; the delivery-side mirror of Procurement's
-// money.farmer_settlement, and drawn the same scope boundary until a real
-// Accounting ledger exists to post against.
+// The capture of cash/payment collected at a delivery stop: who took what,
+// where. Its money side is a Finance customer payment (collection_id links
+// the two), applied to the order's invoice and posted to the ledger when
+// the collection is recorded.
 export interface CustomerCollectionRecord {
   id: string;
   tenantId: string;

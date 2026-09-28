@@ -5,12 +5,12 @@ import { ProcurementService } from './procurement.service';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
 import { LotsRepository } from './repositories/lots.repository';
-import { FarmerSettlementsRepository } from './repositories/farmer-settlements.repository';
 import { FarmersService } from '../farmers/farmers.service';
 import { ProductsService } from '../products/products.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { ApprovalsService } from '../approvals/approvals.service';
+import { LotsPaidListener, PayablesService } from '../finance/payables.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { PurchaseOrderRecord } from './entities/purchase-order.entity';
@@ -63,7 +63,8 @@ describe('ProcurementService', () => {
   let purchaseOrders: jest.Mocked<PurchaseOrdersRepository>;
   let pickups: jest.Mocked<PickupsRepository>;
   let lots: jest.Mocked<LotsRepository>;
-  let settlements: jest.Mocked<FarmerSettlementsRepository>;
+  let payables: jest.Mocked<PayablesService>;
+  let lotsPaid: LotsPaidListener;
   let farmers: jest.Mocked<FarmersService>;
   let products: jest.Mocked<ProductsService>;
   let approvals: jest.Mocked<ApprovalsService>;
@@ -108,16 +109,20 @@ describe('ProcurementService', () => {
             findByIdWithClient: jest.fn(),
             createWithClient: jest.fn(),
             gradeWithClient: jest.fn(),
+            listByPurchaseOrderWithClient: jest.fn(),
             countUngradedWithClient: jest.fn(),
-            countUnsettledAvailableWithClient: jest.fn(),
           },
         },
         {
-          provide: FarmerSettlementsRepository,
+          provide: PayablesService,
           useValue: {
-            listByPurchaseOrder: jest.fn(),
-            findByLotId: jest.fn(),
-            createWithClient: jest.fn(),
+            onLotsPaid: jest.fn((listener: LotsPaidListener) => {
+              lotsPaid = listener;
+            }),
+            accrueLotPayableWithClient: jest.fn(),
+            recordPayment: jest.fn(),
+            lotPaymentStatus: jest.fn(),
+            lotPaymentStatusWithClient: jest.fn().mockResolvedValue([]),
           },
         },
         { provide: FarmersService, useValue: { getById: jest.fn() } },
@@ -140,7 +145,8 @@ describe('ProcurementService', () => {
     purchaseOrders = module.get(PurchaseOrdersRepository);
     pickups = module.get(PickupsRepository);
     lots = module.get(LotsRepository);
-    settlements = module.get(FarmerSettlementsRepository);
+    payables = module.get(PayablesService);
+    module.get(ProcurementService).onModuleInit();
     farmers = module.get(FarmersService);
     products = module.get(ProductsService);
     approvals = module.get(ApprovalsService);
@@ -320,34 +326,111 @@ describe('ProcurementService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('settleFarmer auto-closes the purchase order once every available lot is settled', async () => {
-    const availableLot = { ...baseLot, status: 'available' as const };
-    lots.findByIdWithClient.mockResolvedValue(availableLot);
-    settlements.createWithClient.mockResolvedValue({
-      id: 'settlement-1',
-      tenantId: 'tenant-1',
+  it('gradeLot accrues the farmer payable in the grading transaction', async () => {
+    const gradedAt = new Date('2026-09-20T10:00:00Z');
+    lots.findByIdWithClient.mockResolvedValue(baseLot);
+    lots.gradeWithClient.mockResolvedValue({
+      ...baseLot,
+      acceptedQuantity: '95.000',
+      rejectedQuantity: '5.000',
+      unitCost: '9.50',
+      status: 'available',
+      gradedAt,
+      version: 2,
+    });
+    lots.countUngradedWithClient.mockResolvedValue(1);
+
+    await service.gradeLot('tenant-1', 'user-1', 'lot-1', {
+      version: 1,
+      acceptedQuantity: 95,
+      rejectedQuantity: 5,
+      unitCost: 9.5,
+    });
+
+    expect(payables.accrueLotPayableWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', {
       lotId: 'lot-1',
       farmerId: 'farmer-1',
-      amount: '950',
-      method: 'cash',
-      notes: null,
-      settledBy: 'user-1',
-      settledAt: new Date(),
+      acceptedQuantity: '95.000',
+      unitCost: '9.50',
+      gradedAt,
     });
-    purchaseOrders.findByIdWithClient.mockResolvedValue({ ...basePo, status: 'graded' });
-    lots.countUnsettledAvailableWithClient.mockResolvedValue(0);
-    purchaseOrders.closeWithClient.mockResolvedValue({ ...basePo, status: 'closed', version: 2 });
-
-    await service.settleFarmer('tenant-1', 'user-1', 'lot-1', { amount: 950, method: 'cash' });
-
-    expect(purchaseOrders.closeWithClient).toHaveBeenCalledWith(fakeClient, 'po-1', 1);
   });
 
-  it('settleFarmer refuses to settle a lot that is not available', async () => {
-    lots.findByIdWithClient.mockResolvedValue({ ...baseLot, status: 'received_ungraded' });
+  it('gradeLot accrues nothing for a fully rejected lot', async () => {
+    lots.findByIdWithClient.mockResolvedValue(baseLot);
+    lots.gradeWithClient.mockResolvedValue({
+      ...baseLot,
+      acceptedQuantity: '0',
+      rejectedQuantity: '100',
+      status: 'rejected',
+      gradedAt: new Date(),
+      version: 2,
+    });
+    lots.countUngradedWithClient.mockResolvedValue(1);
+
+    await service.gradeLot('tenant-1', 'user-1', 'lot-1', {
+      version: 1,
+      acceptedQuantity: 0,
+      rejectedQuantity: 100,
+      rejectionReason: 'rotten',
+    });
+
+    expect(payables.accrueLotPayableWithClient).not.toHaveBeenCalled();
+  });
+
+  it('settleFarmer pays the lot through Finance, the excess as an advance', async () => {
+    lots.findById.mockResolvedValue({ ...baseLot, status: 'available' });
+    payables.lotPaymentStatus.mockResolvedValue([{ lotId: 'lot-1', payable: '950.00', paid: '0.00', outstanding: '950.00' }]);
+
+    await service.settleFarmer('tenant-1', 'user-1', 'lot-1', { amount: 1000, method: 'upi', notes: 'weekly' });
+
+    expect(payables.recordPayment).toHaveBeenCalledWith('tenant-1', 'user-1', {
+      farmerId: 'farmer-1',
+      amount: 1000,
+      method: 'upi',
+      notes: 'weekly',
+      allocations: [{ lotId: 'lot-1', amount: 950 }],
+    });
+  });
+
+  it('settleFarmer refuses a lot with nothing owed on it', async () => {
+    lots.findById.mockResolvedValue({ ...baseLot, status: 'received_ungraded' });
+    payables.lotPaymentStatus.mockResolvedValue([]);
 
     await expect(
       service.settleFarmer('tenant-1', 'user-1', 'lot-1', { amount: 950, method: 'cash' }),
     ).rejects.toBeInstanceOf(ConflictException);
+    expect(payables.recordPayment).not.toHaveBeenCalled();
+  });
+
+  it('closes a graded purchase order once Finance reports its lots paid', async () => {
+    lots.findByIdWithClient.mockResolvedValue({ ...baseLot, status: 'available' });
+    purchaseOrders.findByIdWithClient.mockResolvedValue({ ...basePo, status: 'graded' });
+    lots.listByPurchaseOrderWithClient.mockResolvedValue([{ ...baseLot, status: 'available' }]);
+    payables.lotPaymentStatusWithClient.mockResolvedValue([
+      { lotId: 'lot-1', payable: '950.00', paid: '950.00', outstanding: '0.00' },
+    ]);
+    purchaseOrders.closeWithClient.mockResolvedValue({ ...basePo, status: 'closed', version: 2 });
+
+    await lotsPaid('tenant-1', 'user-1', ['lot-1']);
+
+    expect(purchaseOrders.closeWithClient).toHaveBeenCalledWith(fakeClient, 'po-1', 1);
+  });
+
+  it('leaves the purchase order open while any lot on it is still owed', async () => {
+    lots.findByIdWithClient.mockResolvedValue({ ...baseLot, status: 'available' });
+    purchaseOrders.findByIdWithClient.mockResolvedValue({ ...basePo, status: 'graded' });
+    lots.listByPurchaseOrderWithClient.mockResolvedValue([
+      { ...baseLot, status: 'available' },
+      { ...baseLot, id: 'lot-2', status: 'available' },
+    ]);
+    payables.lotPaymentStatusWithClient.mockResolvedValue([
+      { lotId: 'lot-1', payable: '950.00', paid: '950.00', outstanding: '0.00' },
+      { lotId: 'lot-2', payable: '400.00', paid: '100.00', outstanding: '300.00' },
+    ]);
+
+    await lotsPaid('tenant-1', 'user-1', ['lot-1']);
+
+    expect(purchaseOrders.closeWithClient).not.toHaveBeenCalled();
   });
 });

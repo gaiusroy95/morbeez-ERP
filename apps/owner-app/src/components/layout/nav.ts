@@ -41,7 +41,7 @@ export const NAV: NavGroup[] = [
     label: 'Money',
     items: [
       { href: '/finance', label: 'Finance', permission: 'finance:read' },
-      { href: '/accounting', label: 'Accounting' },
+      { href: '/accounting', label: 'Accounting', permission: 'accounting:read' },
     ],
   },
 ];

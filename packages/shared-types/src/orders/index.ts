@@ -22,3 +22,10 @@ export interface OrderRecord {
   lines?: OrderLineRecord[]; // detail only
   totalValue?: string; // list rows only
 }
+
+// Request body. unitPrice is optional: the backend prices an omitted one at
+// the product's current basePrice.
+export interface CreateOrderBody {
+  customerId: string;
+  lines: { productId: string; quantity: number; unitPrice?: number }[];
+}

@@ -12,6 +12,7 @@ import { VehiclesModule } from '../vehicles/vehicles.module';
 import { WorkforceModule } from '../workforce/workforce.module';
 import { ProcurementModule } from '../procurement/procurement.module';
 import { OrdersModule } from '../orders/orders.module';
+import { FinanceModule } from '../finance/finance.module';
 
 // Bounded context: Logistics — trip planning (vehicle, driver, route),
 // stop execution (a Procurement pickup or a customer delivery), photos,
@@ -20,9 +21,10 @@ import { OrdersModule } from '../orders/orders.module';
 // trip_stop_photo/trip_stop_pod and money.customer_collection; reaches
 // Vehicles/Workforce for assignment validation and trip-ownership
 // resolution, and Procurement/Orders for completing the stops themselves —
-// their public service APIs only (Constitution I.3-I.4).
+// their public service APIs only (Constitution I.3-I.4). A collection is
+// also recorded as a Finance customer payment, in the same transaction.
 @Module({
-  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule],
+  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule],
   controllers: [LogisticsController],
   providers: [
     LogisticsService,

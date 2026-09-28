@@ -1,6 +1,6 @@
-// Operational money views — derived from collections, settlements, trip
-// expenses, and reconciliations. Not the ledger: there is no Accounting
-// module to post journals to yet. Money is a decimal string throughout
+// Finance's reports — receivables, payables, cash flow, trip cash — read
+// from invoices, payables, and payments the finance engine records (each
+// backed by a ledger entry). Money is a decimal string throughout
 // (Constitution III.2). Mirrored in packages/shared-types/src/finance.
 
 export interface CustomerReceivable {
@@ -8,23 +8,24 @@ export interface CustomerReceivable {
   customerName: string;
   creditLimit: string;
   paymentTermsDays: number;
-  delivered: string;
-  collected: string;
-  outstanding: string;
-  // Aging of what's unpaid, per delivered order, against its due date
-  // (delivered date + the customer's payment terms). Collections are
-  // recorded against a specific order, so each order ages on its own.
+  creditHold: boolean;
+  invoiced: string; // sale invoices, all time
+  collected: string; // payments received, net of reversals, all time
+  outstanding: string; // open invoices, including finance charges
+  creditOnAccount: string; // paid in but not yet applied to an invoice
+  // Aging of open invoices by each one's own due date (issue date + the
+  // payment terms in force when it was issued).
   notYetDue: string;
   overdue1To30: string;
   overdue31To60: string;
   overdueOver60: string;
-  openOrderValue: string;
+  openOrderValue: string; // confirmed, not yet delivered
   lastCollectionAt: Date | null;
 }
 
 export interface ReceivablesReport {
   currency: string;
-  totals: { outstanding: string; notYetDue: string; overdue: string };
+  totals: { outstanding: string; notYetDue: string; overdue: string; creditOnAccount: string };
   customers: CustomerReceivable[];
 }
 
@@ -32,39 +33,42 @@ export interface FarmerPayable {
   farmerId: string;
   farmerName: string;
   owed: string;
-  overdue: string; // graded more than PAYABLE_OVERDUE_DAYS ago and still unpaid
-  unsettledLots: number;
-  oldestUnsettledGradedAt: Date | null;
-  lastSettledAt: Date | null;
+  overdue: string; // accrued more than overdueAfterDays ago and still unpaid
+  unpaidLots: number;
+  oldestUnpaidAccruedAt: Date | null;
+  advance: string; // paid ahead, drawn down by the farmer's next graded lots
+  lastPaidAt: Date | null;
 }
 
 export interface PayablesReport {
   currency: string;
   overdueAfterDays: number;
-  totals: { owed: string; overdue: string };
+  totals: { owed: string; overdue: string; advances: string };
   farmers: FarmerPayable[];
 }
 
-export interface UnsettledLot {
+export interface PayableLot {
   lotId: string;
   purchaseOrderId: string;
   productId: string;
   productName: string;
   acceptedQuantity: string;
   unitCost: string;
-  value: string;
-  gradedAt: Date;
+  amount: string;
+  paid: string;
+  outstanding: string;
+  accruedAt: Date;
 }
 
-export type CashMovementKind = 'collection' | 'settlement' | 'trip_expense';
+export type CashMovementKind = 'collection' | 'collection_reversed' | 'farmer_payment' | 'trip_expense' | 'finance_cost';
 
 export interface CashMovement {
   at: Date;
   kind: CashMovementKind;
   counterparty: string;
-  detail: string; // payment method, or the expense category
+  detail: string; // payment method, expense category, cost category, or reversal reason
   amount: string;
-  referenceId: string; // order, lot, or trip id
+  referenceId: string; // payment, cost, or trip id
 }
 
 export interface CashDay {
@@ -77,7 +81,7 @@ export interface CashFlowReport {
   currency: string;
   from: string;
   to: string;
-  totals: { cashIn: string; settlementsOut: string; expensesOut: string; net: string };
+  totals: { cashIn: string; farmerPaymentsOut: string; expensesOut: string; financeCostsOut: string; net: string };
   daily: CashDay[];
   recent: CashMovement[];
 }

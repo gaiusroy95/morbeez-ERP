@@ -62,6 +62,48 @@ function useNameMap<T extends { id: string }>(
   };
 }
 
+/** The same cached page as the name maps, as records — for a form's pick-list. */
+function useRecords<T extends { id: string }>(key: string, path: string, permission: string) {
+  const { data: session } = useSession();
+  const allowed = hasPermission(session, permission);
+  const query = useQuery({
+    queryKey: ['lookup', key],
+    queryFn: () => apiGet<Paginated<T>>(path, { page: 1, pageSize: LOOKUP_PAGE }),
+    enabled: allowed,
+    staleTime: LOOKUP_STALE_MS,
+    select: (page) => page.items,
+  });
+  return { records: query.data ?? [], isPending: allowed && query.isPending, allowed };
+}
+
+// Pick-lists offer only what can be used now: archived customers, farmers,
+// products, and drivers, and vehicles off the road, are left out.
+
+export function useActiveCustomers() {
+  const result = useRecords<CustomerRecord>('customers', 'customers', 'customers:read');
+  return { ...result, records: result.records.filter((c) => c.status === 'active') };
+}
+
+export function useActiveFarmers() {
+  const result = useRecords<FarmerRecord>('farmers', 'farmers', 'farmers:read');
+  return { ...result, records: result.records.filter((f) => f.status === 'active') };
+}
+
+export function useActiveProducts() {
+  const result = useRecords<ProductRecord>('products', 'products', 'products:read');
+  return { ...result, records: result.records.filter((p) => p.status === 'active') };
+}
+
+export function useActiveVehicles() {
+  const result = useRecords<VehicleRecord>('vehicles', 'vehicles', 'vehicles:read');
+  return { ...result, records: result.records.filter((v) => v.status === 'active') };
+}
+
+export function useActiveDrivers() {
+  const result = useRecords<EmployeeRecord>('employees', 'workforce', 'workforce:read');
+  return { ...result, records: result.records.filter((e) => e.status === 'active' && e.roleType === 'driver') };
+}
+
 export function shortRef(id: string): string {
   return `#${id.slice(0, 8)}`;
 }

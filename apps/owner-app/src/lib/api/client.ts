@@ -40,7 +40,25 @@ export async function apiGet<T>(path: string, params?: Record<string, QueryValue
     headers: { accept: 'application/json' },
     cache: 'no-store',
   });
+  return readResponse<T>(response);
+}
 
+/**
+ * A state-changing call. The body goes as JSON; `version` fields in it are
+ * the optimistic-concurrency token the backend checks, so a 409 means
+ * someone else changed the record first — reload it and try again.
+ */
+export async function apiSend<T>(method: 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`/api/backend/${path}`, {
+    method,
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+    cache: 'no-store',
+  });
+  return readResponse<T>(response);
+}
+
+async function readResponse<T>(response: Response): Promise<T> {
   if (response.status === 401) {
     const next = encodeURIComponent(window.location.pathname + window.location.search);
     window.location.assign(`/login?next=${next}`);

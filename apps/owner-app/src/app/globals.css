@@ -1405,3 +1405,496 @@ button {
     white-space: nowrap;
   }
 }
+
+/* ---------- Actions & forms ---------- */
+
+/* A detail panel that grew taller than the window would otherwise be
+   stuck: sticky keeps its top pinned, so its bottom (and its actions)
+   could never scroll into view. */
+@media (min-width: 1201px) {
+  .detail {
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
+}
+
+.button-danger {
+  background: var(--surface);
+  border-color: var(--critical);
+  color: var(--critical);
+}
+
+.button-danger:hover {
+  background: var(--critical-tint);
+}
+
+.button-small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.action-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-tint);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.action-note[data-tone='bad'] {
+  background: var(--critical-tint);
+}
+
+.action-note[data-tone='info'] {
+  background: var(--info-tint);
+}
+
+.dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.45);
+}
+
+.dialog[data-size='wide'] {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: rgba(18, 21, 18, 0.45);
+}
+
+.dialog-form {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.dialog-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
+.dialog-description p {
+  margin: 0 0 6px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-grid > .field[data-wide],
+.form-grid > .lines-editor,
+.form-grid > .form-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.field select,
+.field textarea {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.field textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.field select:focus,
+.field textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+  border-color: var(--primary);
+}
+
+.field input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--critical-tint);
+  color: var(--critical);
+  font-size: 14px;
+}
+
+/* Order / purchase-order lines: product, quantity, price, remove. */
+.lines-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.lines-editor-head,
+.line-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.lines-editor-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+
+.line-row select,
+.line-row input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.line-row select:focus,
+.line-row input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+.lines-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+@media (max-width: 520px) {
+  .lines-editor-head {
+    display: none;
+  }
+  .line-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .line-row > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* An amount typed straight into a table row (payment allocation). */
+.cell-input {
+  width: 110px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: right;
+}
+
+.cell-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+/* ---------- Accounting ---------- */
+
+.range-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.range-controls select,
+.range-controls input {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.range-controls label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.panel-meta:has(.range-controls) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.inline-check input {
+  accent-color: var(--primary);
+}
+
+/* A table cell that navigates: looks like text, acts like a link. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.link-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.statement .num,
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.statement th[scope='row'] {
+  font-weight: 400;
+  text-align: left;
+}
+
+.st-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.st-heading th {
+  padding-top: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  text-align: left;
+}
+
+.st-account {
+  padding-left: 22px;
+}
+
+.st-number {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.st-credit {
+  padding-left: 28px;
+}
+
+.st-sectiontotal th,
+.st-sectiontotal td {
+  color: var(--ink-muted);
+  border-top: 1px solid var(--border);
+}
+
+.st-subtotal th,
+.st-subtotal td {
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+
+.st-total th,
+.st-total td {
+  font-weight: 700;
+  border-top: 1px solid var(--ink-muted);
+  border-bottom: 3px double var(--ink-muted);
+}
+
+.st-note {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.statement td[data-tone='bad'],
+.st-status [data-tone='bad'],
+.lines-total [data-tone='bad'] {
+  color: var(--bad);
+}
+
+.st-status {
+  margin: 0;
+}
+
+.st-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .st-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.journal-detail > td {
+  background: var(--surface-2);
+  padding: 8px 16px 12px;
+}
+
+.table.nested {
+  background: transparent;
+}
+
+.statement tr[data-retired] td,
+.statement tr[data-retired] th {
+  color: var(--ink-faint);
+}
+
+.journal-lines .line-row {
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+@media print {
+  .sidebar,
+  .topbar,
+  .segmented,
+  .range-controls select,
+  .no-print,
+  .page-header .action-bar,
+  .panel-meta button {
+    display: none !important;
+  }
+  .shell,
+  .main,
+  .content {
+    display: block;
+    padding: 0;
+    margin: 0;
+  }
+  .panel {
+    box-shadow: none;
+    border: 0;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}
+
+/* Row headers (th scope=row / rowgroup) read as body cells, not column headings. */
+.table tbody th {
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+  padding: 9px 10px;
+  white-space: normal;
+}
+
+.table tbody .st-heading th {
+  padding-top: 16px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.table tbody .st-account {
+  padding-left: 22px;
+}
+
+.table tbody .st-subtotal th,
+.table tbody .st-total th {
+  font-weight: 600;
+}
+
+.table tbody .st-total th {
+  font-weight: 700;
+}
+
+.table tbody .st-sectiontotal th {
+  color: var(--ink-muted);
+}
+
+/* A statement's grand total keeps its double rule even as the table's last row. */
+.table tr.st-total:last-child th,
+.table tr.st-total:last-child td {
+  border-bottom: 3px double var(--ink-muted);
+}

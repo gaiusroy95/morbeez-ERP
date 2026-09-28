@@ -1,6 +1,5 @@
-// Closes out the trip's own cash float — not a double-entry posting
-// (Accounting doesn't exist as an implemented ledger yet; same scope
-// boundary Procurement drew around money.farmer_settlement). variance =
+// Closes out the trip's own cash float, and is posted to the ledger when
+// it's recorded (LedgerService.postTripReconciliationWithClient). variance =
 // advanceAmount - (totalExpenses + cashReturned): zero means the driver
 // fully accounted for the advance; positive means cash is missing.
 export interface TripReconciliationRecord {

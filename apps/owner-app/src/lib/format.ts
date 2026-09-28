@@ -113,3 +113,14 @@ export function daysSince(iso: string | null): number | null {
   if (!iso) return null;
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
 }
+
+const amountFormatter = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * Statement style: 2 dp, lakh grouping, no currency symbol (the statement
+ * says the currency once), negatives in parentheses — (1,250.00).
+ */
+export function formatAmount(value: string): string {
+  const n = Number(value);
+  const text = amountFormatter.format(Math.abs(n));
+  return n < 0 ? `(${text})` : text;
+}

@@ -35,8 +35,24 @@ const ACCOUNTANT_PERMISSIONS = [
   'farmers:write',
   'customers:read',
   'approvals:read',
-  // Receivables, payables, cash flow, trip cash — read-only.
+  // Receivables, payables, cash flow, trip cash — and the day-to-day money
+  // work: recording collections, paying farmers, finance costs and charges.
+  // Deliberately not customers:credit — loosening a customer's credit is
+  // the owner's call (Constitution V.2).
   'finance:read',
+  'finance:collect',
+  'finance:pay',
+  'finance:manage',
+  // Keeps the books: journals, ledger, statements. Deliberately not
+  // accounting:close or accounting:manage — locking the books and changing
+  // the chart stay with the owner.
+  'accounting:read',
+  'accounting:post',
+  // Files the returns and deposits: reads tax data, records TDS deductions,
+  // challans, and IRNs. Changing rates and registrations (tax:configure)
+  // stays with the owner.
+  'tax:read',
+  'tax:file',
 ];
 
 const HASH_OPTIONS: argon2.Options & { type: typeof argon2.argon2id } = {

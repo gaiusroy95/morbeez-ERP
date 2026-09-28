@@ -6,6 +6,7 @@ import { InventoryMovementsRepository } from './repositories/inventory-movements
 import { ProductsModule } from '../products/products.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
 import { ProcurementModule } from '../procurement/procurement.module';
+import { FinanceModule } from '../finance/finance.module';
 
 // Bounded context: Inventory — locations, stock summaries (physical /
 // reserved / available), shrinkage, post-acceptance rejection, and
@@ -17,7 +18,7 @@ import { ProcurementModule } from '../procurement/procurement.module';
 // getLot methods on ProcurementService are this module's equivalent,
 // Constitution I.3-I.4).
 @Module({
-  imports: [ProductsModule, VehiclesModule, ProcurementModule],
+  imports: [ProductsModule, VehiclesModule, ProcurementModule, FinanceModule],
   controllers: [InventoryController],
   providers: [InventoryService, LocationsRepository, InventoryMovementsRepository],
   exports: [InventoryService],

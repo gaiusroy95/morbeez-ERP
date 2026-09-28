@@ -4,10 +4,12 @@ import { AuditService } from '../../infra/audit/audit.service';
 import { ProductsService } from '../products/products.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { LedgerService } from '../finance/ledger.service';
+import { multiplyToMoney } from '../../common/money';
 import { LocationsRepository } from './repositories/locations.repository';
 import { InventoryMovementsRepository } from './repositories/inventory-movements.repository';
 import { LocationRecord, LocationType } from './entities/location.entity';
-import { InventoryMovementRecord, MovementType, StockSummary } from './entities/inventory-movement.entity';
+import { InventoryMovementRecord, StockSummary } from './entities/inventory-movement.entity';
 import { LotRecord, ProductStockRow } from '../procurement/entities/lot.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateLocationDto } from './dto/create-location.dto';
@@ -28,6 +30,7 @@ export class InventoryService {
     private readonly vehicles: VehiclesService,
     private readonly procurement: ProcurementService,
     private readonly audit: AuditService,
+    private readonly ledger: LedgerService,
   ) {}
 
   // ---- Locations ----
@@ -200,23 +203,38 @@ export class InventoryService {
     return lot;
   }
 
+  /**
+   * The movement record and its ledger entry commit together: stock lost
+   * is written off at the lot's own cost (Accounting Engine SHR.1, LOT.1).
+   */
   private writeMovement(
     tenantId: string,
     actorUserId: string,
     lot: LotRecord,
-    movementType: MovementType,
+    movementType: 'shrinkage' | 'rejected_post_acceptance',
     quantity: number,
     reason: string | null,
   ): Promise<InventoryMovementRecord> {
-    return this.db.withTenant(tenantId, (client) =>
-      this.movements.createWithClient(client, tenantId, actorUserId, {
+    return this.db.withTenant(tenantId, async (client) => {
+      const movement = await this.movements.createWithClient(client, tenantId, actorUserId, {
         lotId: lot.id,
         productId: lot.productId,
         movementType,
         quantity,
         reason,
-      }),
-    );
+      });
+      if (lot.unitCost !== null) {
+        await this.ledger.postInventoryWriteOffWithClient(client, tenantId, actorUserId, {
+          movementId: movement.id,
+          lotId: lot.id,
+          kind: movementType,
+          value: multiplyToMoney(movement.quantity, lot.unitCost),
+          reason,
+          occurredAt: movement.createdAt,
+        });
+      }
+      return movement;
+    });
   }
 
   // ---- Transfers ----

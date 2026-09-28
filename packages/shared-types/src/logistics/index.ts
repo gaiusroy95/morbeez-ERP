@@ -1,5 +1,6 @@
 // Mirrors apps/backend/src/modules/logistics/entities/*.
 import type { IsoDate, IsoDateTime } from '../common';
+import type { PaymentMethod } from '../finance';
 
 export type TripStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'reconciled';
 
@@ -12,7 +13,9 @@ export interface TripRecord {
   advanceAmount: string;
   startedAt: IsoDateTime | null;
   completedAt: IsoDateTime | null;
+  version: number;
   createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
 }
 
 export interface TripStopRecord {
@@ -28,10 +31,12 @@ export interface TripStopRecord {
   notes: string | null;
 }
 
+export type ExpenseCategory = 'fuel' | 'toll' | 'labour' | 'other';
+
 export interface TripExpenseRecord {
   id: string;
   tripId: string;
-  category: 'fuel' | 'toll' | 'labour' | 'other';
+  category: ExpenseCategory;
   amount: string;
   notes: string | null;
   recordedAt: IsoDateTime;
@@ -43,7 +48,31 @@ export interface TripReconciliationRecord {
   advanceAmount: string;
   totalExpenses: string;
   cashReturned: string;
-  variance: string;
+  variance: string; // advance − (expenses + cash returned); positive = short
   notes: string | null;
   reconciledAt: IsoDateTime;
+}
+
+export interface CustomerCollectionRecord {
+  id: string;
+  tripStopId: string;
+  orderId: string;
+  amount: string;
+  method: PaymentMethod;
+  notes: string | null;
+  collectedAt: IsoDateTime;
+}
+
+// Request bodies.
+export interface CreateTripBody {
+  vehicleId: string;
+  driverEmployeeId: string;
+  plannedDate?: IsoDate;
+  advanceAmount?: number;
+}
+
+export interface ReconcileTripBody {
+  version: number;
+  cashReturned: number;
+  notes?: string;
 }

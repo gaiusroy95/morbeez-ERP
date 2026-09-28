@@ -10,6 +10,8 @@ import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { OrdersService } from '../orders/orders.service';
+import { ReceivablesService } from '../finance/receivables.service';
+import { LedgerService } from '../finance/ledger.service';
 import { TripsRepository } from './repositories/trips.repository';
 import { TripStopsRepository } from './repositories/trip-stops.repository';
 import { TripExpensesRepository } from './repositories/trip-expenses.repository';
@@ -61,7 +63,9 @@ export class LogisticsService {
     private readonly workforce: WorkforceService,
     private readonly procurement: ProcurementService,
     private readonly orders: OrdersService,
+    private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
+    private readonly ledger: LedgerService,
   ) {}
 
   // ---- Trips ----
@@ -179,6 +183,12 @@ export class LogisticsService {
       }
 
       const after = await this.trips.startWithClient(client, id, dto.version);
+      // The driver leaves with the advance now — it moves to "Cash with drivers".
+      await this.ledger.postTripAdvanceWithClient(client, tenantId, actorUserId, {
+        id,
+        advanceAmount: after.advanceAmount,
+        occurredAt: after.startedAt ?? new Date(),
+      });
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -556,14 +566,23 @@ export class LogisticsService {
       throw new ConflictException(`Cannot record an expense against a ${trip.status} trip`);
     }
 
-    return this.db.withTenant(tenantId, (client) =>
-      this.expenses.createWithClient(client, actorUserId, {
+    return this.db.withTenant(tenantId, async (client) => {
+      const expense = await this.expenses.createWithClient(client, actorUserId, {
         tripId,
         category: dto.category,
         amount: dto.amount,
         notes: dto.notes ?? null,
-      }),
-    );
+      });
+      await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
+        id: expense.id,
+        tripId,
+        category: expense.category,
+        amount: expense.amount,
+        notes: expense.notes,
+        occurredAt: expense.recordedAt,
+      });
+      return expense;
+    });
   }
 
   // ---- Collections ----
@@ -580,7 +599,12 @@ export class LogisticsService {
     return this.db.withTenant(tenantId, (client) => this.collections.listByStopWithClient(client, stopId));
   }
 
-  /** Cash/payment collected from the customer at a delivery stop — an operational fact, not a ledger posting (see the entity comment). */
+  /**
+   * Cash/payment collected from the customer at a delivery stop. Logistics
+   * keeps the capture (who collected what, at which stop); Finance records
+   * it as a customer payment, applied to that order's invoice, with its
+   * ledger entry, in the same transaction.
+   */
   async recordCollection(
     tenantId: string,
     actorUserId: string,
@@ -595,15 +619,27 @@ export class LogisticsService {
       throw new BadRequestException('Collections can only be recorded against a delivery stop');
     }
 
-    return this.db.withTenant(tenantId, (client) =>
-      this.collections.createWithClient(client, tenantId, actorUserId, {
+    const order = await this.orders.getOrder(tenantId, stop.orderId as string);
+
+    return this.db.withTenant(tenantId, async (client) => {
+      const collection = await this.collections.createWithClient(client, tenantId, actorUserId, {
         tripStopId: stopId,
-        orderId: stop.orderId as string,
+        orderId: order.id,
         amount: dto.amount,
         method: dto.method,
         notes: dto.notes ?? null,
-      }),
-    );
+      });
+      await this.receivables.recordCollectionPaymentWithClient(client, tenantId, actorUserId, {
+        collectionId: collection.id,
+        customerId: order.customerId,
+        orderId: order.id,
+        amount: collection.amount,
+        method: collection.method,
+        notes: collection.notes,
+        collectedAt: collection.collectedAt,
+      });
+      return collection;
+    });
   }
 
   // ---- Reconciliation ----
@@ -614,8 +650,9 @@ export class LogisticsService {
 
   /**
    * variance = advance - (expenses + cashReturned). Zero means the driver
-   * fully accounted for the float; positive means cash is missing. Not a
-   * double-entry posting — see the entity comment. Deliberately not
+   * fully accounted for the float; positive means cash is missing. Posted
+   * to the ledger in the same transaction (LedgerService: the float clears
+   * to cash on hand, any gap to cash shortage or cash over). Deliberately not
    * ownership-scoped: reconciliation is a supervisory action, gated by its
    * own logistics:reconcile permission, over any driver's trip.
    */
@@ -643,6 +680,14 @@ export class LogisticsService {
         cashReturned: dto.cashReturned,
         variance,
         notes: dto.notes ?? null,
+      });
+      await this.ledger.postTripReconciliationWithClient(client, tenantId, actorUserId, {
+        id: reconciliation.id,
+        tripId,
+        advanceAmount: reconciliation.advanceAmount,
+        totalExpenses: reconciliation.totalExpenses,
+        cashReturned: reconciliation.cashReturned,
+        occurredAt: reconciliation.reconciledAt,
       });
 
       const after = await this.trips.markReconciledWithClient(client, tripId, dto.version);

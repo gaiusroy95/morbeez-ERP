@@ -6,9 +6,11 @@ import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { EmptyRow, Figures, FilterTabs, PageHeader, SelectableRow } from '@/components/ui/ListControls';
 import { DetailPanel } from '@/components/ui/DetailPanel';
+import { ActionBar } from '@/components/ui/Form';
 import { AgingBar } from '@/components/finance/AgingBar';
 import { CashChart } from '@/components/finance/CashChart';
-import { useCashFlow, usePayables, useReceivables, useTripCash, useUnsettledLots } from '@/lib/hooks/use-modules';
+import { CustomerPaymentDialog, FarmerPaymentDialog } from '@/components/forms/PaymentDialogs';
+import { useCashFlow, usePayableLots, usePayables, useReceivables, useTripCash } from '@/lib/hooks/use-modules';
 import { useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { daysSince, formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
@@ -32,6 +34,9 @@ function useTimeZone() {
 function Receivables() {
   const { data, error, isPending, refetch } = useReceivables();
   const timeZone = useTimeZone();
+  const { data: session } = useSession();
+  const canCollect = hasPermission(session, 'finance:collect');
+  const [paying, setPaying] = useState<{ id: string; name: string } | null>(null);
   if (isPending) return <Panel title="Receivables"><SkeletonLines lines={6} /></Panel>;
   if (error) return <Panel title="Receivables"><ErrorState error={error} onRetry={() => refetch()} /></Panel>;
 
@@ -55,10 +60,11 @@ function Receivables() {
             tone: Number(totals.overdue) > 0 ? 'bad' : undefined,
           },
           { label: 'Not yet due', value: formatMoney(totals.notYetDue, currency) },
+          { label: 'Held on account', value: formatMoney(totals.creditOnAccount, currency) },
           { label: 'Customers owing', value: String(owing.length) },
         ]}
       />
-      <Panel title="Outstanding by age" meta="due = delivery date + the customer's payment terms">
+      <Panel title="Outstanding by age" meta="each invoice is due on its issue date + the customer's payment terms">
         <AgingBar receivable={buckets} currency={currency} />
       </Panel>
       <Panel title="By customer">
@@ -73,14 +79,23 @@ function Receivables() {
                 <th className="align-right">31–60 late</th>
                 <th className="align-right">60+ late</th>
                 <th className="align-right">Last payment</th>
+                {canCollect && <th />}
               </tr>
             </thead>
             <tbody>
-              {owing.length === 0 && <EmptyRow colSpan={7}>No customer owes anything right now.</EmptyRow>}
+              {owing.length === 0 && (
+                <EmptyRow colSpan={canCollect ? 8 : 7}>No customer owes anything right now.</EmptyRow>
+              )}
               {owing.map((c) => (
                 <tr key={c.customerId}>
                   <td>
                     {c.customerName}
+                    {c.creditHold && (
+                      <>
+                        {' '}
+                        <StatusBadge status="credit_hold" tone="bad" label="On hold" />
+                      </>
+                    )}
                     <div className="cell-sub">{c.paymentTermsDays === 0 ? 'Pays on delivery' : `${c.paymentTermsDays}-day terms`}</div>
                   </td>
                   <td className="align-right strong">{formatMoney(c.outstanding, currency)}</td>
@@ -95,12 +110,31 @@ function Receivables() {
                     {moneyOrDash(c.overdueOver60, currency)}
                   </td>
                   <td className="align-right">{formatDateTime(c.lastCollectionAt, timeZone)}</td>
+                  {canCollect && (
+                    <td>
+                      <button
+                        type="button"
+                        className="button button-small"
+                        onClick={() => setPaying({ id: c.customerId, name: c.customerName })}
+                      >
+                        Record payment
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Panel>
+      {paying && (
+        <CustomerPaymentDialog
+          customerId={paying.id}
+          customerName={paying.name}
+          currency={currency}
+          onClose={() => setPaying(null)}
+        />
+      )}
     </>
   );
 }
@@ -111,11 +145,43 @@ function moneyOrDash(value: string, currency: string) {
 
 // ---- Payables ----
 
-function FarmerLots({ farmerId, farmerName, currency, onClose }: { farmerId: string; farmerName: string; currency: string; onClose: () => void }) {
-  const { data, error, isPending, refetch } = useUnsettledLots(farmerId);
+function FarmerLots({
+  farmerId,
+  farmerName,
+  advance,
+  currency,
+  onClose,
+}: {
+  farmerId: string;
+  farmerName: string;
+  advance: string;
+  currency: string;
+  onClose: () => void;
+}) {
+  const { data, error, isPending, refetch } = usePayableLots(farmerId);
   const timeZone = useTimeZone();
+  const { data: session } = useSession();
+  const canPay = hasPermission(session, 'finance:pay');
+  const [paying, setPaying] = useState(false);
+  const unpaid = (data ?? []).filter((lot) => Number(lot.outstanding) > 0);
   return (
     <DetailPanel title={`${farmerName} — unpaid lots`} onClose={onClose}>
+      {canPay && (
+        <ActionBar>
+          <button type="button" className="button button-primary" onClick={() => setPaying(true)}>
+            Pay {farmerName}
+          </button>
+        </ActionBar>
+      )}
+      {Number(advance) > 0 && (
+        <p className="action-note" data-tone="info">
+          {formatMoney(advance, currency)} paid in advance — it&apos;s drawn down automatically as this farmer&apos;s next
+          lots are graded.
+        </p>
+      )}
+      {paying && (
+        <FarmerPaymentDialog farmerId={farmerId} farmerName={farmerName} currency={currency} onClose={() => setPaying(false)} />
+      )}
       {isPending ? (
         <SkeletonLines lines={4} />
       ) : error ? (
@@ -129,18 +195,20 @@ function FarmerLots({ farmerId, farmerName, currency, onClose }: { farmerId: str
                 <th>Product</th>
                 <th className="align-right">Accepted</th>
                 <th className="align-right">Rate</th>
-                <th className="align-right">Owed</th>
+                <th className="align-right">Value</th>
+                <th className="align-right">Still owed</th>
               </tr>
             </thead>
             <tbody>
-              {data.length === 0 && <EmptyRow colSpan={5}>Nothing unpaid.</EmptyRow>}
-              {data.map((lot) => (
+              {unpaid.length === 0 && <EmptyRow colSpan={6}>Nothing unpaid.</EmptyRow>}
+              {unpaid.map((lot) => (
                 <tr key={lot.lotId}>
-                  <td>{formatDateTime(lot.gradedAt, timeZone)}</td>
+                  <td>{formatDateTime(lot.accruedAt, timeZone)}</td>
                   <td>{lot.productName}</td>
                   <td className="align-right">{formatQuantity(lot.acceptedQuantity)}</td>
                   <td className="align-right">{formatMoney(lot.unitCost, currency)}</td>
-                  <td className="align-right strong">{formatMoney(lot.value, currency)}</td>
+                  <td className="align-right">{formatMoney(lot.amount, currency)}</td>
+                  <td className="align-right strong">{formatMoney(lot.outstanding, currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -171,11 +239,12 @@ function Payables() {
             value: formatMoney(totals.overdue, currency),
             tone: Number(totals.overdue) > 0 ? 'bad' : undefined,
           },
-          { label: 'Farmers waiting', value: String(farmers.length) },
+          { label: 'Paid in advance', value: formatMoney(totals.advances, currency) },
+          { label: 'Farmers waiting', value: String(farmers.filter((f) => Number(f.owed) > 0).length) },
         ]}
       />
       <div className="split" data-detail={selectedFarmer ? 'open' : undefined}>
-        <Panel title="By farmer" meta="a lot is owed once graded, until it's settled">
+        <Panel title="By farmer" meta="a lot is owed once graded, until it's paid">
           <div className="table-wrap">
             <table className="table">
               <thead>
@@ -191,7 +260,7 @@ function Payables() {
               <tbody>
                 {farmers.length === 0 && <EmptyRow colSpan={6}>Every graded lot has been paid for.</EmptyRow>}
                 {farmers.map((f) => {
-                  const waiting = daysSince(f.oldestUnsettledGradedAt);
+                  const waiting = daysSince(f.oldestUnpaidAccruedAt);
                   return (
                     <SelectableRow
                       key={f.farmerId}
@@ -204,11 +273,11 @@ function Payables() {
                       <td className="align-right" data-tone={Number(f.overdue) > 0 ? 'bad' : undefined}>
                         {moneyOrDash(f.overdue, currency)}
                       </td>
-                      <td className="align-right">{f.unsettledLots}</td>
+                      <td className="align-right">{f.unpaidLots}</td>
                       <td className="align-right">
                         {waiting === null ? '—' : waiting === 0 ? 'Today' : `${waiting} day${waiting === 1 ? '' : 's'}`}
                       </td>
-                      <td className="align-right">{formatDateTime(f.lastSettledAt, timeZone)}</td>
+                      <td className="align-right">{formatDateTime(f.lastPaidAt, timeZone)}</td>
                     </SelectableRow>
                   );
                 })}
@@ -221,6 +290,7 @@ function Payables() {
             key={selectedFarmer.farmerId}
             farmerId={selectedFarmer.farmerId}
             farmerName={selectedFarmer.farmerName}
+            advance={selectedFarmer.advance}
             currency={currency}
             onClose={() => setSelected(null)}
           />
@@ -234,11 +304,16 @@ function Payables() {
 
 const KIND_LABEL: Record<CashMovementKind, string> = {
   collection: 'From customer',
-  settlement: 'To farmer',
+  collection_reversed: 'Payment reversed',
+  farmer_payment: 'To farmer',
   trip_expense: 'Trip expense',
+  finance_cost: 'Finance cost',
 };
 
-// Payment methods and expense categories, as people say them.
+// Payment methods, expense categories, and finance-cost categories, as
+// people say them. A reversal's detail is its free-text reason.
+
+
 const DETAIL_LABEL: Record<string, string> = {
   cash: 'Cash',
   upi: 'UPI',
@@ -248,6 +323,10 @@ const DETAIL_LABEL: Record<string, string> = {
   toll: 'Toll',
   labour: 'Labour',
   other: 'Other',
+  bank_charges: 'Bank charges',
+  interest: 'Interest',
+  payment_fee: 'Payment fee',
+  loan_processing: 'Loan processing',
 };
 
 function CashFlow() {
@@ -275,8 +354,9 @@ function CashFlow() {
       <Figures
         items={[
           { label: 'Collected from customers', value: formatMoney(totals.cashIn, currency) },
-          { label: 'Paid to farmers', value: formatMoney(totals.settlementsOut, currency) },
+          { label: 'Paid to farmers', value: formatMoney(totals.farmerPaymentsOut, currency) },
           { label: 'Trip expenses', value: formatMoney(totals.expensesOut, currency) },
+          { label: 'Finance costs', value: formatMoney(totals.financeCostsOut, currency) },
           {
             label: 'Net cash',
             value: formatMoney(totals.net, currency),
@@ -310,6 +390,7 @@ function CashFlow() {
                   <td>{m.counterparty}</td>
                   <td>{DETAIL_LABEL[m.detail] ?? m.detail.replace(/_/g, ' ')}</td>
                   <td className="align-right" data-tone={m.kind === 'collection' ? 'good' : undefined}>
+                    {/* Only a collection brings cash in; a reversal gives it back. */}
                     {m.kind === 'collection' ? '+' : '−'}
                     {formatMoney(m.amount, currency)}
                   </td>
@@ -457,7 +538,7 @@ export default function FinancePage() {
   const header = (
     <PageHeader
       title="Finance"
-      subtitle="Who owes you, whom you owe, and where the cash went. Operating figures — not yet the ledger."
+      subtitle="Who owes you, whom you owe, and where the cash went — from invoices and payments on the ledger."
     />
   );
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -9,6 +9,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { UpdateCreditTermsDto } from './dto/update-credit-terms.dto';
 import { CustomerRecord } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 
@@ -51,6 +52,16 @@ export class CustomersController {
     @Body() dto: UpdateCustomerDto,
   ): Promise<CustomerRecord> {
     return this.customersService.update(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post(':id/credit-terms')
+  @RequirePermissions('customers:credit')
+  updateCreditTerms(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCreditTermsDto,
+  ): Promise<CustomerRecord> {
+    return this.customersService.updateCreditTerms(user.tenantId, user.userId, id, dto);
   }
 
   @Post(':id/archive')

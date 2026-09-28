@@ -6,6 +6,8 @@ import { ApprovalsService } from '../approvals/approvals.service';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { ReceivablesService } from '../finance/receivables.service';
+import { sumMoney } from '../../common/money';
 import { OrdersRepository } from './repositories/orders.repository';
 import { OrderRecord, OrderStatus } from './entities/customer-order.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
@@ -29,6 +31,7 @@ export class OrdersService {
     private readonly products: ProductsService,
     private readonly procurement: ProcurementService,
     private readonly approvals: ApprovalsService,
+    private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
   ) {}
 
@@ -160,6 +163,10 @@ export class OrdersService {
     }
 
     if (request.status === 'approved') {
+      // Approval may have taken days; the customer's balance or hold may
+      // have changed since confirmOrder checked it.
+      const orderTotal = await this.db.withTenant(tenantId, (client) => this.orders.computeTotalWithClient(client, id));
+      await this.assertWithinCreditLimit(tenantId, before.customerId, id, orderTotal);
       return this.reserveAndConfirm(tenantId, actorUserId, before);
     }
 
@@ -211,12 +218,25 @@ export class OrdersService {
   }
 
   /**
-   * Called by Logistics — its public API, so Logistics never touches
-   * OrdersRepository directly (Constitution I.3-I.4). No inventory or
-   * accounting side effect yet; see the OrderStatus comment on 'delivered'.
+   * Called by Logistics (its public API, so Logistics never touches
+   * OrdersRepository directly, Constitution I.3-I.4). One transaction:
+   * the order is delivered, the lots reserved for it are consumed, and
+   * Finance issues the invoice and recognises the cost of goods (Event
+   * Catalog, Delivery Completed / Invoice Issued). Either all of it
+   * happens or none of it does.
    */
   async markDelivered(tenantId: string, actorUserId: string, id: string, expectedVersion: number): Promise<OrderRecord> {
-    const delivered = await this.db.withTenant(tenantId, async (client) => {
+    const order = await this.getOrder(tenantId, id);
+    // Names for the invoice lines, read before the transaction opens so it
+    // never waits on a second pooled connection.
+    const names = new Map<string, string>();
+    for (const line of order.lines ?? []) {
+      if (!names.has(line.productId)) {
+        names.set(line.productId, (await this.products.getById(tenantId, line.productId)).name);
+      }
+    }
+
+    return this.db.withTenant(tenantId, async (client) => {
       const before = await this.orders.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Order not found');
 
@@ -230,25 +250,44 @@ export class OrdersService {
         before: before as unknown as Record<string, unknown>,
         after: after as unknown as Record<string, unknown>,
       });
-      return { after, lines: before.lines ?? [] };
-    });
 
-    // The goods have left: consume the lots reserved for each line. A
-    // separate transaction per line, the same cross-module pattern as
-    // reservation itself.
-    for (const line of delivered.lines) {
-      await this.procurement.consumeLotsForOrderLine(tenantId, actorUserId, line.id);
-    }
-    return delivered.after;
+      const lines = before.lines ?? [];
+      const lineCosts: string[] = [];
+      for (const line of lines) {
+        const cost = await this.procurement.consumeLotsForOrderLineWithClient(
+          client,
+          tenantId,
+          actorUserId,
+          line.id,
+          line.quantity,
+        );
+        if (cost !== null) lineCosts.push(cost);
+      }
+
+      await this.receivables.issueSaleInvoiceWithClient(client, tenantId, actorUserId, {
+        orderId: id,
+        customerId: before.customerId,
+        deliveredAt: new Date(),
+        lines: lines.map((line) => ({
+          orderLineId: line.id,
+          productId: line.productId,
+          description: names.get(line.productId) ?? 'Product',
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+        })),
+        costOfGoods: lineCosts.length > 0 ? sumMoney(lineCosts) : null,
+      });
+      return after;
+    });
   }
 
   /**
-   * Credit check: this order's total plus every other 'confirmed' order's
-   * total for the same customer must stay within their credit limit. A
-   * hard block, not an approval-overridable gate — there is no Finance/AR
-   * module yet to give a real-time balance an override could safely be
-   * checked against, so the safest behavior is to refuse outright rather
-   * than let a manager approve past a number nobody can fully verify yet.
+   * Credit check, the customer's full exposure: what they owe now per
+   * Finance (open invoices, including finance charges, net of credit on
+   * account) + every other confirmed-but-undelivered order + this one, must
+   * stay within their credit limit. A customer on credit hold can't have
+   * any order confirmed. Both are hard blocks, not approval-overridable:
+   * lifting a hold or raising a limit is a customers:credit decision.
    */
   private async assertWithinCreditLimit(
     tenantId: string,
@@ -257,15 +296,23 @@ export class OrdersService {
     orderTotal: number,
   ): Promise<void> {
     const customer = await this.customers.getById(tenantId, customerId);
-    const exposure = await this.db.withTenant(tenantId, (client) =>
-      this.orders.computeCustomerExposureWithClient(client, customerId, orderId),
-    );
+    if (customer.creditHold) {
+      throw new ConflictException(`${customer.name} is on credit hold: ${customer.creditHoldReason ?? 'no reason recorded'}`);
+    }
+
+    const { openOrders, balance } = await this.db.withTenant(tenantId, async (client) => ({
+      openOrders: await this.orders.computeCustomerExposureWithClient(client, customerId, orderId),
+      balance: await this.receivables.customerBalanceWithClient(client, customerId),
+    }));
+    const owed = Number(balance.balance);
+    const exposure = owed + openOrders;
     const creditLimit = Number(customer.creditLimit);
 
     if (exposure + orderTotal > creditLimit) {
       throw new ConflictException(
         `Confirming this order would exceed ${customer.name}'s credit limit ` +
-          `(limit ${creditLimit}, existing exposure ${exposure}, this order ${orderTotal})`,
+          `(limit ${creditLimit.toFixed(2)}, owed ${owed.toFixed(2)}, other open orders ${openOrders.toFixed(2)}, ` +
+          `this order ${orderTotal.toFixed(2)})`,
       );
     }
   }

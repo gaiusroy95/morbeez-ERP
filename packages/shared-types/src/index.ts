@@ -6,3 +6,5 @@ export * from './procurement';
 export * from './inventory';
 export * from './logistics';
 export * from './finance';
+export * from './approvals';
+export * from './accounting';

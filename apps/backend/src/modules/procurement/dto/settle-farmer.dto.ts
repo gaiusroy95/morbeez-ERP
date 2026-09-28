@@ -4,8 +4,10 @@ import { SettlementMethod } from '../entities/farmer-settlement.entity';
 
 const VALID_METHODS: SettlementMethod[] = ['cash', 'bank_transfer', 'upi', 'cheque'];
 
-// No version field — a settlement is created once, never updated
-// (money.farmer_settlement has no version column; see the entity comment).
+// Pays one lot through Finance (a farmer payment allocated to this lot;
+// anything beyond what's owed becomes an advance). No version field: a
+// payment is recorded once, never updated. POST /finance/farmer-payments
+// pays several lots at once.
 export class SettleFarmerDto {
   @ApiProperty({ minimum: 0 })
   @IsNumber({ maxDecimalPlaces: 2 })

@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsNumber, IsPositive, IsUUID, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsNumber, IsOptional, IsPositive, IsUUID, ValidateNested } from 'class-validator';
 
 export class ReceivedLineDto {
   @ApiProperty()
@@ -24,6 +24,10 @@ export class ReceiveGoodsDto {
   @Type(() => ReceivedLineDto)
   lines!: ReceivedLineDto[];
 
+  // Validators are required, not decorative: the global ValidationPipe runs
+  // with forbidNonWhitelisted, so an undecorated property is rejected.
   @ApiProperty({ required: false })
+  @IsOptional()
+  @IsUUID()
   pickupId?: string;
 }

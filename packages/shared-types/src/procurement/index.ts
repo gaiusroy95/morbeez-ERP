@@ -1,5 +1,6 @@
 // Mirrors apps/backend/src/modules/procurement/entities/*.
 import type { IsoDate, IsoDateTime } from '../common';
+import type { PaymentMethod } from '../finance';
 
 export type PurchaseOrderStatus = 'placed' | 'confirmed' | 'cancelled' | 'received' | 'graded' | 'closed';
 
@@ -19,6 +20,7 @@ export interface PurchaseOrderRecord {
   approvalRequestId: string | null;
   version: number;
   createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
   lines?: PurchaseOrderLineRecord[]; // detail only
   expectedValue?: string; // list rows only
 }
@@ -30,6 +32,7 @@ export interface LotRecord {
   purchaseOrderId: string;
   farmerId: string;
   productId: string;
+  pickupId: string | null;
   receivedQuantity: string;
   acceptedQuantity: string | null;
   rejectedQuantity: string | null;
@@ -42,22 +45,50 @@ export interface LotRecord {
   currentLocationId: string | null;
   receivedAt: IsoDateTime;
   gradedAt: IsoDateTime | null;
+  version: number;
 }
 
 export interface PickupRecord {
   id: string;
   purchaseOrderId: string;
+  farmerId: string;
+  vehicleId: string | null;
+  driverEmployeeId: string | null;
   status: 'scheduled' | 'completed' | 'cancelled';
   scheduledAt: IsoDateTime | null;
   pickedUpAt: IsoDateTime | null;
   notes: string | null;
+  version: number;
 }
 
-export interface FarmerSettlementRecord {
-  id: string;
-  lotId: string;
+// Request bodies.
+export interface CreatePurchaseOrderBody {
   farmerId: string;
-  amount: string;
-  method: 'cash' | 'bank_transfer' | 'upi' | 'cheque';
-  settledAt: IsoDateTime;
+  lines: { productId: string; expectedQuantity: number; indicativePrice: number }[];
+}
+
+export interface ReceiveGoodsBody {
+  lines: { productId: string; receivedQuantity: number }[];
+  pickupId?: string;
+}
+
+export interface GradeLotBody {
+  version: number;
+  acceptedQuantity: number;
+  rejectedQuantity: number;
+  grade?: string;
+  rejectionReason?: string;
+  unitCost?: number;
+}
+
+export interface SchedulePickupBody {
+  vehicleId?: string;
+  driverEmployeeId?: string;
+  scheduledAt?: IsoDateTime;
+}
+
+export interface SettleLotBody {
+  amount: number;
+  method: PaymentMethod;
+  notes?: string;
 }

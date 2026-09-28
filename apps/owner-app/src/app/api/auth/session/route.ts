@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
   }
 
   const response = NextResponse.json({
+    userId: claims.userId,
     email: claims.email,
     roles: claims.roles,
     permissions: claims.permissions,

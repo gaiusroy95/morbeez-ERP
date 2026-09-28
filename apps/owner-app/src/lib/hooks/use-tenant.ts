@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 // Reads the signed-in user's role/permission context, for UI decisions
 // only — the backend is the real gate (System Architecture FE.5).
 export interface Session {
+  userId: string;
   email: string;
   roles: string[];
   permissions: string[];

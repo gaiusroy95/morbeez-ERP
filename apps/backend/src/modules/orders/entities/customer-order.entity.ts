@@ -1,8 +1,8 @@
-// 'delivered' added for Logistics — a confirmed order's terminal state
-// once a Trip's delivery stop for it completes. Delivery consumes the lots
-// reserved for the order (reserved -> delivered, OrdersService.markDelivered).
-// A COGS-at-delivery journal entry (Accounting Engine) is not posted yet —
-// there is no Accounting module to post against.
+// 'delivered' added for Logistics: a confirmed order's terminal state once
+// a Trip's delivery stop for it completes. Delivery consumes the lots
+// reserved for the order (reserved -> delivered), and Finance issues its
+// invoice and posts revenue and cost of goods, in one transaction
+// (OrdersService.markDelivered).
 export type OrderStatus = 'placed' | 'confirmed' | 'cancelled' | 'delivered';
 
 export interface OrderLineRecord {

@@ -14,6 +14,8 @@ import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { OrdersService } from '../orders/orders.service';
+import { ReceivablesService } from '../finance/receivables.service';
+import { LedgerService } from '../finance/ledger.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { TripRecord } from './entities/trip.entity';
@@ -142,6 +144,8 @@ describe('LogisticsService', () => {
   let workforce: jest.Mocked<WorkforceService>;
   let procurement: jest.Mocked<ProcurementService>;
   let orders: jest.Mocked<OrdersService>;
+  let receivables: jest.Mocked<ReceivablesService>;
+  let ledger: jest.Mocked<LedgerService>;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
@@ -203,6 +207,15 @@ describe('LogisticsService', () => {
           useValue: { getPickup: jest.fn(), completePickup: jest.fn() },
         },
         { provide: OrdersService, useValue: { getOrder: jest.fn(), markDelivered: jest.fn() } },
+        { provide: ReceivablesService, useValue: { recordCollectionPaymentWithClient: jest.fn() } },
+        {
+          provide: LedgerService,
+          useValue: {
+            postTripAdvanceWithClient: jest.fn(),
+            postTripExpenseWithClient: jest.fn(),
+            postTripReconciliationWithClient: jest.fn(),
+          },
+        },
         {
           provide: DatabaseService,
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
@@ -223,6 +236,8 @@ describe('LogisticsService', () => {
     workforce = module.get(WorkforceService);
     procurement = module.get(ProcurementService);
     orders = module.get(OrdersService);
+    receivables = module.get(ReceivablesService);
+    ledger = module.get(LedgerService);
   });
 
   it('is defined', () => {
@@ -298,6 +313,44 @@ describe('LogisticsService', () => {
     await expect(
       service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('startTrip posts the cash advance in the same transaction', async () => {
+    const startedAt = new Date('2026-09-20T03:00:00Z');
+    trips.findById.mockResolvedValue(baseTrip);
+    stops.countWithClient.mockResolvedValue(2);
+    trips.startWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', advanceAmount: '1000.00', startedAt, version: 2 });
+
+    await service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 });
+
+    expect(ledger.postTripAdvanceWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'dispatcher-1', {
+      id: 'trip-1',
+      advanceAmount: '1000.00',
+      occurredAt: startedAt,
+    });
+  });
+
+  it('recordExpense posts the expense to its transport account', async () => {
+    const recordedAt = new Date();
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    expenses.createWithClient.mockResolvedValue({
+      id: 'expense-1',
+      tripId: 'trip-1',
+      category: 'toll',
+      amount: '85.00',
+      notes: null,
+      recordedBy: 'dispatcher-1',
+      recordedAt,
+    });
+
+    await service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'toll', amount: 85 });
+
+    expect(ledger.postTripExpenseWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      'tenant-1',
+      'dispatcher-1',
+      expect.objectContaining({ id: 'expense-1', category: 'toll', amount: '85.00', occurredAt: recordedAt }),
+    );
   });
 
   it('addPickupStop requires the trip to still be planned', async () => {
@@ -448,8 +501,9 @@ describe('LogisticsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('recordCollection records a payment against a delivery stop', async () => {
+  it('recordCollection records the capture and a Finance payment for the order, in one transaction', async () => {
     trips.findById.mockResolvedValue(baseTrip);
+    orders.getOrder.mockResolvedValue({ id: 'order-1', customerId: 'customer-1' } as never);
     stops.findByIdWithClient.mockResolvedValue(
       makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }),
     );
@@ -476,6 +530,12 @@ describe('LogisticsService', () => {
       'tenant-1',
       'dispatcher-1',
       expect.objectContaining({ tripStopId: 'stop-1', orderId: 'order-1', amount: 500, method: 'cash' }),
+    );
+    expect(receivables.recordCollectionPaymentWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'dispatcher-1',
+      expect.objectContaining({ collectionId: 'collection-1', customerId: 'customer-1', orderId: 'order-1', amount: '500', method: 'cash' }),
     );
   });
 
@@ -515,6 +575,13 @@ describe('LogisticsService', () => {
     const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 180 });
 
     expect(result.variance).toBe('20');
+    // Posted from the stored record, in the same transaction.
+    expect(ledger.postTripReconciliationWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ id: 'recon-1', tripId: 'trip-1', advanceAmount: '500', totalExpenses: '300', cashReturned: '180' }),
+    );
   });
 
   it('reconcileTrip refuses a trip that is not completed', async () => {

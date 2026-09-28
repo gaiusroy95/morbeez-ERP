@@ -7,6 +7,7 @@ import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { ApprovalsService } from '../approvals/approvals.service';
+import { ReceivablesService } from '../finance/receivables.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { OrderRecord } from './entities/customer-order.entity';
@@ -35,6 +36,10 @@ const baseCustomer: CustomerRecord = {
   contact: {},
   creditLimit: '1000',
   paymentTermsDays: 30,
+  financeChargeRateMonthly: '0.00',
+  financeChargeGraceDays: 0,
+  creditHold: false,
+  creditHoldReason: null,
   status: 'active',
   version: 1,
   createdAt: new Date(),
@@ -63,6 +68,7 @@ describe('OrdersService', () => {
   let products: jest.Mocked<ProductsService>;
   let procurement: jest.Mocked<ProcurementService>;
   let approvals: jest.Mocked<ApprovalsService>;
+  let receivables: jest.Mocked<ReceivablesService>;
   let audit: jest.Mocked<AuditService>;
 
   beforeEach(async () => {
@@ -91,7 +97,20 @@ describe('OrdersService', () => {
           useValue: {
             reserveLotsForOrderLine: jest.fn(),
             releaseLotsForOrderLine: jest.fn(),
-            consumeLotsForOrderLine: jest.fn(),
+            consumeLotsForOrderLineWithClient: jest.fn(),
+          },
+        },
+        {
+          provide: ReceivablesService,
+          useValue: {
+            customerBalanceWithClient: jest.fn().mockResolvedValue({
+              invoicedOutstanding: '0.00',
+              unappliedCredit: '0.00',
+              balance: '0.00',
+              overdue: '0.00',
+              oldestOverdueDays: null,
+            }),
+            issueSaleInvoiceWithClient: jest.fn(),
           },
         },
         { provide: ApprovalsService, useValue: { evaluate: jest.fn(), getRequest: jest.fn() } },
@@ -109,6 +128,7 @@ describe('OrdersService', () => {
     products = module.get(ProductsService);
     procurement = module.get(ProcurementService);
     approvals = module.get(ApprovalsService);
+    receivables = module.get(ReceivablesService);
     audit = module.get(AuditService);
   });
 
@@ -155,6 +175,41 @@ describe('OrdersService', () => {
       ConflictException,
     );
     expect(approvals.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('confirmOrder counts what the customer already owes toward the credit limit', async () => {
+    orders.findById.mockResolvedValue(baseOrder);
+    orders.computeTotalWithClient.mockResolvedValue(500);
+    customers.getById.mockResolvedValue({ ...baseCustomer, creditLimit: '1000' });
+    orders.computeCustomerExposureWithClient.mockResolvedValue(200);
+    receivables.customerBalanceWithClient.mockResolvedValue({
+      invoicedOutstanding: '450.00',
+      unappliedCredit: '50.00',
+      balance: '400.00',
+      overdue: '0.00',
+      oldestOverdueDays: null,
+    });
+
+    // owed 400 + other open orders 200 + this order 500 = 1100 > 1000
+    await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toThrow(
+      /owed 400\.00, other open orders 200\.00, this order 500\.00/,
+    );
+    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
+  });
+
+  it('confirmOrder refuses a customer on credit hold, whatever the limit', async () => {
+    orders.findById.mockResolvedValue(baseOrder);
+    orders.computeTotalWithClient.mockResolvedValue(10);
+    customers.getById.mockResolvedValue({
+      ...baseCustomer,
+      creditLimit: '1000000',
+      creditHold: true,
+      creditHoldReason: 'Cheque bounced twice',
+    });
+
+    await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toThrow(
+      /credit hold: Cheque bounced twice/,
+    );
   });
 
   it('confirmOrder reserves stock for every line and confirms when no approval is required', async () => {
@@ -225,10 +280,24 @@ describe('OrdersService', () => {
     approvals.getRequest.mockResolvedValue({ status: 'approved' } as never);
     procurement.reserveLotsForOrderLine.mockResolvedValue([]);
     orders.confirmWithClient.mockResolvedValue({ ...awaiting, status: 'confirmed' });
+    orders.computeTotalWithClient.mockResolvedValue(500);
+    orders.computeCustomerExposureWithClient.mockResolvedValue(0);
+    customers.getById.mockResolvedValue(baseCustomer);
 
     const result = await service.finalizeConfirmation('tenant-1', 'user-1', 'order-1');
 
     expect(result.status).toBe('confirmed');
+  });
+
+  it('finalizeConfirmation re-checks credit: an approved order still cannot pass a hold placed since', async () => {
+    const awaiting = { ...baseOrder, approvalRequestId: 'req-1' };
+    orders.findById.mockResolvedValue(awaiting);
+    approvals.getRequest.mockResolvedValue({ status: 'approved' } as never);
+    orders.computeTotalWithClient.mockResolvedValue(500);
+    customers.getById.mockResolvedValue({ ...baseCustomer, creditHold: true, creditHoldReason: 'Overdue 60+ days' });
+
+    await expect(service.finalizeConfirmation('tenant-1', 'user-1', 'order-1')).rejects.toBeInstanceOf(ConflictException);
+    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
   });
 
   it('finalizeConfirmation cancels the order once the approval request is rejected', async () => {
@@ -270,14 +339,57 @@ describe('OrdersService', () => {
     expect(procurement.releaseLotsForOrderLine).not.toHaveBeenCalled();
   });
 
-  it('markDelivered consumes the lots reserved for every line once the order is delivered', async () => {
-    const confirmed: OrderRecord = { ...baseOrder, status: 'confirmed' };
+  it('markDelivered consumes lots and has Finance invoice the order, in one transaction', async () => {
+    const confirmed: OrderRecord = {
+      ...baseOrder,
+      status: 'confirmed',
+      lines: [
+        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10.000', unitPrice: '50.00' },
+        { id: 'line-2', orderId: 'order-1', productId: 'product-1', quantity: '4.000', unitPrice: '55.00' },
+      ],
+    };
+    orders.findById.mockResolvedValue(confirmed);
     orders.findByIdWithClient.mockResolvedValue(confirmed);
     orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
+    products.getById.mockResolvedValue(baseProduct);
+    procurement.consumeLotsForOrderLineWithClient.mockResolvedValueOnce('320.50').mockResolvedValueOnce('130.25');
 
     const result = await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
 
     expect(result.status).toBe('delivered');
-    expect(procurement.consumeLotsForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', 'line-1');
+    expect(procurement.consumeLotsForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'line-1', '10.000');
+    expect(procurement.consumeLotsForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'line-2', '4.000');
+    expect(receivables.issueSaleInvoiceWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({
+        orderId: 'order-1',
+        customerId: 'customer-1',
+        costOfGoods: '450.75',
+        lines: [
+          expect.objectContaining({ orderLineId: 'line-1', description: 'Tomato', quantity: '10.000', unitPrice: '50.00' }),
+          expect.objectContaining({ orderLineId: 'line-2', description: 'Tomato', quantity: '4.000', unitPrice: '55.00' }),
+        ],
+      }),
+    );
+  });
+
+  it('markDelivered passes no cost of goods when no delivered lot was costed', async () => {
+    const confirmed: OrderRecord = { ...baseOrder, status: 'confirmed' };
+    orders.findById.mockResolvedValue(confirmed);
+    orders.findByIdWithClient.mockResolvedValue(confirmed);
+    orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
+    products.getById.mockResolvedValue(baseProduct);
+    procurement.consumeLotsForOrderLineWithClient.mockResolvedValue(null);
+
+    await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
+
+    expect(receivables.issueSaleInvoiceWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ costOfGoods: null }),
+    );
   });
 });

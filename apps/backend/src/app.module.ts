@@ -20,6 +20,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { LogisticsModule } from './modules/logistics/logistics.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { AccountingModule } from './modules/accounting/accounting.module';
+import { TaxModule } from './modules/tax/tax.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
 import { AiModule } from './modules/ai/ai.module';
@@ -48,6 +49,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     LogisticsModule,
     FinanceModule,
     AccountingModule,
+    TaxModule,
     WorkforceModule,
     VehiclesModule,
     AiModule,

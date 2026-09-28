@@ -1,17 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import {
-  IsInt,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
+import { IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
 
+// Deliberately no credit fields — limit, payment days, finance charges,
+// and credit hold change only through POST .../credit-terms, under its own
+// customers:credit permission (Constitution V.2).
 // Deliberately no `status` field here — archiving/restoring is a distinct
 // action with its own audit entry (POST .../archive, POST .../restore),
 // not a side effect of a general-purpose field update.
@@ -32,17 +26,4 @@ export class UpdateCustomerDto {
   @ValidateNested()
   @Type(() => CustomerContactDto)
   contact?: CustomerContactDto;
-
-  @ApiPropertyOptional({ minimum: 0 })
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0)
-  creditLimit?: number;
-
-  @ApiPropertyOptional({ minimum: 0, maximum: 180 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(180)
-  paymentTermsDays?: number;
 }

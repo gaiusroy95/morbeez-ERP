@@ -18,9 +18,11 @@ export interface ReceivableRow {
   customer_name: string;
   credit_limit: string;
   payment_terms_days: number;
-  delivered: string;
+  credit_hold: boolean;
+  invoiced: string;
   collected: string;
   outstanding: string;
+  credit_on_account: string;
   not_yet_due: string;
   overdue_1_30: string;
   overdue_31_60: string;
@@ -34,26 +36,30 @@ export interface PayableRow {
   farmer_name: string;
   owed: string;
   overdue: string;
-  unsettled_lots: number;
-  oldest_unsettled_graded_at: Date | null;
-  last_settled_at: Date | null;
+  unpaid_lots: number;
+  oldest_unpaid_accrued_at: Date | null;
+  advance: string;
+  last_paid_at: Date | null;
 }
 
-export interface UnsettledLotRow {
+export interface PayableLotRow {
   lot_id: string;
   purchase_order_id: string;
   product_id: string;
   product_name: string;
   accepted_quantity: string;
   unit_cost: string;
-  value: string;
-  graded_at: Date;
+  amount: string;
+  paid: string;
+  outstanding: string;
+  accrued_at: Date;
 }
 
 export interface CashTotalsRow {
   cash_in: string;
-  settlements_out: string;
+  farmer_payments_out: string;
   expenses_out: string;
+  finance_costs_out: string;
   net: string;
 }
 
@@ -63,9 +69,11 @@ export interface CashDayRow {
   cash_out: string;
 }
 
+export type CashMovementKindRow = 'collection' | 'collection_reversed' | 'farmer_payment' | 'trip_expense' | 'finance_cost';
+
 export interface CashMovementRow {
   at: Date;
-  kind: 'collection' | 'settlement' | 'trip_expense';
+  kind: CashMovementKindRow;
   counterparty: string;
   detail: string;
   amount: string;
@@ -93,18 +101,61 @@ export interface TripReconciledRow {
   variance: string;
 }
 
-// A lot is payable once graded with a positive accepted quantity and a
-// fixed unit cost, and stays payable until a farmer_settlement row exists
-// for it — the same definition the dashboard's payables balance uses.
-const UNSETTLED_LOT = `
-  l.unit_cost IS NOT NULL AND l.accepted_quantity > 0
-  AND NOT EXISTS (SELECT 1 FROM money.farmer_settlement fs WHERE fs.lot_id = l.id)`;
+export interface StatementRow {
+  at: Date;
+  kind: 'invoice' | 'finance_charge' | 'payment' | 'payment_reversal';
+  reference: string;
+  description: string;
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+export interface TrialBalanceRowDb {
+  account: string;
+  name: string;
+  root_type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+// Every movement of real money, as (instant, in, out, kind, …). Customer
+// money counts net of what the channel kept (the fee never reached us);
+// a reversal takes that same net amount back out. Farmer transfer fees and
+// recorded finance costs are outflows of their own. Trip expenses are paid
+// from the driver's float — cash that left, even though Logistics doesn't
+// post them to the ledger yet.
+const CASH_MOVEMENTS = `
+  SELECT p.received_at AS at, 'collection' AS kind, c.name AS counterparty, p.method AS detail,
+         (p.amount - p.fee_amount) AS cash_in, 0::numeric AS cash_out, p.id AS reference_id
+    FROM money.customer_payment p JOIN trading_partners.customer c ON c.id = p.customer_id
+  UNION ALL
+  SELECT r.reversed_at, 'collection_reversed', c.name, r.reason, 0, (p.amount - p.fee_amount), p.id
+    FROM money.customer_payment_reversal r
+    JOIN money.customer_payment p ON p.id = r.payment_id
+    JOIN trading_partners.customer c ON c.id = p.customer_id
+  UNION ALL
+  SELECT p.paid_at, 'farmer_payment', f.name, p.method, 0, p.amount, p.id
+    FROM money.farmer_payment p JOIN trading_partners.farmer f ON f.id = p.farmer_id
+  UNION ALL
+  SELECT p.paid_at, 'finance_cost', f.name, 'payment_fee', 0, p.fee_amount, p.id
+    FROM money.farmer_payment p JOIN trading_partners.farmer f ON f.id = p.farmer_id
+   WHERE p.fee_amount > 0
+  UNION ALL
+  SELECT fc.incurred_at, 'finance_cost', fc.description, fc.category, 0, fc.amount, fc.id
+    FROM money.finance_cost fc
+  UNION ALL
+  SELECT e.recorded_at, 'trip_expense', v.registration_number, e.category, 0, e.amount, e.trip_id
+    FROM fulfilment.trip_expense e
+    JOIN fulfilment.trip tr ON tr.id = e.trip_id
+    JOIN trading_partners.vehicle v ON v.id = tr.vehicle_id`;
 
 /**
- * A read model over Orders, Procurement, Logistics, and Money — the same
- * reporting exception DashboardRepository takes (System Architecture DB.4).
- * Never writes. RLS scopes every statement to the tenant; the client always
- * comes from DatabaseService.withTenant.
+ * A read model over Finance's own tables plus Orders, Procurement, and
+ * Logistics — the same reporting exception DashboardRepository takes
+ * (System Architecture DB.4). Never writes. RLS scopes every statement to
+ * the tenant; the client always comes from DatabaseService.withTenant.
  */
 @Injectable()
 export class FinanceRepository {
@@ -158,107 +209,103 @@ export class FinanceRepository {
   }
 
   /**
-   * One row per customer with anything delivered, collected, or open.
-   * Collections are recorded against a specific order, so each delivered
-   * order is aged on its own: due = delivery date + the customer's payment
-   * terms, and what's left unpaid on it lands in one aging bucket.
+   * One row per customer with anything invoiced, paid, or on order. Each
+   * open invoice lands in one aging bucket by its own due date (tenant-local
+   * today). Credit on account (unapplied payments) is shown beside the
+   * buckets rather than netted into them — it belongs to no invoice yet.
    */
   async receivables(client: PoolClient): Promise<ReceivableRow[]> {
     const result = await client.query<ReceivableRow>(
-      `WITH order_value AS (
-         SELECT o.id AS order_id, o.customer_id, o.status, SUM(ol.quantity * ol.unit_price) AS value
-         FROM commerce.customer_order o
-         JOIN commerce.customer_order_line ol ON ol.order_id = o.id
-         WHERE o.status IN ('confirmed', 'delivered')
-         GROUP BY o.id, o.customer_id, o.status
+      `WITH today AS (SELECT (now() AT TIME ZONE timezone)::date AS d FROM tenant.tenant WHERE id = current_tenant_id()),
+       inv AS (
+         SELECT b.customer_id,
+                SUM(b.amount) FILTER (WHERE b.kind = 'sale') AS invoiced,
+                SUM(b.outstanding) AS outstanding,
+                SUM(b.outstanding) FILTER (WHERE b.due_date >= today.d) AS not_yet_due,
+                SUM(b.outstanding) FILTER (WHERE today.d - b.due_date BETWEEN 1 AND 30) AS overdue_1_30,
+                SUM(b.outstanding) FILTER (WHERE today.d - b.due_date BETWEEN 31 AND 60) AS overdue_31_60,
+                SUM(b.outstanding) FILTER (WHERE today.d - b.due_date > 60) AS overdue_over_60
+         FROM money.invoice_balance b, today
+         GROUP BY b.customer_id
        ),
-       delivered_at AS (
-         SELECT s.order_id, MAX(s.completed_at) AS at
-         FROM fulfilment.trip_stop s
-         JOIN fulfilment.trip t ON t.id = s.trip_id
-         WHERE s.stop_type = 'delivery' AND s.status = 'completed'
-         GROUP BY s.order_id
+       pay AS (
+         SELECT customer_id,
+                SUM(amount) FILTER (WHERE reversed_at IS NULL) AS collected,
+                SUM(unapplied) AS credit_on_account,
+                MAX(received_at) FILTER (WHERE reversed_at IS NULL) AS last_collection_at
+         FROM money.customer_payment_balance
+         GROUP BY customer_id
        ),
-       collected AS (
-         SELECT order_id, SUM(amount) AS amount, MAX(collected_at) AS last_at
-         FROM money.customer_collection
-         GROUP BY order_id
-       ),
-       per_order AS (
-         SELECT ov.customer_id,
-                ov.status,
-                ov.value,
-                COALESCE(c.amount, 0) AS collected,
-                c.last_at,
-                GREATEST(ov.value - COALESCE(c.amount, 0), 0) AS unpaid,
-                (now()::date - (COALESCE(d.at, now())::date + cu.payment_terms_days)) AS days_overdue
-         FROM order_value ov
-         JOIN trading_partners.customer cu ON cu.id = ov.customer_id
-         LEFT JOIN delivered_at d ON d.order_id = ov.order_id
-         LEFT JOIN collected c ON c.order_id = ov.order_id
+       open_orders AS (
+         SELECT o.customer_id, SUM(ol.quantity * ol.unit_price) AS value
+         FROM commerce.customer_order o JOIN commerce.customer_order_line ol ON ol.order_id = o.id
+         WHERE o.status = 'confirmed'
+         GROUP BY o.customer_id
        )
-       SELECT cu.id AS customer_id,
-              cu.name AS customer_name,
-              cu.credit_limit::text AS credit_limit,
-              cu.payment_terms_days,
-              ROUND(COALESCE(SUM(po.value) FILTER (WHERE po.status = 'delivered'), 0), 2)::text AS delivered,
-              ROUND(COALESCE(SUM(po.collected), 0), 2)::text AS collected,
-              ROUND(COALESCE(SUM(po.unpaid) FILTER (WHERE po.status = 'delivered'), 0), 2)::text AS outstanding,
-              ROUND(COALESCE(SUM(po.unpaid) FILTER (WHERE po.status = 'delivered' AND po.days_overdue <= 0), 0), 2)::text AS not_yet_due,
-              ROUND(COALESCE(SUM(po.unpaid) FILTER (WHERE po.status = 'delivered' AND po.days_overdue BETWEEN 1 AND 30), 0), 2)::text AS overdue_1_30,
-              ROUND(COALESCE(SUM(po.unpaid) FILTER (WHERE po.status = 'delivered' AND po.days_overdue BETWEEN 31 AND 60), 0), 2)::text AS overdue_31_60,
-              ROUND(COALESCE(SUM(po.unpaid) FILTER (WHERE po.status = 'delivered' AND po.days_overdue > 60), 0), 2)::text AS overdue_over_60,
-              ROUND(COALESCE(SUM(po.value) FILTER (WHERE po.status = 'confirmed'), 0), 2)::text AS open_order_value,
-              MAX(po.last_at) AS last_collection_at
-       FROM per_order po
-       JOIN trading_partners.customer cu ON cu.id = po.customer_id
-       GROUP BY cu.id, cu.name, cu.credit_limit, cu.payment_terms_days
-       ORDER BY SUM(po.unpaid) FILTER (WHERE po.status = 'delivered') DESC NULLS LAST, cu.name`,
+       SELECT c.id AS customer_id, c.name AS customer_name, c.credit_limit::text AS credit_limit,
+              c.payment_terms_days, c.credit_hold,
+              ROUND(COALESCE(inv.invoiced, 0), 2)::text AS invoiced,
+              ROUND(COALESCE(pay.collected, 0), 2)::text AS collected,
+              ROUND(COALESCE(inv.outstanding, 0), 2)::text AS outstanding,
+              ROUND(COALESCE(pay.credit_on_account, 0), 2)::text AS credit_on_account,
+              ROUND(COALESCE(inv.not_yet_due, 0), 2)::text AS not_yet_due,
+              ROUND(COALESCE(inv.overdue_1_30, 0), 2)::text AS overdue_1_30,
+              ROUND(COALESCE(inv.overdue_31_60, 0), 2)::text AS overdue_31_60,
+              ROUND(COALESCE(inv.overdue_over_60, 0), 2)::text AS overdue_over_60,
+              ROUND(COALESCE(oo.value, 0), 2)::text AS open_order_value,
+              pay.last_collection_at
+       FROM trading_partners.customer c
+       LEFT JOIN inv ON inv.customer_id = c.id
+       LEFT JOIN pay ON pay.customer_id = c.id
+       LEFT JOIN open_orders oo ON oo.customer_id = c.id
+       WHERE inv.customer_id IS NOT NULL OR pay.customer_id IS NOT NULL OR oo.customer_id IS NOT NULL
+       ORDER BY COALESCE(inv.outstanding, 0) DESC, c.name`,
     );
     return result.rows;
   }
 
   async payables(client: PoolClient, overdueAfterDays: number): Promise<PayableRow[]> {
     const result = await client.query<PayableRow>(
-      `WITH unsettled AS (
-         SELECT l.farmer_id, l.accepted_quantity * l.unit_cost AS value, l.graded_at
-         FROM commerce.lot l
-         WHERE ${UNSETTLED_LOT}
+      `WITH owed AS (
+         SELECT farmer_id,
+                SUM(outstanding) AS owed,
+                SUM(outstanding) FILTER (WHERE accrued_at < now() - make_interval(days => $1)) AS overdue,
+                count(*) AS unpaid_lots,
+                MIN(accrued_at) AS oldest
+         FROM money.farmer_payable_balance WHERE outstanding > 0
+         GROUP BY farmer_id
        ),
-       settled AS (
-         SELECT farmer_id, MAX(settled_at) AS last_at FROM money.farmer_settlement GROUP BY farmer_id
+       paid AS (
+         SELECT farmer_id, SUM(unapplied) AS advance, MAX(paid_at) AS last_paid_at
+         FROM money.farmer_payment_balance GROUP BY farmer_id
        )
-       SELECT f.id AS farmer_id,
-              f.name AS farmer_name,
-              ROUND(SUM(u.value), 2)::text AS owed,
-              ROUND(COALESCE(SUM(u.value) FILTER (WHERE u.graded_at < now() - make_interval(days => $1)), 0), 2)::text AS overdue,
-              count(*)::int AS unsettled_lots,
-              MIN(u.graded_at) AS oldest_unsettled_graded_at,
-              s.last_at AS last_settled_at
-       FROM unsettled u
-       JOIN trading_partners.farmer f ON f.id = u.farmer_id
-       LEFT JOIN settled s ON s.farmer_id = f.id
-       GROUP BY f.id, f.name, s.last_at
-       ORDER BY SUM(u.value) DESC, f.name`,
+       SELECT f.id AS farmer_id, f.name AS farmer_name,
+              ROUND(COALESCE(owed.owed, 0), 2)::text AS owed,
+              ROUND(COALESCE(owed.overdue, 0), 2)::text AS overdue,
+              COALESCE(owed.unpaid_lots, 0)::int AS unpaid_lots,
+              owed.oldest AS oldest_unpaid_accrued_at,
+              ROUND(COALESCE(paid.advance, 0), 2)::text AS advance,
+              paid.last_paid_at
+       FROM trading_partners.farmer f
+       LEFT JOIN owed ON owed.farmer_id = f.id
+       LEFT JOIN paid ON paid.farmer_id = f.id
+       WHERE COALESCE(owed.owed, 0) > 0 OR COALESCE(paid.advance, 0) > 0
+       ORDER BY COALESCE(owed.owed, 0) DESC, f.name`,
       [overdueAfterDays],
     );
     return result.rows;
   }
 
-  async unsettledLotsForFarmer(client: PoolClient, farmerId: string): Promise<UnsettledLotRow[]> {
-    const result = await client.query<UnsettledLotRow>(
-      `SELECT l.id AS lot_id,
-              l.purchase_order_id,
-              l.product_id,
-              p.name AS product_name,
-              l.accepted_quantity::text AS accepted_quantity,
-              l.unit_cost::text AS unit_cost,
-              ROUND(l.accepted_quantity * l.unit_cost, 2)::text AS value,
-              l.graded_at
-       FROM commerce.lot l
+  async payableLotsForFarmer(client: PoolClient, farmerId: string): Promise<PayableLotRow[]> {
+    const result = await client.query<PayableLotRow>(
+      `SELECT b.lot_id, l.purchase_order_id, l.product_id, p.name AS product_name,
+              l.accepted_quantity::text AS accepted_quantity, l.unit_cost::text AS unit_cost,
+              b.amount::text AS amount, b.paid::text AS paid, b.outstanding::text AS outstanding, b.accrued_at
+       FROM money.farmer_payable_balance b
+       JOIN commerce.lot l ON l.id = b.lot_id
        JOIN trading_partners.product p ON p.id = l.product_id
-       WHERE l.farmer_id = $1 AND ${UNSETTLED_LOT}
-       ORDER BY l.graded_at`,
+       WHERE b.farmer_id = $1 AND b.outstanding > 0
+       ORDER BY b.accrued_at`,
       [farmerId],
     );
     return result.rows;
@@ -266,20 +313,19 @@ export class FinanceRepository {
 
   async cashTotals(client: PoolClient, startAt: Date, endAt: Date): Promise<CashTotalsRow> {
     const result = await client.query<CashTotalsRow>(
-      `WITH t AS (
-         SELECT
-           (SELECT COALESCE(SUM(amount), 0) FROM money.customer_collection
-             WHERE collected_at >= $1 AND collected_at < $2) AS cash_in,
-           (SELECT COALESCE(SUM(amount), 0) FROM money.farmer_settlement
-             WHERE settled_at >= $1 AND settled_at < $2) AS settlements_out,
-           (SELECT COALESCE(SUM(e.amount), 0) FROM fulfilment.trip_expense e
-              JOIN fulfilment.trip tr ON tr.id = e.trip_id
-             WHERE e.recorded_at >= $1 AND e.recorded_at < $2) AS expenses_out
+      `WITH m AS (SELECT * FROM (${CASH_MOVEMENTS}) x WHERE at >= $1 AND at < $2),
+       t AS (
+         SELECT COALESCE(SUM(cash_in), 0) - COALESCE(SUM(cash_out) FILTER (WHERE kind = 'collection_reversed'), 0) AS cash_in,
+                COALESCE(SUM(cash_out) FILTER (WHERE kind = 'farmer_payment'), 0) AS farmer_payments_out,
+                COALESCE(SUM(cash_out) FILTER (WHERE kind = 'trip_expense'), 0) AS expenses_out,
+                COALESCE(SUM(cash_out) FILTER (WHERE kind = 'finance_cost'), 0) AS finance_costs_out
+         FROM m
        )
        SELECT ROUND(cash_in, 2)::text AS cash_in,
-              ROUND(settlements_out, 2)::text AS settlements_out,
+              ROUND(farmer_payments_out, 2)::text AS farmer_payments_out,
               ROUND(expenses_out, 2)::text AS expenses_out,
-              ROUND(cash_in - settlements_out - expenses_out, 2)::text AS net
+              ROUND(finance_costs_out, 2)::text AS finance_costs_out,
+              ROUND(cash_in - farmer_payments_out - expenses_out - finance_costs_out, 2)::text AS net
        FROM t`,
       [startAt, endAt],
     );
@@ -296,27 +342,13 @@ export class FinanceRepository {
     endAt: Date,
   ): Promise<CashDayRow[]> {
     const result = await client.query<CashDayRow>(
-      `WITH days AS (
-         SELECT generate_series($3::date, $4::date, interval '1 day')::date AS day
-       ),
-       moves AS (
-         SELECT (collected_at AT TIME ZONE $5)::date AS day, amount AS cash_in, 0::numeric AS cash_out
-           FROM money.customer_collection WHERE collected_at >= $1 AND collected_at < $2
-         UNION ALL
-         SELECT (settled_at AT TIME ZONE $5)::date, 0, amount
-           FROM money.farmer_settlement WHERE settled_at >= $1 AND settled_at < $2
-         UNION ALL
-         SELECT (e.recorded_at AT TIME ZONE $5)::date, 0, e.amount
-           FROM fulfilment.trip_expense e JOIN fulfilment.trip tr ON tr.id = e.trip_id
-          WHERE e.recorded_at >= $1 AND e.recorded_at < $2
-       )
+      `WITH days AS (SELECT generate_series($3::date, $4::date, interval '1 day')::date AS day),
+       m AS (SELECT (at AT TIME ZONE $5)::date AS day, cash_in, cash_out FROM (${CASH_MOVEMENTS}) x WHERE at >= $1 AND at < $2)
        SELECT d.day::text AS date,
               ROUND(COALESCE(SUM(m.cash_in), 0), 2)::text AS cash_in,
               ROUND(COALESCE(SUM(m.cash_out), 0), 2)::text AS cash_out
-       FROM days d
-       LEFT JOIN moves m ON m.day = d.day
-       GROUP BY d.day
-       ORDER BY d.day`,
+       FROM days d LEFT JOIN m ON m.day = d.day
+       GROUP BY d.day ORDER BY d.day`,
       [startAt, endAt, fromDate, toDate, timezone],
     );
     return result.rows;
@@ -324,25 +356,9 @@ export class FinanceRepository {
 
   async recentCashMovements(client: PoolClient, startAt: Date, endAt: Date, limit: number): Promise<CashMovementRow[]> {
     const result = await client.query<CashMovementRow>(
-      `SELECT * FROM (
-         SELECT c.collected_at AS at, 'collection' AS kind, cu.name AS counterparty, c.method AS detail,
-                c.amount::text AS amount, c.order_id AS reference_id
-           FROM money.customer_collection c
-           JOIN commerce.customer_order o ON o.id = c.order_id
-           JOIN trading_partners.customer cu ON cu.id = o.customer_id
-          WHERE c.collected_at >= $1 AND c.collected_at < $2
-         UNION ALL
-         SELECT fs.settled_at, 'settlement', f.name, fs.method, fs.amount::text, fs.lot_id
-           FROM money.farmer_settlement fs
-           JOIN trading_partners.farmer f ON f.id = fs.farmer_id
-          WHERE fs.settled_at >= $1 AND fs.settled_at < $2
-         UNION ALL
-         SELECT e.recorded_at, 'trip_expense', v.registration_number, e.category, e.amount::text, e.trip_id
-           FROM fulfilment.trip_expense e
-           JOIN fulfilment.trip tr ON tr.id = e.trip_id
-           JOIN trading_partners.vehicle v ON v.id = tr.vehicle_id
-          WHERE e.recorded_at >= $1 AND e.recorded_at < $2
-       ) m
+      `SELECT at, kind, counterparty, detail, ROUND(cash_in + cash_out, 2)::text AS amount, reference_id
+       FROM (${CASH_MOVEMENTS}) x
+       WHERE at >= $1 AND at < $2
        ORDER BY at DESC
        LIMIT $3`,
       [startAt, endAt, limit],
@@ -391,5 +407,93 @@ export class FinanceRepository {
       [limit],
     );
     return result.rows;
+  }
+
+  /** Value of the customer's confirmed, not-yet-delivered orders — the order side of credit exposure. */
+  async openOrderValue(client: PoolClient, customerId: string): Promise<string> {
+    const result = await client.query<{ value: string }>(
+      `SELECT ROUND(COALESCE(SUM(ol.quantity * ol.unit_price), 0), 2)::text AS value
+       FROM commerce.customer_order o JOIN commerce.customer_order_line ol ON ol.order_id = o.id
+       WHERE o.customer_id = $1 AND o.status = 'confirmed'`,
+      [customerId],
+    );
+    return result.rows[0].value;
+  }
+
+  /**
+   * A customer's account, invoice by payment, with a running balance.
+   * Debits raise what they owe (invoices, reversed payments); credits
+   * lower it (payments). The opening balance is everything before startAt.
+   */
+  async statement(
+    client: PoolClient,
+    customerId: string,
+    startAt: Date,
+    endAt: Date,
+  ): Promise<{ opening: string; lines: StatementRow[] }> {
+    const events = `
+      SELECT i.issued_at AS at, CASE WHEN i.kind = 'sale' THEN 'invoice' ELSE 'finance_charge' END AS kind,
+             i.invoice_number AS reference,
+             CASE WHEN i.kind = 'sale' THEN 'Invoice, due ' || to_char(i.due_date, 'DD Mon YYYY')
+                  ELSE 'Finance charge on ' || si.invoice_number END AS description,
+             i.amount AS debit, 0::numeric AS credit
+        FROM money.invoice i LEFT JOIN money.invoice si ON si.id = i.source_invoice_id
+       WHERE i.customer_id = $1
+      UNION ALL
+      SELECT p.received_at, 'payment', COALESCE(p.reference, initcap(replace(p.method, '_', ' '))),
+             'Payment received (' || replace(p.method, '_', ' ') || ')', 0, p.amount
+        FROM money.customer_payment p WHERE p.customer_id = $1
+      UNION ALL
+      SELECT r.reversed_at, 'payment_reversal', COALESCE(p.reference, initcap(replace(p.method, '_', ' '))),
+             'Payment reversed: ' || r.reason, p.amount, 0
+        FROM money.customer_payment_reversal r JOIN money.customer_payment p ON p.id = r.payment_id
+       WHERE p.customer_id = $1`;
+    const opening = await client.query<{ opening: string }>(
+      `SELECT ROUND(COALESCE(SUM(debit - credit), 0), 2)::text AS opening FROM (${events}) e WHERE at < $2`,
+      [customerId, startAt],
+    );
+    const lines = await client.query<StatementRow>(
+      `SELECT at, kind, reference, description, ROUND(debit, 2)::text AS debit, ROUND(credit, 2)::text AS credit,
+              ROUND($4::numeric + SUM(debit - credit) OVER (ORDER BY at, reference ROWS UNBOUNDED PRECEDING), 2)::text AS balance
+       FROM (${events}) e
+       WHERE at >= $2 AND at < $3
+       ORDER BY at, reference`,
+      [customerId, startAt, endAt, opening.rows[0].opening],
+    );
+    return { opening: opening.rows[0].opening, lines: lines.rows };
+  }
+
+  /** Every account, even those with no postings, summed from the ledger up to endAt. */
+  async trialBalance(client: PoolClient, endAt: Date): Promise<TrialBalanceRowDb[]> {
+    const result = await client.query<TrialBalanceRowDb>(
+      `SELECT a.code AS account, a.name, a.root_type,
+              ROUND(COALESCE(SUM(l.debit), 0), 2)::text AS debit,
+              ROUND(COALESCE(SUM(l.credit), 0), 2)::text AS credit,
+              ROUND(COALESCE(SUM(l.debit - l.credit), 0), 2)::text AS balance
+       FROM money.account a
+       LEFT JOIN (
+         SELECT l.* FROM money.ledger_line l JOIN money.ledger_entry e ON e.id = l.entry_id WHERE e.occurred_at < $1
+       ) l ON l.account_code = a.code
+       GROUP BY a.code, a.number, a.name, a.root_type
+       ORDER BY a.number`,
+      [endAt],
+    );
+    return result.rows;
+  }
+
+  /**
+   * The control accounts as their sub-ledgers see them, for reconciling
+   * against the trial balance: AR = open invoices − credit on account;
+   * AP = open payables; farmer advances = unapplied farmer payments.
+   */
+  async subledgerTotals(client: PoolClient): Promise<{ receivable: string; payable: string; advances: string }> {
+    const result = await client.query<{ receivable: string; payable: string; advances: string }>(
+      `SELECT
+         ROUND((SELECT COALESCE(SUM(outstanding), 0) FROM money.invoice_balance)
+             - (SELECT COALESCE(SUM(unapplied), 0) FROM money.customer_payment_balance), 2)::text AS receivable,
+         ROUND((SELECT COALESCE(SUM(outstanding), 0) FROM money.farmer_payable_balance), 2)::text AS payable,
+         ROUND((SELECT COALESCE(SUM(unapplied), 0) FROM money.farmer_payment_balance), 2)::text AS advances`,
+    );
+    return result.rows[0];
   }
 }

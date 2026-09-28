@@ -9,6 +9,7 @@ import { VehiclesService } from '../vehicles/vehicles.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
+import { LedgerService } from '../finance/ledger.service';
 import { LocationRecord } from './entities/location.entity';
 import { LotRecord } from '../procurement/entities/lot.entity';
 import { ProductRecord } from '../products/entities/product.entity';
@@ -94,6 +95,7 @@ describe('InventoryService', () => {
   let products: jest.Mocked<ProductsService>;
   let vehicles: jest.Mocked<VehiclesService>;
   let procurement: jest.Mocked<ProcurementService>;
+  let ledger: jest.Mocked<LedgerService>;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
@@ -112,7 +114,11 @@ describe('InventoryService', () => {
         },
         {
           provide: InventoryMovementsRepository,
-          useValue: { createWithClient: jest.fn(), listByLot: jest.fn(), listByProduct: jest.fn() },
+          useValue: {
+            createWithClient: jest.fn().mockResolvedValue({ id: 'movement-x', quantity: '0.000', createdAt: new Date() }),
+            listByLot: jest.fn(),
+            listByProduct: jest.fn(),
+          },
         },
         { provide: ProductsService, useValue: { getById: jest.fn() } },
         { provide: VehiclesService, useValue: { getById: jest.fn() } },
@@ -131,10 +137,12 @@ describe('InventoryService', () => {
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: LedgerService, useValue: { postInventoryWriteOffWithClient: jest.fn() } },
       ],
     }).compile();
 
     service = module.get(InventoryService);
+    ledger = module.get(LedgerService);
     locations = module.get(LocationsRepository);
     movements = module.get(InventoryMovementsRepository);
     products = module.get(ProductsService);
@@ -189,8 +197,22 @@ describe('InventoryService', () => {
   });
 
   it('recordShrinkage delegates to Procurement and writes a movement entry', async () => {
-    const shrunkLot = makeLot({ currentQuantity: '90' });
+    const shrunkLot = makeLot({ currentQuantity: '90', unitCost: '21.35' });
     procurement.recordShrinkage.mockResolvedValue(shrunkLot);
+    const createdAt = new Date();
+    movements.createWithClient.mockResolvedValue({
+      id: 'movement-1',
+      tenantId: 'tenant-1',
+      lotId: 'lot-1',
+      productId: shrunkLot.productId,
+      movementType: 'shrinkage',
+      quantity: '10.000',
+      reason: 'evaporation',
+      fromLocationId: null,
+      toLocationId: null,
+      createdAt,
+      createdBy: 'user-1',
+    });
 
     const result = await service.recordShrinkage('tenant-1', 'user-1', 'lot-1', {
       version: 1,
@@ -205,6 +227,15 @@ describe('InventoryService', () => {
       'user-1',
       expect.objectContaining({ movementType: 'shrinkage', quantity: 10, reason: 'evaporation' }),
     );
+    // Written off at the lot's own cost, in the movement's transaction: 10 × 21.35.
+    expect(ledger.postInventoryWriteOffWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', {
+      movementId: 'movement-1',
+      lotId: 'lot-1',
+      kind: 'shrinkage',
+      value: '213.50',
+      reason: 'evaporation',
+      occurredAt: createdAt,
+    });
     expect(result).toBe(shrunkLot);
   });
 

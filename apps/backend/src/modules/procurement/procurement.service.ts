@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
@@ -8,14 +8,14 @@ import { FarmersService } from '../farmers/farmers.service';
 import { ProductsService } from '../products/products.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
+import { PayablesService } from '../finance/payables.service';
+import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
 import { LotsRepository } from './repositories/lots.repository';
-import { FarmerSettlementsRepository } from './repositories/farmer-settlements.repository';
 import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
 import { LotRecord, ProductStockRow } from './entities/lot.entity';
-import { FarmerSettlementRecord } from './entities/farmer-settlement.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { ConfirmPurchaseOrderDto } from './dto/confirm-purchase-order.dto';
@@ -29,7 +29,6 @@ import { SettleFarmerDto } from './dto/settle-farmer.dto';
 const PO_ENTITY = 'purchase_order';
 const PICKUP_ENTITY = 'pickup';
 const LOT_ENTITY = 'lot';
-const SETTLEMENT_ENTITY = 'farmer_settlement';
 
 // The pre-seeded approval rule (database/seeds/003_dev_approval_roles_and_limits.ts)
 // gates this exact action type — confirming a purchase order is the one
@@ -38,20 +37,27 @@ const SETTLEMENT_ENTITY = 'farmer_settlement';
 const APPROVAL_ACTION_TYPE = 'purchase_order';
 
 @Injectable()
-export class ProcurementService {
+export class ProcurementService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly purchaseOrders: PurchaseOrdersRepository,
     private readonly pickups: PickupsRepository,
     private readonly lots: LotsRepository,
-    private readonly settlements: FarmerSettlementsRepository,
     private readonly farmers: FarmersService,
     private readonly products: ProductsService,
     private readonly vehicles: VehiclesService,
     private readonly workforce: WorkforceService,
     private readonly approvals: ApprovalsService,
+    private readonly payables: PayablesService,
     private readonly audit: AuditService,
   ) {}
+
+  /** A purchase order closes once every lot on it has been paid for, however the payment was made. */
+  onModuleInit(): void {
+    this.payables.onLotsPaid((tenantId, actorUserId, lotIds) =>
+      this.closePaidPurchaseOrders(tenantId, actorUserId, lotIds),
+    );
+  }
 
   // ---- Purchase orders ----
 
@@ -416,7 +422,21 @@ export class ProcurementService {
         after: after as unknown as Record<string, unknown>,
       });
 
+      // The cost is fixed now (LOT.2), so it's owed: posted in this same
+      // transaction, so a graded lot and its payable exist together or not at all.
+      if (!fullyRejected && after.acceptedQuantity && after.unitCost && after.gradedAt) {
+        await this.payables.accrueLotPayableWithClient(client, tenantId, actorUserId, {
+          lotId: after.id,
+          farmerId: after.farmerId,
+          acceptedQuantity: after.acceptedQuantity,
+          unitCost: after.unitCost,
+          gradedAt: after.gradedAt,
+        });
+      }
+
       await this.maybeMarkPurchaseOrderGraded(client, tenantId, actorUserId, after.purchaseOrderId);
+      // An advance may already have paid for everything on it.
+      await this.closeIfPaidWithClient(client, tenantId, actorUserId, after.purchaseOrderId);
 
       return after;
     });
@@ -447,47 +467,58 @@ export class ProcurementService {
   }
 
   // ---- Farmer settlement ----
+  // Paying farmers belongs to Finance (Domain Model: Finance owns payables
+  // and payments). These keep Procurement's lot-level view of it.
 
-  listSettlements(tenantId: string, purchaseOrderId: string): Promise<FarmerSettlementRecord[]> {
-    return this.settlements.listByPurchaseOrder(tenantId, purchaseOrderId);
+  /** What each lot on the purchase order was owed, and how much of it is paid. */
+  async listSettlements(tenantId: string, purchaseOrderId: string): Promise<LotPaymentStatus[]> {
+    const lots = await this.lots.listByPurchaseOrder(tenantId, purchaseOrderId);
+    return this.payables.lotPaymentStatus(
+      tenantId,
+      lots.map((l) => l.id),
+    );
   }
 
+  /**
+   * Pays one lot through Finance: its outstanding balance first, anything
+   * beyond that as an advance on the farmer's next lots.
+   */
   async settleFarmer(
     tenantId: string,
     actorUserId: string,
     lotId: string,
     dto: SettleFarmerDto,
-  ): Promise<FarmerSettlementRecord> {
-    return this.db.withTenant(tenantId, async (client) => {
-      const lot = await this.lots.findByIdWithClient(client, lotId);
-      if (!lot) throw new NotFoundException('Lot not found');
-      if (lot.status !== 'available') {
-        throw new ConflictException(`Only a graded, available lot can be settled (status: ${lot.status})`);
-      }
+  ): Promise<FarmerPaymentRecord> {
+    const lot = await this.getLot(tenantId, lotId);
+    const [status] = await this.payables.lotPaymentStatus(tenantId, [lotId]);
+    if (!status) throw new ConflictException('Nothing is owed on this lot: it is ungraded, rejected, or has no cost');
+    if (Number(status.outstanding) <= 0) throw new ConflictException('This lot is already paid in full');
 
-      const settlement = await this.settlements.createWithClient(client, tenantId, actorUserId, {
-        lotId,
-        farmerId: lot.farmerId,
-        amount: dto.amount,
-        method: dto.method,
-        notes: dto.notes ?? null,
-      });
-      await this.audit.record(client, {
-        tenantId,
-        actorUserId,
-        action: 'create',
-        entityType: SETTLEMENT_ENTITY,
-        entityId: settlement.id,
-        after: settlement as unknown as Record<string, unknown>,
-      });
-
-      await this.maybeClosePurchaseOrder(client, tenantId, actorUserId, lot.purchaseOrderId);
-
-      return settlement;
+    const toLot = Math.min(dto.amount, Number(status.outstanding));
+    return this.payables.recordPayment(tenantId, actorUserId, {
+      farmerId: lot.farmerId,
+      amount: dto.amount,
+      method: dto.method,
+      notes: dto.notes,
+      allocations: [{ lotId, amount: toLot }],
     });
   }
 
-  private async maybeClosePurchaseOrder(
+  private async closePaidPurchaseOrders(tenantId: string, actorUserId: string, lotIds: string[]): Promise<void> {
+    await this.db.withTenant(tenantId, async (client) => {
+      const purchaseOrderIds = new Set<string>();
+      for (const lotId of lotIds) {
+        const lot = await this.lots.findByIdWithClient(client, lotId);
+        if (lot) purchaseOrderIds.add(lot.purchaseOrderId);
+      }
+      for (const purchaseOrderId of purchaseOrderIds) {
+        await this.closeIfPaidWithClient(client, tenantId, actorUserId, purchaseOrderId);
+      }
+    });
+  }
+
+  /** graded -> closed once nothing is owed on any of its lots. */
+  private async closeIfPaidWithClient(
     client: PoolClient,
     tenantId: string,
     actorUserId: string,
@@ -496,8 +527,12 @@ export class ProcurementService {
     const po = await this.purchaseOrders.findByIdWithClient(client, purchaseOrderId);
     if (!po || po.status !== 'graded') return;
 
-    const remainingUnsettled = await this.lots.countUnsettledAvailableWithClient(client, purchaseOrderId);
-    if (remainingUnsettled > 0) return;
+    const lots = await this.lots.listByPurchaseOrderWithClient(client, purchaseOrderId);
+    const statuses = await this.payables.lotPaymentStatusWithClient(
+      client,
+      lots.map((l) => l.id),
+    );
+    if (statuses.some((st) => Number(st.outstanding) > 0)) return;
 
     const after = await this.purchaseOrders.closeWithClient(client, po.id, po.version);
     await this.audit.record(client, {
@@ -585,22 +620,35 @@ export class ProcurementService {
    * left the warehouse. They move to 'delivered' and keep their link to the
    * order line, which is how cost of goods finds them.
    */
-  async consumeLotsForOrderLine(tenantId: string, actorUserId: string, orderLineId: string): Promise<void> {
-    await this.db.withTenant(tenantId, async (client) => {
-      const lots = await this.lots.listReservedForOrderLineWithClient(client, orderLineId);
-      for (const lot of lots.filter((l) => l.status === 'reserved')) {
-        const after = await this.lots.consumeWithClient(client, lot.id, lot.version);
-        await this.audit.record(client, {
-          tenantId,
-          actorUserId,
-          action: 'update',
-          entityType: LOT_ENTITY,
-          entityId: lot.id,
-          before: lot as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-        });
-      }
-    });
+  /**
+   * The goods have left: every lot reserved for this order line moves to
+   * 'delivered'. Runs inside Orders' delivery transaction and returns the
+   * line's cost of goods for Finance to recognise: quantity delivered x the
+   * quantity-weighted unit cost of the lots reserved for it (Accounting
+   * Engine, LOT.1/LOT.3), or null when none of those lots carries a cost.
+   */
+  async consumeLotsForOrderLineWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    orderLineId: string,
+    deliveredQuantity: string,
+  ): Promise<string | null> {
+    const lots = await this.lots.listReservedForOrderLineWithClient(client, orderLineId);
+    const cost = await this.lots.lineCostWithClient(client, orderLineId, deliveredQuantity);
+    for (const lot of lots.filter((l) => l.status === 'reserved')) {
+      const after = await this.lots.consumeWithClient(client, lot.id, lot.version);
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: LOT_ENTITY,
+        entityId: lot.id,
+        before: lot as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+      });
+    }
+    return cost;
   }
 
   /** Stock for every product in one read — for Inventory's overview. */

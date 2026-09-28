@@ -12,6 +12,10 @@ interface CustomerRow {
   contact: Record<string, unknown>;
   credit_limit: string;
   payment_terms_days: number;
+  finance_charge_rate_monthly: string;
+  finance_charge_grace_days: number;
+  credit_hold: boolean;
+  credit_hold_reason: string | null;
   status: 'active' | 'archived';
   version: number;
   created_at: Date;
@@ -27,6 +31,10 @@ function toRecord(row: CustomerRow): CustomerRecord {
     contact: row.contact ?? {},
     creditLimit: row.credit_limit,
     paymentTermsDays: row.payment_terms_days,
+    financeChargeRateMonthly: row.finance_charge_rate_monthly,
+    financeChargeGraceDays: row.finance_charge_grace_days,
+    creditHold: row.credit_hold,
+    creditHoldReason: row.credit_hold_reason,
     status: row.status,
     version: row.version,
     createdAt: row.created_at,
@@ -121,16 +129,12 @@ export class CustomersRepository {
     fields: Partial<{
       name: string;
       contact: Record<string, unknown>;
-      creditLimit: number;
-      paymentTermsDays: number;
     }>,
   ): Promise<CustomerRecord> {
     const result = await client.query<CustomerRow>(
       `UPDATE trading_partners.customer SET
          name = COALESCE($3, name),
          contact = COALESCE($4, contact),
-         credit_limit = COALESCE($5, credit_limit),
-         payment_terms_days = COALESCE($6, payment_terms_days),
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -140,8 +144,53 @@ export class CustomersRepository {
         expectedVersion,
         fields.name,
         fields.contact ? JSON.stringify(fields.contact) : null,
-        fields.creditLimit,
-        fields.paymentTermsDays,
+      ],
+    );
+    if (result.rowCount === 0) {
+      throw new OptimisticLockException('Customer', id);
+    }
+    return toRecord(result.rows[0]);
+  }
+
+  /**
+   * Credit terms only — a separate statement from updateWithClient so the
+   * permission split (customers:credit vs customers:write) has a single
+   * write path to guard. A hold's reason is cleared when the hold lifts.
+   */
+  async updateCreditTermsWithClient(
+    client: PoolClient,
+    id: string,
+    expectedVersion: number,
+    fields: {
+      creditLimit?: number;
+      paymentTermsDays?: number;
+      financeChargeRateMonthly?: number;
+      financeChargeGraceDays?: number;
+      creditHold?: boolean;
+      creditHoldReason?: string | null;
+    },
+  ): Promise<CustomerRecord> {
+    const result = await client.query<CustomerRow>(
+      `UPDATE trading_partners.customer SET
+         credit_limit = COALESCE($3, credit_limit),
+         payment_terms_days = COALESCE($4, payment_terms_days),
+         finance_charge_rate_monthly = COALESCE($5, finance_charge_rate_monthly),
+         finance_charge_grace_days = COALESCE($6, finance_charge_grace_days),
+         credit_hold = COALESCE($7, credit_hold),
+         credit_hold_reason = CASE WHEN COALESCE($7, credit_hold) THEN COALESCE($8, credit_hold_reason) ELSE NULL END,
+         version = version + 1,
+         updated_at = now()
+       WHERE id = $1 AND version = $2
+       RETURNING *`,
+      [
+        id,
+        expectedVersion,
+        fields.creditLimit ?? null,
+        fields.paymentTermsDays ?? null,
+        fields.financeChargeRateMonthly ?? null,
+        fields.financeChargeGraceDays ?? null,
+        fields.creditHold ?? null,
+        fields.creditHoldReason ?? null,
       ],
     );
     if (result.rowCount === 0) {

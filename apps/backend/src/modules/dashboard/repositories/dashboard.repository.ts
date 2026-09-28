@@ -212,10 +212,14 @@ export class DashboardRepository {
          (SELECT ROUND(COALESCE(SUM(l.accepted_quantity * l.unit_cost), 0), 2)::text
             FROM commerce.lot l
            WHERE l.graded_at >= $1 AND l.graded_at < $2 AND l.unit_cost IS NOT NULL) AS procurement_spend,
-         (SELECT ROUND(COALESCE(SUM(c.amount), 0), 2)::text FROM money.customer_collection c
-           WHERE c.collected_at >= $1 AND c.collected_at < $2) AS collections,
-         (SELECT ROUND(COALESCE(SUM(f.amount), 0), 2)::text FROM money.farmer_settlement f
-           WHERE f.settled_at >= $1 AND f.settled_at < $2) AS farmer_settlements,
+         (SELECT ROUND(
+            (SELECT COALESCE(SUM(p.amount), 0) FROM money.customer_payment p
+              WHERE p.received_at >= $1 AND p.received_at < $2)
+          - (SELECT COALESCE(SUM(p.amount), 0) FROM money.customer_payment_reversal r
+               JOIN money.customer_payment p ON p.id = r.payment_id
+              WHERE r.reversed_at >= $1 AND r.reversed_at < $2), 2)::text) AS collections,
+         (SELECT ROUND(COALESCE(SUM(f.amount), 0), 2)::text FROM money.farmer_payment f
+           WHERE f.paid_at >= $1 AND f.paid_at < $2) AS farmer_settlements,
          (SELECT ROUND(COALESCE(SUM(e.amount), 0), 2)::text
             FROM fulfilment.trip_expense e
             JOIN fulfilment.trip t ON t.id = e.trip_id
@@ -231,16 +235,12 @@ export class DashboardRepository {
          (SELECT ROUND(COALESCE(SUM(l.current_quantity * l.unit_cost), 0), 2)::text
             FROM commerce.lot l
            WHERE l.status IN ('available', 'reserved') AND l.unit_cost IS NOT NULL) AS stock_on_hand_value,
+         -- Open invoices (finance charges included) net of credit on account.
          (SELECT ROUND(
-            (SELECT COALESCE(SUM(ol.quantity * ol.unit_price), 0)
-               FROM commerce.customer_order o
-               JOIN commerce.customer_order_line ol ON ol.order_id = o.id
-              WHERE o.status = 'delivered')
-            - (SELECT COALESCE(SUM(c.amount), 0) FROM money.customer_collection c), 2)::text) AS receivables_outstanding,
-         (SELECT ROUND(COALESCE(SUM(l.accepted_quantity * l.unit_cost), 0), 2)::text
-            FROM commerce.lot l
-           WHERE l.unit_cost IS NOT NULL AND l.accepted_quantity > 0
-             AND NOT EXISTS (SELECT 1 FROM money.farmer_settlement fs WHERE fs.lot_id = l.id)) AS farmer_payables_outstanding`,
+            (SELECT COALESCE(SUM(outstanding), 0) FROM money.invoice_balance)
+            - (SELECT COALESCE(SUM(unapplied), 0) FROM money.customer_payment_balance), 2)::text) AS receivables_outstanding,
+         (SELECT ROUND(COALESCE(SUM(outstanding), 0), 2)::text
+            FROM money.farmer_payable_balance) AS farmer_payables_outstanding`,
     );
     return result.rows[0];
   }
@@ -324,28 +324,28 @@ export class DashboardRepository {
          (SELECT ROUND(COALESCE(SUM(r.variance), 0), 2)::text FROM fulfilment.trip_reconciliation r
             JOIN fulfilment.trip t ON t.id = r.trip_id
            WHERE r.variance > 0 AND r.reconciled_at >= now() - make_interval(days => $4)) AS variance_amount,
-         (SELECT count(*)::int FROM commerce.lot l
-           WHERE l.unit_cost IS NOT NULL AND l.accepted_quantity > 0
-             AND l.graded_at < now() - make_interval(days => $5)
-             AND NOT EXISTS (SELECT 1 FROM money.farmer_settlement fs WHERE fs.lot_id = l.id)) AS overdue_count,
-         (SELECT ROUND(COALESCE(SUM(l.accepted_quantity * l.unit_cost), 0), 2)::text FROM commerce.lot l
-           WHERE l.unit_cost IS NOT NULL AND l.accepted_quantity > 0
-             AND l.graded_at < now() - make_interval(days => $5)
-             AND NOT EXISTS (SELECT 1 FROM money.farmer_settlement fs WHERE fs.lot_id = l.id)) AS overdue_value,
+         (SELECT count(*)::int FROM money.farmer_payable_balance
+           WHERE outstanding > 0 AND accrued_at < now() - make_interval(days => $5)) AS overdue_count,
+         (SELECT ROUND(COALESCE(SUM(outstanding), 0), 2)::text FROM money.farmer_payable_balance
+           WHERE outstanding > 0 AND accrued_at < now() - make_interval(days => $5)) AS overdue_value,
          breach.count AS credit_breach_count,
          breach.amount AS credit_breach_amount
        FROM (
-         -- Same exposure definition OrdersService's credit check uses:
-         -- the value of every confirmed order.
+         -- Same exposure OrdersService's credit check uses: what the
+         -- customer owes now (open invoices net of credit on account) plus
+         -- every confirmed, undelivered order.
          SELECT count(*)::int AS count, ROUND(COALESCE(SUM(exposure - credit_limit), 0), 2)::text AS amount
          FROM (
-           SELECT c.credit_limit, SUM(ol.quantity * ol.unit_price) AS exposure
+           SELECT c.credit_limit,
+                  COALESCE((SELECT SUM(ol.quantity * ol.unit_price) FROM commerce.customer_order o
+                              JOIN commerce.customer_order_line ol ON ol.order_id = o.id
+                             WHERE o.customer_id = c.id AND o.status = 'confirmed'), 0)
+                + COALESCE((SELECT SUM(outstanding) FROM money.invoice_balance b WHERE b.customer_id = c.id), 0)
+                - COALESCE((SELECT SUM(unapplied) FROM money.customer_payment_balance p WHERE p.customer_id = c.id), 0)
+                  AS exposure
            FROM trading_partners.customer c
-           JOIN commerce.customer_order o ON o.customer_id = c.id AND o.status = 'confirmed'
-           JOIN commerce.customer_order_line ol ON ol.order_id = o.id
-           GROUP BY c.id, c.credit_limit
-           HAVING SUM(ol.quantity * ol.unit_price) > c.credit_limit
-         ) over_limit
+         ) e
+         WHERE exposure > credit_limit
        ) breach`,
       [
         thresholds.ungradedAfterHours,

@@ -32,9 +32,14 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
 
   // SameSite=Lax cookies already aren't sent on cross-site POSTs; this is
   // the second layer for anything that changes state.
+  // Compared against the Host the browser actually sent (or the one a
+  // reverse proxy forwarded), not request.nextUrl.host: `next start`
+  // normalises that to its own bind address (localhost:PORT), so every
+  // same-origin write from any other hostname was refused.
   if (!BODYLESS.has(request.method)) {
     const origin = request.headers.get('origin');
-    if (origin && new URL(origin).host !== request.nextUrl.host) {
+    const host = (request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? '').split(',')[0].trim();
+    if (origin && new URL(origin).host !== host) {
       return NextResponse.json({ error: { message: 'Cross-origin request refused.' } }, { status: 403 });
     }
   }

@@ -173,15 +173,21 @@ export class LotsRepository {
     return Number(result.rows[0].count);
   }
 
-  async countUnsettledAvailableWithClient(client: PoolClient, purchaseOrderId: string): Promise<number> {
-    const result = await client.query<{ count: string }>(
-      `SELECT count(*) FROM commerce.lot l
-       WHERE l.purchase_order_id = $1 AND l.status = 'available'
-         AND NOT EXISTS (SELECT 1 FROM money.farmer_settlement s WHERE s.lot_id = l.id)`,
-      [purchaseOrderId],
+  /**
+   * quantity x the quantity-weighted unit cost of the costed lots reserved
+   * for the line, rounded to the paisa: the same basis the dashboard's
+   * profit figures use. null when no reserved lot has a cost.
+   */
+  async lineCostWithClient(client: PoolClient, orderLineId: string, quantity: string): Promise<string | null> {
+    const result = await client.query<{ cost: string | null }>(
+      `SELECT ROUND($2::numeric * SUM(current_quantity * unit_cost) / NULLIF(SUM(current_quantity), 0), 2)::text AS cost
+       FROM commerce.lot
+       WHERE reserved_for_order_line_id = $1 AND unit_cost IS NOT NULL`,
+      [orderLineId, quantity],
     );
-    return Number(result.rows[0].count);
+    return result.rows[0]?.cost ?? null;
   }
+
 
   /**
    * Locks every available lot for this product, oldest received_at first

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { CustomersRepository } from './repositories/customers.repository';
@@ -6,6 +7,7 @@ import { CustomerRecord } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { UpdateCreditTermsDto } from './dto/update-credit-terms.dto';
 
 const ENTITY_TYPE = 'customer';
 
@@ -23,6 +25,17 @@ export class CustomersService {
 
   async getById(tenantId: string, id: string): Promise<CustomerRecord> {
     const customer = await this.customers.findById(tenantId, id);
+    if (!customer) throw new NotFoundException('Customer not found');
+    return customer;
+  }
+
+  /**
+   * For another module already inside its own transaction (Finance reads
+   * payment terms and finance-charge policy while issuing an invoice) —
+   * the same connection, so no second pooled client is taken mid-transaction.
+   */
+  async getByIdWithClient(client: PoolClient, id: string): Promise<CustomerRecord> {
+    const customer = await this.customers.findByIdWithClient(client, id);
     if (!customer) throw new NotFoundException('Customer not found');
     return customer;
   }
@@ -60,8 +73,38 @@ export class CustomersService {
       const after = await this.customers.updateWithClient(client, id, dto.version, {
         name: dto.name,
         contact: dto.contact && { ...dto.contact },
+      });
+
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: ENTITY_TYPE,
+        entityId: id,
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+      });
+      return after;
+    });
+  }
+
+  updateCreditTerms(
+    tenantId: string,
+    actorUserId: string,
+    id: string,
+    dto: UpdateCreditTermsDto,
+  ): Promise<CustomerRecord> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const before = await this.customers.findByIdWithClient(client, id);
+      if (!before) throw new NotFoundException('Customer not found');
+
+      const after = await this.customers.updateCreditTermsWithClient(client, id, dto.version, {
         creditLimit: dto.creditLimit,
         paymentTermsDays: dto.paymentTermsDays,
+        financeChargeRateMonthly: dto.financeChargeRateMonthly,
+        financeChargeGraceDays: dto.financeChargeGraceDays,
+        creditHold: dto.creditHold,
+        creditHoldReason: dto.creditHoldReason ?? null,
       });
 
       await this.audit.record(client, {

@@ -62,6 +62,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       };
     }
 
+    // The ledger's period lock (money.assert_period_open, SQLSTATE MZ001):
+    // whichever module's posting ran into a closed period, the person gets
+    // the database's own explanation, not a 500.
+    if (isPgError(exception) && exception.code === 'MZ001') {
+      return { status: HttpStatus.CONFLICT, code: 'PERIOD_CLOSED', message: exception.message };
+    }
+
     // An error we didn't anticipate is exactly the case Constitution IV.6
     // exists for — the client still gets a stable, opaque shape.
     return {
@@ -70,4 +77,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       message: 'An unexpected error occurred.',
     };
   }
+}
+
+function isPgError(value: unknown): value is { code: string; message: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { code?: unknown }).code === 'string' &&
+    typeof (value as { message?: unknown }).message === 'string'
+  );
 }

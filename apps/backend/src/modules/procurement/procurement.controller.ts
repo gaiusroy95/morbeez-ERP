@@ -19,7 +19,7 @@ import { SettleFarmerDto } from './dto/settle-farmer.dto';
 import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
 import { LotRecord } from './entities/lot.entity';
-import { FarmerSettlementRecord } from './entities/farmer-settlement.entity';
+import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 
 @ApiTags('procurement')
 @ApiBearerAuth()
@@ -176,7 +176,7 @@ export class ProcurementController {
   listSettlements(
     @CurrentUser() user: AuthContext,
     @Param('id') purchaseOrderId: string,
-  ): Promise<FarmerSettlementRecord[]> {
+  ): Promise<LotPaymentStatus[]> {
     return this.procurementService.listSettlements(user.tenantId, purchaseOrderId);
   }
 
@@ -186,7 +186,7 @@ export class ProcurementController {
     @CurrentUser() user: AuthContext,
     @Param('id') lotId: string,
     @Body() dto: SettleFarmerDto,
-  ): Promise<FarmerSettlementRecord> {
+  ): Promise<FarmerPaymentRecord> {
     return this.procurementService.settleFarmer(user.tenantId, user.userId, lotId, dto);
   }
 }
