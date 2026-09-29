@@ -248,7 +248,8 @@ export class TaxRepository {
 
   async productRows(client: PoolClient, today: string): Promise<Record<string, unknown>[]> {
     const result = await client.query(
-      `SELECT p.id AS product_id, p.name, p.base_uom, p.status, pt.hsn_code, COALESCE(pt.version, 0) AS version, rule.*
+      `SELECT p.id AS product_id, p.name, p.base_uom, p.status AS product_status, pt.hsn_code AS product_hsn,
+              COALESCE(pt.version, 0) AS product_version, rule.*
        FROM trading_partners.product p
        LEFT JOIN tax.product_tax pt ON pt.product_id = p.id
        LEFT JOIN LATERAL (
@@ -358,7 +359,7 @@ export class TaxRepository {
        JOIN tax.invoice_tax it ON it.invoice_id = i.id
        JOIN trading_partners.customer c ON c.id = i.customer_id
        LEFT JOIN tax.einvoice e ON e.invoice_id = i.id
-       WHERE i.kind = 'sale' AND (i.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       WHERE i.kind IN ('sale', 'crate_charge', 'spot_sale') AND (i.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
        ORDER BY i.issued_at DESC, i.invoice_number DESC`,
       [timezone, from, to],
     );
@@ -410,7 +411,7 @@ export class TaxRepository {
        JOIN trading_partners.customer c ON c.id = i.customer_id
        JOIN money.invoice_line l ON l.invoice_id = i.id
        JOIN tax.invoice_line_tax lt ON lt.invoice_line_id = l.id
-       WHERE i.kind = 'sale' AND (i.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       WHERE i.kind IN ('sale', 'crate_charge', 'spot_sale') AND (i.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
        ORDER BY i.invoice_number, l.id`,
       [timezone, from, to],
     );

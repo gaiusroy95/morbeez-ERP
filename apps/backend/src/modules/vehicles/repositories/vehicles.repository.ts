@@ -170,6 +170,16 @@ export class VehiclesRepository {
     return toRecord(result.rows[0]);
   }
 
+  /** Whether the vehicle is on the books as an asset (fleet.vehicle_asset), and whether its disposal is recorded. */
+  async bookStateWithClient(client: PoolClient, id: string): Promise<{ onBooks: boolean; disposalRecorded: boolean }> {
+    const result = await client.query<{ on_books: boolean; disposal_recorded: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM fleet.vehicle_asset WHERE vehicle_id = $1) AS on_books,
+              EXISTS (SELECT 1 FROM fleet.vehicle_disposal WHERE vehicle_id = $1) AS disposal_recorded`,
+      [id],
+    );
+    return { onBooks: result.rows[0].on_books, disposalRecorded: result.rows[0].disposal_recorded };
+  }
+
   async setStatusWithClient(
     client: PoolClient,
     id: string,

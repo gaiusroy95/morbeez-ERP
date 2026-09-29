@@ -48,7 +48,8 @@ export interface TripReconciliationRecord {
   advanceAmount: string;
   totalExpenses: string;
   cashReturned: string;
-  variance: string; // advance − (expenses + cash returned); positive = short
+  spotCash: string; // cash taken for spot sales on the trip
+  variance: string; // advance + spot cash − (expenses + cash returned); positive = short
   notes: string | null;
   reconciledAt: IsoDateTime;
 }

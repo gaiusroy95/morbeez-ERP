@@ -47,7 +47,12 @@ export class TaxRulesService {
   ): Promise<InvoiceTax> {
     const profile = await this.profileWithClient(client);
     const buyer = await this.repo.customerTax(client, input.customerId);
-    const resolved = await this.repo.resolveProducts(client, input.lines.map((l) => l.productId), input.issuedOn);
+    const resolved = await this.repo.resolveProducts(
+      client,
+      input.lines.map((l) => l.productId),
+      input.issuedOn,
+      input.lines.map((l) => l.hsnCode ?? null),
+    );
     const supplierState = profile.stateCode;
     const placeOfSupply = buyer?.state_code ?? supplierState;
     const intraState = !supplierState || !placeOfSupply || supplierState === placeOfSupply;

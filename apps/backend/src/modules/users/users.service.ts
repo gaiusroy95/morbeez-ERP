@@ -32,11 +32,11 @@ export class UsersService {
       const user = await this.users.create(tenantId, email, passwordHash);
       return toPublicUser(user);
     } catch (err) {
-      // identity.app_user has a (tenant_id, email) unique constraint —
-      // this is the one error translation worth doing here, so the API
-      // returns 409 instead of a raw 500 from an unhandled DB constraint.
+      // An email is one login across every tenant (app_user_email_unique,
+      // Security Audit SA-01) — this is the one error translation worth
+      // doing here, so the API returns 409 instead of a raw 500.
       if (isUniqueViolation(err)) {
-        throw new ConflictException('A user with this email already exists in this tenant');
+        throw new ConflictException('This email already has a Morbeez login');
       }
       throw err;
     }

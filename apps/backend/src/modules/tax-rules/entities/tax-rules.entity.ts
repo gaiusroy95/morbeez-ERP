@@ -59,6 +59,9 @@ export interface TdsSection {
 export interface InvoiceLineTaxInput {
   productId: string | null;
   taxableValue: string; // the line amount before GST
+  // A line that isn't a catalogue product (lost crates charged) names its
+  // own HSN, counted in units; a product's comes from its tax set-up.
+  hsnCode?: string | null;
 }
 
 export interface LineTax {

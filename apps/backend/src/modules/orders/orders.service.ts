@@ -318,10 +318,10 @@ export class OrdersService {
   }
 
   /**
-   * Reserves stock for every line via Procurement's public API, then flips
-   * the order to 'confirmed'. If any line can't be covered, every line
-   * reserved earlier in this same call is released before the error
-   * propagates — no partially-reserved order is left behind.
+   * Reserves stock for every line via Procurement's public API and flips
+   * the order to 'confirmed', all in one transaction: if any line can't be
+   * covered, nothing was reserved (Performance Audit PA-03 — it used to be
+   * a transaction per line, undone by hand on failure).
    */
   private async reserveAndConfirm(
     tenantId: string,
@@ -329,26 +329,18 @@ export class OrdersService {
     order: OrderRecord,
   ): Promise<OrderRecord> {
     const lines = order.lines ?? [];
-    const reservedLineIds: string[] = [];
-    try {
-      for (const line of lines) {
-        await this.procurement.reserveLotsForOrderLine(tenantId, actorUserId, {
+    return this.db.withTenant(tenantId, async (client) => {
+      const before = await this.orders.findByIdWithClient(client, order.id);
+      if (!before) throw new NotFoundException('Order not found');
+
+      // Lines in product order, so two orders lock the same products in the same sequence.
+      for (const line of [...lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
+        await this.procurement.reserveLotsForOrderLineWithClient(client, tenantId, actorUserId, {
           orderLineId: line.id,
           productId: line.productId,
           quantity: Number(line.quantity),
         });
-        reservedLineIds.push(line.id);
       }
-    } catch (err) {
-      for (const lineId of reservedLineIds) {
-        await this.procurement.releaseLotsForOrderLine(tenantId, actorUserId, lineId);
-      }
-      throw err;
-    }
-
-    return this.db.withTenant(tenantId, async (client) => {
-      const before = await this.orders.findByIdWithClient(client, order.id);
-      if (!before) throw new NotFoundException('Order not found');
 
       const after = await this.orders.confirmWithClient(client, order.id, before.version);
       await this.audit.record(client, {

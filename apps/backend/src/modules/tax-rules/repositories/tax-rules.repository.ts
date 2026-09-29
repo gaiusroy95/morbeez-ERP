@@ -139,27 +139,34 @@ export class TaxRulesRepository {
    * `date` — the longest HSN prefix that matches wins, and at the same
    * length the tenant's own rule wins over the system default.
    */
-  async resolveProducts(client: PoolClient, productIds: (string | null)[], date: string): Promise<ResolvedLine[]> {
+  async resolveProducts(
+    client: PoolClient,
+    productIds: (string | null)[],
+    date: string,
+    hsnOverrides: (string | null)[] = [],
+  ): Promise<ResolvedLine[]> {
+    const overrides = productIds.map((_, i) => hsnOverrides[i] ?? null);
     const result = await client.query<Record<string, unknown>>(
-      `SELECT pt.hsn_code, p.base_uom, rule.*
-       FROM unnest($1::uuid[]) WITH ORDINALITY AS l(product_id, n)
+      `SELECT COALESCE(l.hsn, pt.hsn_code) AS product_hsn, CASE WHEN l.hsn IS NOT NULL THEN 'unit' ELSE p.base_uom END AS base_uom, rule.*
+       FROM unnest($1::uuid[], $3::text[]) WITH ORDINALITY AS l(product_id, hsn, n)
        LEFT JOIN trading_partners.product p ON p.id = l.product_id
        LEFT JOIN tax.product_tax pt ON pt.product_id = l.product_id
        LEFT JOIN LATERAL (
          SELECT ${GST_RULE_COLUMNS}
          FROM tax.gst_rate r
-         WHERE pt.hsn_code IS NOT NULL
-           AND pt.hsn_code LIKE r.hsn_code || '%'
+         WHERE COALESCE(l.hsn, pt.hsn_code) IS NOT NULL
+           AND COALESCE(l.hsn, pt.hsn_code) LIKE r.hsn_code || '%'
            AND r.effective_from <= $2::date
            AND (r.effective_to IS NULL OR r.effective_to >= $2::date)
          ORDER BY length(r.hsn_code) DESC, (r.tenant_id IS NOT NULL) DESC, r.effective_from DESC
          LIMIT 1
        ) rule ON true
        ORDER BY l.n`,
-      [productIds, date],
+      [productIds, date, overrides],
     );
     return result.rows.map((row) => ({
-      hsn_code: row.hsn_code as string | null,
+      // Aliased: the rule's own hsn_code (a shorter prefix) would shadow it.
+      hsn_code: row.product_hsn as string | null,
       base_uom: row.base_uom as string | null,
       rule: row.id ? toGstRule(row) : null,
     }));

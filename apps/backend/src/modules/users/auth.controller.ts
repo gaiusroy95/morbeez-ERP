@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Ip, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthService, TokenPair } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -16,18 +16,20 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   login(
     @Body() dto: LoginDto,
+    @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ): Promise<TokenPair> {
-    return this.authService.login(dto.email, dto.password, userAgent);
+    return this.authService.login(dto.email, dto.password, userAgent, ip, dto.deviceId);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(
     @Body() dto: RefreshTokenDto,
+    @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ): Promise<TokenPair> {
-    return this.authService.refresh(dto.refreshToken, userAgent);
+    return this.authService.refresh(dto.refreshToken, userAgent, ip);
   }
 
   // Requires a valid access token even though only the refresh token in

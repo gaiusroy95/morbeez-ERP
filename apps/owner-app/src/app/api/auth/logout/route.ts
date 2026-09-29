@@ -4,6 +4,7 @@ import {
   apiBaseUrl,
   clearSessionCookies,
   REFRESH_COOKIE,
+  forwardedFor,
   refreshTokens,
 } from '@/lib/server/session';
 
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
 
   if (refresh) {
     if (!access) {
-      const rotated = await refreshTokens(refresh);
+      const rotated = await refreshTokens(refresh, forwardedFor(request));
       access = rotated?.accessToken;
       refresh = rotated?.refreshToken ?? refresh;
     }

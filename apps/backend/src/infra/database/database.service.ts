@@ -106,6 +106,33 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * withTenant, but the database itself refuses any write: the transaction
+   * is READ ONLY and runs as `role` — for the AI's computations, which
+   * read the business but must never change it (AI System DR.1,
+   * Constitution VIII.1). RLS still scopes every read to the tenant.
+   */
+  async withTenantReadOnly<T>(
+    tenantId: string,
+    role: 'morbeez_ai',
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN TRANSACTION READ ONLY');
+      await client.query(`SET LOCAL ROLE ${role}`);
+      await this.setTenantContext(client, tenantId);
+      const result = await work(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async isHealthy(): Promise<boolean> {
     await this.pool.query('SELECT 1');
     return true;

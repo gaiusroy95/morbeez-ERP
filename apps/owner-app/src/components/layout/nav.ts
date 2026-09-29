@@ -16,7 +16,10 @@ export interface NavGroup {
 export const NAV: NavGroup[] = [
   {
     label: 'Overview',
-    items: [{ href: '/dashboard', label: 'Dashboard', permission: 'dashboard:read' }],
+    items: [
+      { href: '/dashboard', label: 'Dashboard', permission: 'dashboard:read' },
+      { href: '/ai', label: 'Suggestions', permission: 'ai:read' },
+    ],
   },
   {
     label: 'Trading',
@@ -25,6 +28,8 @@ export const NAV: NavGroup[] = [
       { href: '/procurement', label: 'Procurement', permission: 'procurement:read' },
       { href: '/inventory', label: 'Inventory', permission: 'inventory:read' },
       { href: '/logistics', label: 'Trips', permission: 'logistics:dispatch' },
+      { href: '/spot-sales', label: 'Spot sales', permission: 'spot_sales:read' },
+      { href: '/crates', label: 'Crates', permission: 'crates:read' },
     ],
   },
   {
@@ -42,6 +47,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: '/finance', label: 'Finance', permission: 'finance:read' },
       { href: '/accounting', label: 'Accounting', permission: 'accounting:read' },
+      { href: '/tax', label: 'Tax', permission: 'tax:read' },
     ],
   },
 ];

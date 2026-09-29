@@ -48,7 +48,7 @@ export async function apiGet<T>(path: string, params?: Record<string, QueryValue
  * the optimistic-concurrency token the backend checks, so a 409 means
  * someone else changed the record first — reload it and try again.
  */
-export async function apiSend<T>(method: 'POST' | 'PATCH', path: string, body?: unknown): Promise<T> {
+export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT', path: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/backend/${path}`, {
     method,
     headers: { accept: 'application/json', 'content-type': 'application/json' },

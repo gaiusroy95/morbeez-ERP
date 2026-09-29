@@ -170,6 +170,7 @@ export function CustomerPaymentDialog({
                     <td>
                       {invoice.invoiceNumber}
                       {invoice.kind === 'finance_charge' && <div className="cell-sub">Finance charge</div>}
+                      {invoice.kind === 'crate_charge' && <div className="cell-sub">Lost crates</div>}
                     </td>
                     <td data-tone={invoice.state === 'overdue' ? 'bad' : undefined}>{formatDate(invoice.dueDate)}</td>
                     <td className="align-right">{formatMoney(invoice.outstanding, currency)}</td>

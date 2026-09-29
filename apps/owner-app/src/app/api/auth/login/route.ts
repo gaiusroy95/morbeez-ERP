@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { apiBaseUrl, setSessionCookies, TokenPair } from '@/lib/server/session';
+import { apiBaseUrl, forwardedFor, setSessionCookies, TokenPair } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       headers: {
         'content-type': 'application/json',
         'user-agent': request.headers.get('user-agent') ?? 'morbeez-owner-app',
+        ...forwardedFor(request),
       },
       body: JSON.stringify({ email: credentials.email, password: credentials.password }),
       cache: 'no-store',

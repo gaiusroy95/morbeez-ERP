@@ -100,11 +100,12 @@ export function useProductLots(productId: string | null) {
 
 // ---- Logistics ----
 
-export function useTrips(status: TripStatus | undefined, page: number) {
+export function useTrips(status: TripStatus | undefined, page: number, enabled = true) {
   return useQuery({
     queryKey: ['logistics', 'trips', status ?? 'all', page],
     queryFn: () => apiGet<Paginated<TripRecord>>('logistics/trips', { status, page, pageSize: PAGE_SIZE }),
     placeholderData: keep,
+    enabled,
   });
 }
 

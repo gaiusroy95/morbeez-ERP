@@ -187,6 +187,17 @@ export class ReceivablesRepository {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('finance.customer'), hashtext($1))`, [customerId]);
   }
 
+  /** The tenant's walk-in customer, created the first time a spot sale needs it. */
+  async walkInCustomerWithClient(client: PoolClient, tenantId: string, userId: string): Promise<string> {
+    await client.query(
+      `INSERT INTO trading_partners.customer (tenant_id, name, is_walk_in, created_by) VALUES ($1, 'Walk-in customers', true, $2)
+       ON CONFLICT (tenant_id) WHERE is_walk_in DO NOTHING`,
+      [tenantId, userId],
+    );
+    const result = await client.query<{ id: string }>('SELECT id FROM trading_partners.customer WHERE is_walk_in');
+    return result.rows[0].id;
+  }
+
   async todayWithClient(client: PoolClient): Promise<string> {
     const result = await client.query<{ today: string }>(
       `SELECT (now() AT TIME ZONE timezone)::date::text AS today FROM tenant.tenant WHERE id = current_tenant_id()`,
@@ -202,7 +213,7 @@ export class ReceivablesRepository {
        RETURNING last_number`,
       [tenantId, kind],
     );
-    const prefix = kind === 'sale' ? 'INV' : 'FC';
+    const prefix = { sale: 'INV', finance_charge: 'FC', crate_charge: 'CRT', spot_sale: 'SPT' }[kind];
     return `${prefix}-${String(result.rows[0].last_number).padStart(6, '0')}`;
   }
 

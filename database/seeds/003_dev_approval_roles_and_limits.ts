@@ -20,6 +20,21 @@ const OPS_MANAGER_PERMISSIONS = [
   'vehicles:write',
   'workforce:read',
   'workforce:write',
+  // Runs the floor: records work and drafts pay, which someone else approves.
+  'payroll:read',
+  'payroll:prepare',
+  // Keeps count of crates in and out; charging for lost ones is Finance's.
+  'crates:read',
+  'crates:write',
+  // Sees drivers' spot sales, sets price bands, and approves small price exceptions.
+  'spot_sales:read',
+  'spot_sales:configure',
+  // Sees AI suggestions; the owner has delegated route and load suggestions
+  // to this role (AI System DR.2). Everything else the AI suggests stays the owner's.
+  'ai:read',
+  'ai:decide:logistics',
+  'logistics:read',
+  'logistics:dispatch',
   'products:read',
   'products:write',
   'approvals:read',
@@ -53,7 +68,28 @@ const ACCOUNTANT_PERMISSIONS = [
   // stays with the owner.
   'tax:read',
   'tax:file',
+  // Checks and pays wages the ops manager drafts; rates and rules stay with the owner.
+  'workforce:read',
+  'payroll:read',
+  'payroll:approve',
+  'payroll:pay',
+  // Keeps the fleet's books: assets, depreciation, loans, hire bills.
+  'vehicles:read',
+  'fleet:finance',
+  // Charges customers and farmers for crates they lost.
+  'crates:read',
+  'crates:charge',
+  'spot_sales:read',
+  // Sees AI suggestions and customer profitability; decides none of them.
+  'ai:read',
 ];
+
+// A driver's login (Driver App Architecture DRV.17): their own trips, and
+// spot sales from them — nothing else. Linked to an employee record by
+// whoever provisions it (DRV.16).
+const DRIVER_EMAIL = 'driver@dev.morbeez.local';
+const DRIVER_PASSWORD = 'dev-only-change-me-123';
+const DRIVER_PERMISSIONS = ['logistics:read', 'logistics:write', 'inventory:write', 'spot_sales:record'];
 
 const HASH_OPTIONS: argon2.Options & { type: typeof argon2.argon2id } = {
   type: argon2.argon2id,
@@ -158,6 +194,10 @@ export async function seed(client: Client): Promise<void> {
   await grantPermissions(client, accountantRoleId, ACCOUNTANT_PERMISSIONS);
   await ensureUser(client, tenantId, ACCOUNTANT_EMAIL, ACCOUNTANT_PASSWORD, accountantRoleId);
 
+  const driverRoleId = await ensureRole(client, tenantId, 'Driver');
+  await grantPermissions(client, driverRoleId, DRIVER_PERMISSIONS);
+  await ensureUser(client, tenantId, DRIVER_EMAIL, DRIVER_PASSWORD, driverRoleId);
+
   // Owner: unlimited, every action type — one wildcard row, not one row
   // per action type.
   await setLimit(client, tenantId, ownerUserId, ownerRoleId, null, null);
@@ -167,6 +207,8 @@ export async function seed(client: Client): Promise<void> {
   // this role (falls through to Owner).
   await setLimit(client, tenantId, ownerUserId, opsManagerRoleId, 'purchase_order', 100000);
   await setLimit(client, tenantId, ownerUserId, opsManagerRoleId, 'vehicle_disposal', 500000);
+  // A spot-sale price exception, sized by how far off band it is.
+  await setLimit(client, tenantId, ownerUserId, opsManagerRoleId, 'spot_sale_price', 500);
 
   // Accountant: bounded, the financial-adjustment action types.
   await setLimit(client, tenantId, ownerUserId, accountantRoleId, 'credit_note', 25000);

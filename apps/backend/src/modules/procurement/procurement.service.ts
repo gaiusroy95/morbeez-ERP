@@ -565,35 +565,43 @@ export class ProcurementService implements OnModuleInit {
     actorUserId: string,
     fields: { orderLineId: string; productId: string; quantity: number },
   ): Promise<LotRecord[]> {
-    return this.db.withTenant(tenantId, async (client) => {
-      const candidates = await this.lots.lockAvailableForProductWithClient(client, tenantId, fields.productId);
+    return this.db.withTenant(tenantId, (client) => this.reserveLotsForOrderLineWithClient(client, tenantId, actorUserId, fields));
+  }
 
-      const claimed: LotRecord[] = [];
-      let remaining = fields.quantity;
-      for (const lot of candidates) {
-        if (remaining <= 0) break;
+  /** The same, inside the caller's transaction — so a whole order reserves or nothing does (Performance Audit PA-03). */
+  async reserveLotsForOrderLineWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    fields: { orderLineId: string; productId: string; quantity: number },
+  ): Promise<LotRecord[]> {
+    const candidates = await this.lots.lockForQuantityWithClient(client, tenantId, fields.productId, fields.quantity);
 
-        const after = await this.lots.reserveWithClient(client, lot.id, lot.version, fields.orderLineId);
-        await this.audit.record(client, {
-          tenantId,
-          actorUserId,
-          action: 'update',
-          entityType: LOT_ENTITY,
-          entityId: lot.id,
-          before: lot as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-        });
-        claimed.push(after);
-        remaining -= Number(lot.currentQuantity ?? 0);
-      }
+    const claimed: LotRecord[] = [];
+    let remaining = fields.quantity;
+    for (const lot of candidates) {
+      if (remaining <= 0) break;
 
-      if (remaining > 0) {
-        throw new ConflictException(
-          `Insufficient available stock for product ${fields.productId}: short by ${remaining}`,
-        );
-      }
-      return claimed;
-    });
+      const after = await this.lots.reserveWithClient(client, lot.id, lot.version, fields.orderLineId);
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: LOT_ENTITY,
+        entityId: lot.id,
+        before: lot as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+      });
+      claimed.push(after);
+      remaining -= Number(lot.currentQuantity ?? 0);
+    }
+
+    if (remaining > 0) {
+      throw new ConflictException(
+        `Insufficient available stock for product ${fields.productId}: short by ${remaining}`,
+      );
+    }
+    return claimed;
   }
 
   /** Reverses reserveLotsForOrderLine — every lot it claimed goes back to 'available'. */

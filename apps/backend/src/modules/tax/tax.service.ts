@@ -334,10 +334,10 @@ export class TaxService {
         name: row.name as string,
         baseUom: row.base_uom as string,
         uqc: TaxRulesRepository.uqcFor(row.base_uom as string),
-        status: row.status as ProductTaxRow['status'],
-        hsnCode: row.hsn_code as string | null,
+        status: row.product_status as ProductTaxRow['status'],
+        hsnCode: row.product_hsn as string | null,
         rule: row.id ? toGstRule(row) : null,
-        version: Number(row.version),
+        version: Number(row.product_version),
       }));
     });
   }

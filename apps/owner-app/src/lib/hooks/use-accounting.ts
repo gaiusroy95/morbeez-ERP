@@ -33,10 +33,11 @@ export function usePeriods(enabled = true) {
   });
 }
 
-export function useAccounts(includeInactive = false) {
+export function useAccounts(includeInactive = false, enabled = true) {
   return useQuery({
     queryKey: ['accounting', 'accounts', includeInactive],
     queryFn: () => apiGet<AccountRecord[]>('accounting/accounts', { includeInactive: includeInactive ? 'true' : undefined }),
+    enabled,
     placeholderData: keep,
   });
 }

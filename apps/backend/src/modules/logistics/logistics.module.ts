@@ -1,3 +1,5 @@
+import { PinsController } from './pins.controller';
+import { PinsService } from './pins.service';
 import { Module } from '@nestjs/common';
 import { LogisticsController } from './logistics.controller';
 import { LogisticsService } from './logistics.service';
@@ -25,9 +27,10 @@ import { FinanceModule } from '../finance/finance.module';
 // also recorded as a Finance customer payment, in the same transaction.
 @Module({
   imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule],
-  controllers: [LogisticsController],
+  controllers: [LogisticsController, PinsController],
   providers: [
     LogisticsService,
+    PinsService,
     TripsRepository,
     TripStopsRepository,
     TripExpensesRepository,

@@ -6,8 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import com.morbeez.driver.data.security.TokenStore
 import com.morbeez.driver.data.sync.SyncWorker
 import com.morbeez.driver.ui.nav.MorbeezNavGraph
@@ -39,6 +37,6 @@ class MainActivity : ComponentActivity() {
         // periodic background pass (Driver App Architecture, DRV.5) — a
         // driver reopening the app after a signal dead zone shouldn't have
         // to wait for the next scheduled tick.
-        WorkManager.getInstance(this).enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+        SyncWorker.requestNow(this)
     }
 }

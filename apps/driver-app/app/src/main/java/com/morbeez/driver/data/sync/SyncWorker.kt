@@ -2,7 +2,12 @@ package com.morbeez.driver.data.sync
 
 import android.content.Context
 import androidx.hilt.work.HiltWorker
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -30,5 +35,19 @@ class SyncWorker @AssistedInject constructor(
 
     companion object {
         const val UNIQUE_WORK_NAME = "morbeez-driver-sync"
+        const val NOW_WORK_NAME = "morbeez-driver-sync-now"
+
+        /**
+         * One sync as soon as there's a network (Performance Audit PA-11).
+         * Asking again while one is waiting or running joins it instead of
+         * starting another — the app coming to the foreground, a Refresh tap
+         * and the periodic pass used to stack up and race.
+         */
+        fun requestNow(context: Context) {
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(NOW_WORK_NAME, ExistingWorkPolicy.KEEP, request)
+        }
     }
 }

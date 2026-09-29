@@ -133,6 +133,34 @@ export class ApprovalsService {
     });
   }
 
+  /**
+   * For an action that always needs sign-off whatever its size — a price
+   * outside its band — rather than past a configured threshold: files the
+   * request inside the caller's transaction. Who may decide it, and up to
+   * what amount, is still the role limits' call (resolveAuthority).
+   */
+  async requireWithClient(
+    client: PoolClient,
+    tenantId: string,
+    requestedBy: string,
+    fields: { actionType: string; subjectId: string; amount: number },
+  ): Promise<ApprovalRequestRecord> {
+    const request = await this.requests.createWithClient(client, tenantId, requestedBy, {
+      actionType: fields.actionType,
+      subjectId: fields.subjectId,
+      amount: fields.amount,
+    });
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId: requestedBy,
+      action: 'create',
+      entityType: ENTITY_TYPE,
+      entityId: request.id,
+      after: request as unknown as Record<string, unknown>,
+    });
+    return request;
+  }
+
   async decide(
     tenantId: string,
     deciderUserId: string,

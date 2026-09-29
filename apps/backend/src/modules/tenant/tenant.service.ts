@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { TenantRepository } from './repositories/tenant.repository';
 import { TenantRecord } from './entities/tenant.entity';
@@ -33,25 +33,35 @@ export class TenantService {
     ownerEmail: string,
     ownerPassword: string,
   ): Promise<NewBusinessAccount> {
-    return this.db.transaction(async (client) => {
-      const tenant = await this.tenants.createWithClient(
-        client,
-        businessName,
-        'INR',
-        'Asia/Kolkata',
-      );
-      await this.db.setTenantContext(client, tenant.id);
-      const owner = await this.users.provisionOwner(
-        client,
-        tenant.id,
-        ownerEmail,
-        ownerPassword,
-      );
-      return { tenant, owner };
-    });
-    // A thrown error anywhere above rolls back the whole transaction
-    // (DatabaseService.transaction) — no orphaned tenant row, no manual
-    // cleanup needed.
+    try {
+      return await this.db.transaction(async (client) => {
+        const tenant = await this.tenants.createWithClient(
+          client,
+          businessName,
+          'INR',
+          'Asia/Kolkata',
+        );
+        await this.db.setTenantContext(client, tenant.id);
+        const owner = await this.users.provisionOwner(
+          client,
+          tenant.id,
+          ownerEmail,
+          ownerPassword,
+        );
+        return { tenant, owner };
+      });
+      // A thrown error anywhere above rolls back the whole transaction
+      // (DatabaseService.transaction) — no orphaned tenant row, no manual
+      // cleanup needed.
+    } catch (err) {
+      // The email already logs in somewhere (app_user_email_unique,
+      // Security Audit SA-01). Saying so does confirm the address has an
+      // account; signup is rate-limited per IP for that reason (SA-02).
+      if ((err as { code?: string }).code === '23505') {
+        throw new ConflictException('This email already has a Morbeez login. Sign in instead, or use a different email.');
+      }
+      throw err;
+    }
   }
 
   async getById(tenantId: string): Promise<TenantRecord> {

@@ -67,6 +67,8 @@ dependencies {
 
     // WorkManager — the sync engine's execution model (Driver App Architecture DRV.5)
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // Reads a photo's rotation before it is shrunk for upload (PhotoShrinker).
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
 

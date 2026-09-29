@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { VehiclesRepository } from './repositories/vehicles.repository';
@@ -8,6 +8,9 @@ import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 
 const ENTITY_TYPE = 'vehicle';
+
+const isoDay = (v: string | Date | null): string | null =>
+  v === null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 
 @Injectable()
 export class VehiclesService {
@@ -57,6 +60,14 @@ export class VehiclesService {
     return this.db.withTenant(tenantId, async (client) => {
       const before = await this.vehicles.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Vehicle not found');
+      const books = await this.vehicles.bookStateWithClient(client, id);
+      if (
+        books.onBooks &&
+        ((dto.acquisitionCost !== undefined && Number(dto.acquisitionCost) !== Number(before.acquisitionCost)) ||
+          (dto.acquisitionDate !== undefined && dto.acquisitionDate.slice(0, 10) !== isoDay(before.acquisitionDate)))
+      ) {
+        throw new ConflictException('The acquisition cost and date come from the asset register once the vehicle is capitalised');
+      }
 
       const after = await this.vehicles.updateWithClient(client, id, dto.version, {
         registrationNumber: dto.registrationNumber,
@@ -88,6 +99,15 @@ export class VehiclesService {
     return this.db.withTenant(tenantId, async (client) => {
       const before = await this.vehicles.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Vehicle not found');
+      // VEH.5: an asset leaves the books only through its disposal event,
+      // which records proceeds and the gain or loss — and can't be undone.
+      const books = await this.vehicles.bookStateWithClient(client, id);
+      if (books.disposalRecorded && status !== 'disposed') {
+        throw new ConflictException('This vehicle has been disposed of — that is final');
+      }
+      if (books.onBooks && !books.disposalRecorded && status === 'disposed') {
+        throw new ConflictException('This vehicle is on the books — record its disposal under Vehicles › Asset, with the proceeds');
+      }
 
       const after = await this.vehicles.setStatusWithClient(client, id, status);
       if (!after) throw new NotFoundException('Vehicle not found');

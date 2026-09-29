@@ -1,12 +1,14 @@
 import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import configuration from './config/configuration';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { DatabaseModule } from './infra/database/database.module';
 import { RedisModule } from './infra/redis/redis.module';
 import { LoggerModule } from './infra/logging/logger.module';
 import { AuditModule } from './infra/audit/audit.module';
+import { RateLimitModule } from './infra/rate-limit/rate-limit.module';
+import { TenantRateLimitInterceptor } from './infra/rate-limit/tenant-rate-limit.interceptor';
 import { HealthModule } from './health/health.module';
 import { TenantModule } from './modules/tenant/tenant.module';
 import { UsersModule } from './modules/users/users.module';
@@ -23,6 +25,8 @@ import { AccountingModule } from './modules/accounting/accounting.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { WorkforceModule } from './modules/workforce/workforce.module';
 import { VehiclesModule } from './modules/vehicles/vehicles.module';
+import { CratesModule } from './modules/crates/crates.module';
+import { SpotSalesModule } from './modules/spot-sales/spot-sales.module';
 import { AiModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 
@@ -35,6 +39,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     LoggerModule,
     DatabaseModule,
     RedisModule,
+    RateLimitModule,
     AuditModule,
     HealthModule,
     TenantModule,
@@ -52,6 +57,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     TaxModule,
     WorkforceModule,
     VehiclesModule,
+    CratesModule,
+    SpotSalesModule,
     AiModule,
     DashboardModule,
   ],
@@ -71,6 +78,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     // Error handling: one consistent envelope for every error, anywhere
     // in the app (Constitution IV.6).
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    // Per-tenant request budget (Constitution IV.7, Security Audit SA-02).
+    { provide: APP_INTERCEPTOR, useClass: TenantRateLimitInterceptor },
   ],
 })
 export class AppModule {}

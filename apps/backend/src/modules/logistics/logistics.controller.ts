@@ -4,11 +4,14 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Post,
+  Put,
   Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Headers,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -16,6 +19,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { idempotencyKey } from '../../common/idempotency';
 import { AuthContext } from '../../common/types/auth-context';
 import { ListTripsQueryDto } from './dto/list-trips-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
@@ -24,6 +28,7 @@ import { CreateTripDto } from './dto/create-trip.dto';
 import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
 import { VersionDto } from './dto/version.dto';
+import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { RecordExpenseDto } from './dto/record-expense.dto';
 import { ReconcileTripDto } from './dto/reconcile-trip.dto';
 import { CompleteDeliveryDto } from './dto/complete-delivery.dto';
@@ -130,6 +135,16 @@ export class LogisticsController {
     return this.logisticsService.addPickupStop(user.tenantId, user.userId, tripId, dto);
   }
 
+  @Put(':id/stops/order')
+  @RequirePermissions('logistics:dispatch')
+  reorderStops(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) tripId: string,
+    @Body() dto: ReorderStopsDto,
+  ): Promise<TripStopRecord[]> {
+    return this.logisticsService.reorderStops(user.tenantId, user.userId, tripId, dto.version, dto.stopIds);
+  }
+
   @Post(':id/stops/delivery')
   @RequirePermissions('logistics:dispatch')
   addDeliveryStop(
@@ -229,8 +244,9 @@ export class LogisticsController {
     @CurrentUser() user: AuthContext,
     @Param('id') tripId: string,
     @Body() dto: RecordExpenseDto,
+    @Headers('idempotency-key') key?: string,
   ): Promise<TripExpenseRecord> {
-    return this.logisticsService.recordExpense(user.tenantId, user.userId, isDispatcher(user), tripId, dto);
+    return this.logisticsService.recordExpense(user.tenantId, user.userId, isDispatcher(user), tripId, dto, idempotencyKey(key));
   }
 
   // ---- Collections ----
@@ -252,6 +268,7 @@ export class LogisticsController {
     @Param('id') tripId: string,
     @Param('stopId') stopId: string,
     @Body() dto: RecordCollectionDto,
+    @Headers('idempotency-key') key?: string,
   ): Promise<CustomerCollectionRecord> {
     return this.logisticsService.recordCollection(
       user.tenantId,
@@ -260,6 +277,7 @@ export class LogisticsController {
       tripId,
       stopId,
       dto,
+      idempotencyKey(key),
     );
   }
 

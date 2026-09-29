@@ -11,6 +11,8 @@ import com.morbeez.driver.data.repository.TripRepository
 import com.squareup.moshi.Moshi
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.asRequestBody
@@ -39,15 +41,22 @@ class SyncEngine @Inject constructor(
     private val tripRepository: TripRepository,
     private val moshi: Moshi,
 ) {
-    suspend fun sync(): SyncResult {
+    suspend fun sync(): SyncResult = passes.withLock {
+        // One pass at a time across every trigger — periodic, app opened,
+        // Refresh — so two never race to send the same queued action
+        // (Performance Audit PA-11).
         val operationsDrained = pushOperations()
-        val photosDrained = pushPhotos()
 
-        if (operationsDrained && photosDrained) {
+        // Push before pull (DRV.9) is about actions: a pull must never land
+        // on top of one the server hasn't seen. Photos change no state a pull
+        // could overwrite, so the route comes down first and the (slow)
+        // photo uploads follow (PA-12).
+        if (operationsDrained) {
             runCatching { tripRepository.refreshMyTrips() }
         }
+        val photosDrained = pushPhotos()
 
-        return if (operationsDrained && photosDrained) SyncResult.SUCCESS else SyncResult.PARTIAL
+        return@withLock if (operationsDrained && photosDrained) SyncResult.SUCCESS else SyncResult.PARTIAL
     }
 
     private suspend fun pushOperations(): Boolean {
@@ -87,7 +96,11 @@ class SyncEngine @Inject constructor(
             }
             PendingOperationType.RECORD_EXPENSE -> {
                 val payload = parse<RecordExpensePayload>(operation.payloadJson)
-                api.recordExpense(operation.tripId, RecordExpenseRequest(payload.category, payload.amount, payload.notes))
+                api.recordExpense(
+                    operation.tripId,
+                    RecordExpenseRequest(payload.category, payload.amount, payload.notes),
+                    operation.idempotencyKey,
+                )
             }
             PendingOperationType.RECORD_COLLECTION -> {
                 val payload = parse<RecordCollectionPayload>(operation.payloadJson)
@@ -95,6 +108,7 @@ class SyncEngine @Inject constructor(
                     operation.tripId,
                     payload.stopId,
                     RecordCollectionRequest(payload.amount, payload.method, payload.notes),
+                    operation.idempotencyKey,
                 )
             }
         }
@@ -121,5 +135,10 @@ class SyncEngine @Inject constructor(
             }
         }
         return true
+    }
+
+    private companion object {
+        // Process-wide, not per instance: WorkManager builds a new engine for each run.
+        val passes = Mutex()
     }
 }

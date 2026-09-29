@@ -16,6 +16,8 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { OrdersService } from '../orders/orders.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerService } from '../finance/ledger.service';
+import { PayrollService } from '../workforce/payroll.service';
+import { FleetService } from '../vehicles/fleet.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { TripRecord } from './entities/trip.entity';
@@ -185,7 +187,7 @@ describe('LogisticsService', () => {
         },
         {
           provide: TripReconciliationsRepository,
-          useValue: { findByTripWithClient: jest.fn(), createWithClient: jest.fn() },
+          useValue: { findByTripWithClient: jest.fn(), createWithClient: jest.fn(), spotSalesWithClient: jest.fn().mockResolvedValue({ cash: '0.00', pending: 0 }) },
         },
         {
           provide: TripStopPhotosRepository,
@@ -208,6 +210,8 @@ describe('LogisticsService', () => {
         },
         { provide: OrdersService, useValue: { getOrder: jest.fn(), markDelivered: jest.fn() } },
         { provide: ReceivablesService, useValue: { recordCollectionPaymentWithClient: jest.fn() } },
+        { provide: PayrollService, useValue: { recordTripWorkWithClient: jest.fn() } },
+        { provide: FleetService, useValue: { assertRoadworthyWithClient: jest.fn() } },
         {
           provide: LedgerService,
           useValue: {
@@ -341,6 +345,7 @@ describe('LogisticsService', () => {
       notes: null,
       recordedBy: 'dispatcher-1',
       recordedAt,
+      clientRef: null,
     });
 
     await service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'toll', amount: 85 });
@@ -517,6 +522,7 @@ describe('LogisticsService', () => {
       notes: null,
       collectedBy: 'dispatcher-1',
       collectedAt: new Date(),
+      clientRef: null,
     });
 
     const result = await service.recordCollection('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', {
@@ -565,6 +571,7 @@ describe('LogisticsService', () => {
       advanceAmount: String(fields.advanceAmount),
       totalExpenses: String(fields.totalExpenses),
       cashReturned: String(fields.cashReturned),
+      spotCash: fields.spotCash,
       variance: String(fields.variance),
       notes: fields.notes,
       reconciledBy: 'user-1',
@@ -580,8 +587,22 @@ describe('LogisticsService', () => {
       expect.anything(),
       'tenant-1',
       'user-1',
-      expect.objectContaining({ id: 'recon-1', tripId: 'trip-1', advanceAmount: '500', totalExpenses: '300', cashReturned: '180' }),
+      expect.objectContaining({ id: 'recon-1', tripId: 'trip-1', advanceAmount: '500', totalExpenses: '300', cashReturned: '180', cashIn: '0.00' }),
     );
+  });
+
+  it('reconcileTrip expects back the cash taken for spot sales, and waits for pending ones', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '500' });
+    expenses.sumByTripWithClient.mockResolvedValue(300);
+    reconciliations.spotSalesWithClient.mockResolvedValueOnce({ cash: '0.00', pending: 1 });
+    await expect(service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 200 })).rejects.toThrow(/await an approval/);
+
+    reconciliations.spotSalesWithClient.mockResolvedValueOnce({ cash: '1250.00', pending: 0 });
+    reconciliations.createWithClient.mockImplementation(async (_c, _by, fields) => ({ ...fields, id: 'r', advanceAmount: '500', totalExpenses: '300', cashReturned: '1450', variance: String(fields.variance), reconciledBy: 'u', reconciledAt: new Date() }) as never);
+    trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 1450 });
+    // 500 advance + 1,250 spot cash − 300 expenses − 1,450 returned
+    expect(result.variance).toBe('0');
   });
 
   it('reconcileTrip refuses a trip that is not completed', async () => {

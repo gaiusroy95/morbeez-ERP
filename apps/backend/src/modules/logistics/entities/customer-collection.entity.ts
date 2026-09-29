@@ -14,4 +14,6 @@ export interface CustomerCollectionRecord {
   notes: string | null;
   collectedBy: string;
   collectedAt: Date;
+  /** The Idempotency-Key it was recorded under, when the client sent one. */
+  clientRef: string | null;
 }

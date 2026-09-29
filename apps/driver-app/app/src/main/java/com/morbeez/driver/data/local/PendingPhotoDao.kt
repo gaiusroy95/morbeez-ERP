@@ -16,6 +16,9 @@ interface PendingPhotoDao {
     @Insert
     suspend fun insert(photo: PendingPhotoEntity)
 
+    @Query("SELECT count(*) FROM pending_photos")
+    suspend fun count(): Int
+
     @Query("UPDATE pending_photos SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: String)
 

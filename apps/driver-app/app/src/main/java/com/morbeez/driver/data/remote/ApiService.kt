@@ -77,8 +77,15 @@ interface ApiService {
     @GET("logistics/trips/{tripId}/expenses")
     suspend fun listExpenses(@Path("tripId") tripId: String): List<TripExpenseResponse>
 
+    // The queued operation's key goes with every attempt, so a retry after a
+    // lost response returns the first expense instead of recording a second
+    // (Security Audit SA-03; Constitution I.7, IV.3).
     @POST("logistics/trips/{tripId}/expenses")
-    suspend fun recordExpense(@Path("tripId") tripId: String, @Body body: RecordExpenseRequest): TripExpenseResponse
+    suspend fun recordExpense(
+        @Path("tripId") tripId: String,
+        @Body body: RecordExpenseRequest,
+        @Header("Idempotency-Key") idempotencyKey: String,
+    ): TripExpenseResponse
 
     // ---- Collections ----
 
@@ -93,19 +100,6 @@ interface ApiService {
         @Path("tripId") tripId: String,
         @Path("stopId") stopId: String,
         @Body body: RecordCollectionRequest,
+        @Header("Idempotency-Key") idempotencyKey: String,
     ): CustomerCollectionResponse
-
-    // ---- Cross-module reads used only to render Stop Detail ----
-
-    @GET("procurement/pickups/{id}")
-    suspend fun getPickup(@Path("id") id: String): PickupResponse
-
-    @GET("orders/{id}")
-    suspend fun getOrder(@Path("id") id: String): OrderResponse
-
-    @GET("farmers/{id}")
-    suspend fun getFarmer(@Path("id") id: String): FarmerResponse
-
-    @GET("customers/{id}")
-    suspend fun getCustomer(@Path("id") id: String): CustomerResponse
 }

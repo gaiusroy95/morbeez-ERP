@@ -27,6 +27,10 @@ interface PendingOperationDao {
     @Query("DELETE FROM pending_operations WHERE idempotencyKey = :key")
     suspend fun delete(key: String)
 
+    /** Actions recorded on this phone that the server hasn't confirmed yet. */
+    @Query("SELECT count(*) FROM pending_operations")
+    suspend fun count(): Int
+
     @Query("SELECT COALESCE(MAX(sequence), 0) FROM pending_operations")
     suspend fun maxSequence(): Long
 }

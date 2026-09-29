@@ -5,6 +5,7 @@ import {
   decodeAccessToken,
   isExpired,
   REFRESH_COOKIE,
+  forwardedFor,
   refreshTokens,
   setSessionCookies,
   TokenPair,
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
   let rotated: TokenPair | null = null;
 
   if ((!claims || isExpired(claims)) && refresh) {
-    rotated = await refreshTokens(refresh);
+    rotated = await refreshTokens(refresh, forwardedFor(request));
     claims = rotated ? decodeAccessToken(rotated.accessToken) : null;
   }
 

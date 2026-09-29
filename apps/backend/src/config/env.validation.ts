@@ -50,6 +50,21 @@ export const envSchema = z
       .default('true')
       .transform((v) => v === 'true'),
 
+    // Sign-in attempts one network address may make a minute (Security Audit
+    // SA-02). Generous on purpose: Indian mobile carriers put many phones
+    // behind one shared address, and a fleet of drivers signs in at dispatch.
+    // Per-account failure limits do the real work against guessing.
+    LOGIN_ATTEMPTS_PER_IP_PER_MINUTE: z.coerce.number().int().positive().default(60),
+
+    // Per-tenant request budget on authenticated routes (Constitution IV.7).
+    TENANT_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(1200),
+
+    // Which hops in front of the API are trusted to report the client's IP
+    // (Express `trust proxy`): the owner app's server and, in production,
+    // the load balancer. Per-IP login and signup limits are only as good
+    // as this — trusting too much lets a caller pick its own IP.
+    TRUST_PROXY: z.string().default('loopback'),
+
     // Database pool sizing — conservative defaults for a single small
     // instance; production tunes this per the managed RDS instance class.
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),

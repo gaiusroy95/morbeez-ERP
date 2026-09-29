@@ -41,6 +41,7 @@ describe('VehiclesService', () => {
             createWithClient: jest.fn(),
             updateWithClient: jest.fn(),
             setStatusWithClient: jest.fn(),
+            bookStateWithClient: jest.fn().mockResolvedValue({ onBooks: false, disposalRecorded: false }),
           },
         },
         {
@@ -75,5 +76,26 @@ describe('VehiclesService', () => {
         after: expect.objectContaining({ status: 'maintenance' }),
       }),
     );
+  });
+
+  it('setStatus() refuses to dispose of a capitalised vehicle without its disposal event (VEH.5)', async () => {
+    repo.findByIdWithClient.mockResolvedValue(mockVehicle);
+    repo.bookStateWithClient.mockResolvedValue({ onBooks: true, disposalRecorded: false });
+    await expect(service.setStatus('tenant-1', 'user-1', 'vehicle-1', 'disposed')).rejects.toThrow(/record its disposal/);
+    expect(repo.setStatusWithClient).not.toHaveBeenCalled();
+  });
+
+  it('setStatus() never brings back a vehicle whose disposal is recorded', async () => {
+    repo.findByIdWithClient.mockResolvedValue({ ...mockVehicle, status: 'disposed' });
+    repo.bookStateWithClient.mockResolvedValue({ onBooks: true, disposalRecorded: true });
+    await expect(service.setStatus('tenant-1', 'user-1', 'vehicle-1', 'active')).rejects.toThrow(/final/);
+  });
+
+  it('update() keeps the acquisition cost that the asset register set', async () => {
+    repo.findByIdWithClient.mockResolvedValue(mockVehicle);
+    repo.bookStateWithClient.mockResolvedValue({ onBooks: true, disposalRecorded: false });
+    await expect(service.update('tenant-1', 'user-1', 'vehicle-1', { version: 1, acquisitionCost: 1 })).rejects.toThrow(/asset register/);
+    repo.updateWithClient.mockResolvedValue(mockVehicle);
+    await expect(service.update('tenant-1', 'user-1', 'vehicle-1', { version: 1, acquisitionCost: 1500000, capacityKg: 2500 })).resolves.toBeDefined();
   });
 });

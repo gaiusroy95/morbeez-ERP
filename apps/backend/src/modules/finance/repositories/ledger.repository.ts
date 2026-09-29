@@ -30,7 +30,26 @@ export type LedgerAccount =
   | 'output_sgst'
   | 'output_igst'
   | 'output_cess'
-  | 'tds_payable';
+  | 'tds_payable'
+  | 'employee_advance'
+  | 'wages_payable'
+  | 'salaries_wages'
+  | 'incentives_expense'
+  | 'vehicle_fuel'
+  | 'vehicle_insurance_taxes'
+  | 'vehicle_hire_charges'
+  | 'repairs_maintenance'
+  | 'depreciation_expense'
+  | 'fixed_assets_vehicles'
+  | 'accumulated_depreciation'
+  | 'gain_on_disposal'
+  | 'loss_on_disposal'
+  | 'owner_capital'
+  | 'hire_payable'
+  | 'vehicle_loans'
+  | 'loan_interest'
+  | 'crate_recoveries'
+  | 'crate_purchases';
 
 export type LedgerEntryType =
   | 'invoice_issued'
@@ -50,7 +69,24 @@ export type LedgerEntryType =
   | 'period_close'
   | 'period_reopen'
   | 'tds_deducted'
-  | 'tds_deposited';
+  | 'tds_deposited'
+  | 'worker_advance_paid'
+  | 'payroll_accrued'
+  | 'payroll_paid'
+  | 'payroll_voided'
+  | 'vehicle_fuel_bought'
+  | 'vehicle_maintained'
+  | 'vehicle_document_paid'
+  | 'vehicle_capitalized'
+  | 'vehicle_depreciated'
+  | 'vehicle_disposed'
+  | 'vehicle_loan_disbursed'
+  | 'vehicle_loan_emi_paid'
+  | 'vehicle_hire_billed'
+  | 'vehicle_hire_paid'
+  | 'crate_charge_invoiced'
+  | 'crate_charge_deducted'
+  | 'crates_purchased';
 
 export interface LedgerParty {
   type: 'customer' | 'farmer';

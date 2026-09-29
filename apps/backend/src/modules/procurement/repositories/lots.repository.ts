@@ -198,19 +198,47 @@ export class LotsRepository {
    * until this transaction commits or rolls back, then re-reads current
    * (post-commit) rows — never stale ones.
    */
-  async lockAvailableForProductWithClient(
+  /**
+   * Locks just enough available lots of a product to cover `quantity`,
+   * oldest first (Performance Audit PA-03). It used to lock every available
+   * lot of the product, so each order for tomatoes waited on the one before
+   * it. Lots another order is holding are skipped, not waited on; only if
+   * what's left can't cover the quantity does it wait for those, so a
+   * busy moment never turns into a false "insufficient stock".
+   */
+  async lockForQuantityWithClient(
     client: PoolClient,
     tenantId: string,
     productId: string,
+    quantity: number,
   ): Promise<LotRecord[]> {
-    const result = await client.query<LotRow>(
-      `SELECT * FROM commerce.lot
-       WHERE tenant_id = $1 AND product_id = $2 AND status = 'available' AND current_quantity > 0
-       ORDER BY received_at ASC
-       FOR UPDATE`,
-      [tenantId, productId],
-    );
-    return result.rows.map(toRecord);
+    const taken: LotRecord[] = [];
+    let covered = 0;
+    const next = async (skipLocked: boolean) => {
+      const result = await client.query<LotRow>(
+        `SELECT * FROM commerce.lot
+         WHERE tenant_id = $1 AND product_id = $2 AND status = 'available' AND current_quantity > 0
+           AND NOT (id = ANY($3::uuid[]))
+         ORDER BY received_at ASC, id
+         LIMIT ${BATCH}
+         FOR UPDATE ${skipLocked ? 'SKIP LOCKED' : ''}`,
+        [tenantId, productId, taken.map((l) => l.id)],
+      );
+      return result.rows.map(toRecord);
+    };
+    for (const skipLocked of [true, false]) {
+      for (;;) {
+        const batch = await next(skipLocked);
+        for (const lot of batch) {
+          if (covered >= quantity) break;
+          taken.push(lot);
+          covered += Number(lot.currentQuantity ?? 0);
+        }
+        if (covered >= quantity || batch.length < BATCH) break;
+      }
+      if (covered >= quantity) break;
+    }
+    return taken;
   }
 
   async reserveWithClient(
@@ -374,3 +402,7 @@ export class LotsRepository {
     return toRecord(result.rows[0]);
   }
 }
+
+// Every row a lock batch returns stays locked until commit, so keep
+// batches small: most order lines are covered by the first lot or two.
+const BATCH = 5;

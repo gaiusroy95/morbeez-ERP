@@ -462,6 +462,8 @@ export class ReceivablesService {
       collectionId: string | null;
       receivedAt: Date;
       allocations: { id: string; amount: string }[];
+      // Where the money lands, when not the method's usual account (a driver's spot-sale cash).
+      receivedInto?: LedgerAccount;
     },
   ): Promise<string> {
     const paymentId = await this.receivables.insertPaymentWithClient(client, {
@@ -490,7 +492,7 @@ export class ReceivablesService {
       memo: `Payment from ${p.customerName} (${p.method}${p.reference ? `, ${p.reference}` : ''})`,
       createdBy: actorUserId,
       lines: [
-        { account: receivingAccount(p.method), debit: subtractMoney(p.amount, p.fee) },
+        { account: p.receivedInto ?? receivingAccount(p.method), debit: subtractMoney(p.amount, p.fee) },
         { account: 'finance_costs', debit: p.fee },
         { account: 'accounts_receivable', party: { type: 'customer', id: p.customerId }, credit: p.amount },
       ],
@@ -511,6 +513,175 @@ export class ReceivablesService {
       },
     });
     return paymentId;
+  }
+
+  // ---- Crate charges (called by Crates, inside its transaction) ----
+
+  /**
+   * Charges a customer for crates they lost: its own invoice ('crate_charge',
+   * CRT-000001), taxed by the tenant's GST rules on the crate type's HSN — a
+   * charge for lost crates is a supply of those crates — and due on the
+   * customer's usual terms:
+   *   Dr Accounts receivable / Cr Crate loss recoveries / Cr Output GST
+   */
+  async issueCrateChargeWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    input: { customerId: string; movementId: string; description: string; quantity: string; unitPrice: string; hsnCode: string | null; occurredAt: Date },
+  ): Promise<{ invoiceId: string; invoiceNumber: string; amount: string; taxAmount: string; entryId: string }> {
+    await this.receivables.lockCustomerWithClient(client, input.customerId);
+    const customer = await this.customers.getByIdWithClient(client, input.customerId);
+    const priced = await this.receivables.priceLinesWithClient(client, [{ quantity: input.quantity, unitPrice: input.unitPrice }]);
+    if (!isPositiveMoney(priced.total)) throw new BadRequestException('The charge comes to nothing');
+    const today = await this.receivables.todayWithClient(client);
+    const tax = await this.taxRules.computeInvoiceTaxWithClient(client, {
+      customerId: customer.id,
+      issuedOn: today,
+      lines: [{ productId: null, hsnCode: input.hsnCode, taxableValue: priced.total }],
+    });
+    const invoiceNumber = await this.receivables.nextInvoiceNumberWithClient(client, tenantId, 'crate_charge');
+    const { invoiceId, lineIds } = await this.receivables.insertInvoiceWithClient(client, {
+      tenantId,
+      invoiceNumber,
+      kind: 'crate_charge',
+      customerId: customer.id,
+      orderId: null,
+      sourceInvoiceId: null,
+      issuedAt: input.occurredAt,
+      dueDate: addDays(today, customer.paymentTermsDays),
+      amount: tax.total,
+      createdBy: actorUserId,
+      lines: [
+        { orderLineId: null, productId: null, description: input.description, quantity: input.quantity, unitPrice: input.unitPrice, amount: priced.total },
+      ],
+    });
+    await this.taxRules.recordInvoiceTaxWithClient(client, tenantId, invoiceId, lineIds, tax);
+    const entryId = await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'crate_charge_invoiced',
+      sourceType: 'invoice',
+      sourceId: invoiceId,
+      occurredAt: input.occurredAt,
+      memo: `${invoiceNumber} to ${customer.name}: ${input.description}`,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'accounts_receivable', party: { type: 'customer', id: customer.id }, debit: tax.total },
+        { account: 'crate_recoveries', credit: tax.taxableValue },
+        { account: 'output_cgst', credit: tax.cgst },
+        { account: 'output_sgst', credit: tax.sgst },
+        { account: 'output_igst', credit: tax.igst },
+        { account: 'output_cess', credit: tax.cess },
+      ],
+    });
+    await this.applyHeldCreditWithClient(client, tenantId, customer.id);
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'create',
+      entityType: INVOICE_ENTITY,
+      entityId: invoiceId,
+      after: { invoiceNumber, kind: 'crate_charge', customerId: customer.id, crateMovementId: input.movementId, amount: tax.total, taxableValue: tax.taxableValue },
+    });
+    return { invoiceId, invoiceNumber, amount: tax.total, taxAmount: subtractMoney(tax.total, tax.taxableValue), entryId };
+  }
+
+  // ---- Spot sales (called by Spot sales, inside its transaction) ----
+
+  /**
+   * A driver's sale to a walk-in buyer, paid on the spot: its own invoice
+   * ('spot_sale', SPT-000001) to the tenant's walk-in customer, GST by the
+   * tax rules on each product, and the payment applied to it at once —
+   *   Dr Accounts receivable / Cr Sales / Cr Output GST
+   *   Dr Cash with drivers (cash — the driver holds it until the trip is
+   *      reconciled) or Bank (UPI) / Cr Accounts receivable
+   * so the walk-in customer never carries a balance.
+   */
+  async issueSpotSaleWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    input: {
+      saleId: string;
+      saleNumber: string;
+      buyer: string | null;
+      lines: { productId: string; description: string; quantity: string; unitPrice: string }[];
+      method: 'cash' | 'upi';
+      reference: string | null;
+      occurredAt: Date;
+    },
+  ): Promise<{ invoiceId: string; invoiceNumber: string; taxableValue: string; total: string; paymentId: string }> {
+    const customerId = await this.receivables.walkInCustomerWithClient(client, tenantId, actorUserId);
+    await this.receivables.lockCustomerWithClient(client, customerId);
+    const priced = await this.receivables.priceLinesWithClient(client, input.lines);
+    const today = await this.receivables.todayWithClient(client);
+    const tax = await this.taxRules.computeInvoiceTaxWithClient(client, {
+      customerId,
+      issuedOn: today,
+      lines: input.lines.map((l, i) => ({ productId: l.productId, taxableValue: priced.amounts[i] })),
+    });
+    const invoiceNumber = await this.receivables.nextInvoiceNumberWithClient(client, tenantId, 'spot_sale');
+    const { invoiceId, lineIds } = await this.receivables.insertInvoiceWithClient(client, {
+      tenantId,
+      invoiceNumber,
+      kind: 'spot_sale',
+      customerId,
+      orderId: null,
+      sourceInvoiceId: null,
+      issuedAt: input.occurredAt,
+      dueDate: today,
+      amount: tax.total,
+      createdBy: actorUserId,
+      lines: input.lines.map((l, i) => ({
+        orderLineId: null,
+        productId: l.productId,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        amount: priced.amounts[i],
+      })),
+    });
+    await this.taxRules.recordInvoiceTaxWithClient(client, tenantId, invoiceId, lineIds, tax);
+    const label = `${input.saleNumber}${input.buyer ? ` to ${input.buyer}` : ' (walk-in)'}`;
+    await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'invoice_issued',
+      sourceType: 'invoice',
+      sourceId: invoiceId,
+      occurredAt: input.occurredAt,
+      memo: `${invoiceNumber}: spot sale ${label}`,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'accounts_receivable', party: { type: 'customer', id: customerId }, debit: tax.total },
+        { account: 'revenue_sales', credit: tax.taxableValue },
+        { account: 'output_cgst', credit: tax.cgst },
+        { account: 'output_sgst', credit: tax.sgst },
+        { account: 'output_igst', credit: tax.igst },
+        { account: 'output_cess', credit: tax.cess },
+      ],
+    });
+    const paymentId = await this.postPaymentWithClient(client, tenantId, actorUserId, {
+      customerId,
+      customerName: 'Walk-in customers',
+      amount: tax.total,
+      fee: '0.00',
+      method: input.method,
+      reference: input.reference,
+      notes: `Spot sale ${label}`,
+      collectionId: null,
+      receivedAt: input.occurredAt,
+      allocations: [{ id: invoiceId, amount: tax.total }],
+      receivedInto: input.method === 'cash' ? 'cash_with_drivers' : 'bank',
+    });
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'create',
+      entityType: INVOICE_ENTITY,
+      entityId: invoiceId,
+      after: { invoiceNumber, kind: 'spot_sale', spotSaleId: input.saleId, amount: tax.total, taxableValue: tax.taxableValue },
+    });
+    return { invoiceId, invoiceNumber, taxableValue: tax.taxableValue, total: tax.total, paymentId };
   }
 
   /** Credit on account (earlier unapplied payments) is drawn down against open invoices, oldest first. */

@@ -12,4 +12,6 @@ export interface TripExpenseRecord {
   notes: string | null;
   recordedBy: string;
   recordedAt: Date;
+  /** The Idempotency-Key it was recorded under, when the client sent one. */
+  clientRef: string | null;
 }

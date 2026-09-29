@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
+import compression from 'compression';
 import { AppModule } from './app.module';
 import { Env } from './config/env.validation';
 
@@ -23,6 +24,14 @@ async function bootstrap() {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   app.use(helmet());
+  // JSON lists compress about ten-fold; on a driver's 2G link or an owner's
+  // phone that is the difference between a 4-second and a half-second page
+  // (Performance Audit PA-07). Below 1 KB it isn't worth the CPU.
+  app.use(compression({ threshold: 1024 }));
+  // request.ip comes from X-Forwarded-For only when the hop that sent it
+  // is trusted — the per-IP login and signup limits depend on it.
+  const trustProxy = config.get('TRUST_PROXY', { infer: true });
+  app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy.split(',').map((s) => s.trim()));
   app.enableCors({
     origin: config.get('CORS_ORIGIN', { infer: true }).split(','),
     credentials: true,

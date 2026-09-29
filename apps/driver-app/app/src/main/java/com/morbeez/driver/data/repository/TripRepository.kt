@@ -14,6 +14,7 @@ import com.morbeez.driver.data.remote.dto.TripStopResponse
 import com.morbeez.driver.data.sync.CompleteDeliveryPayload
 import com.morbeez.driver.data.sync.CompletePickupPayload
 import com.morbeez.driver.data.sync.PendingOperationType
+import com.morbeez.driver.data.sync.PhotoShrinker
 import com.morbeez.driver.data.sync.RecordCollectionPayload
 import com.morbeez.driver.data.sync.RecordExpensePayload
 import com.morbeez.driver.data.sync.SkipStopPayload
@@ -79,16 +80,14 @@ class TripRepository @Inject constructor(
         stopDao.upsertAll(entities)
     }
 
-    private suspend fun toEntity(stop: TripStopResponse): TripStopEntity {
-        val (counterpartyName, summary) = if (stop.stopType == "pickup") {
-            val pickup = runCatching { api.getPickup(stop.pickupId!!) }.getOrNull()
-            val farmerName = pickup?.let { runCatching { api.getFarmer(it.farmerId) }.getOrNull()?.name }
-            (farmerName ?: "Farmer pickup") to "Purchase order pickup"
-        } else {
-            val order = runCatching { api.getOrder(stop.orderId!!) }.getOrNull()
-            val customerName = order?.let { runCatching { api.getCustomer(it.customerId) }.getOrNull()?.name }
-            val lineCount = order?.lines?.size ?: 0
-            (customerName ?: "Customer delivery") to "$lineCount item(s)"
+    private fun toEntity(stop: TripStopResponse): TripStopEntity {
+        val counterpartyName = stop.party?.name ?: if (stop.stopType == "pickup") "Farmer pickup" else "Customer delivery"
+        val summary = when {
+            stop.items.isEmpty() -> if (stop.stopType == "pickup") "Purchase order pickup" else "No items"
+            else -> {
+                val shown = stop.items.take(3).joinToString(", ") { "${it.productName} ${it.quantity.trimEnd('0').trimEnd('.')} ${it.uom}" }
+                if (stop.items.size > 3) "$shown and ${stop.items.size - 3} more" else shown
+            }
         }
         return TripStopEntity(
             id = stop.id,
@@ -154,6 +153,7 @@ class TripRepository @Inject constructor(
         runCatching { api.listExpenses(tripId) }.getOrDefault(emptyList())
 
     suspend fun queuePhoto(tripId: String, stopId: String, photoType: String, localPath: String, mimeType: String) {
+        if (mimeType == "image/jpeg") PhotoShrinker.shrink(localPath)
         pendingPhotoDao.insert(
             PendingPhotoEntity(
                 id = UUID.randomUUID().toString(),

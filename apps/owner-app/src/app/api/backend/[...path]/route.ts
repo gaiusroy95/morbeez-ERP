@@ -4,6 +4,7 @@ import {
   apiBaseUrl,
   clearSessionCookies,
   REFRESH_COOKIE,
+  forwardedFor,
   refreshTokens,
   setSessionCookies,
   TokenPair,
@@ -49,7 +50,7 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
   let rotated: TokenPair | null = null;
 
   if (!access && refresh) {
-    rotated = await refreshTokens(refresh);
+    rotated = await refreshTokens(refresh, forwardedFor(request));
     access = rotated?.accessToken;
   }
   if (!access) return unauthorized();
@@ -62,6 +63,7 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
       headers: {
         authorization: `Bearer ${token}`,
         accept: 'application/json',
+        ...forwardedFor(request),
         ...(request.headers.get('content-type') ? { 'content-type': request.headers.get('content-type') as string } : {}),
       },
       body,
@@ -72,7 +74,7 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
   try {
     upstream = await send(access);
     if (upstream.status === 401 && refresh && !rotated) {
-      rotated = await refreshTokens(refresh);
+      rotated = await refreshTokens(refresh, forwardedFor(request));
       if (rotated) upstream = await send(rotated.accessToken);
     }
   } catch {
@@ -84,9 +86,14 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
 
   if (upstream.status === 401) return unauthorized();
 
-  const response = new NextResponse(upstream.body, {
+  // fetch() has already undone the backend's compression, so compress again
+  // for the browser — Next doesn't for route handlers, and the big lists
+  // were reaching phones as plain JSON (Performance Audit PA-07).
+  const type = upstream.headers.get('content-type') ?? 'application/json';
+  const gzip = upstream.body !== null && /json/.test(type) && /\bgzip\b/.test(request.headers.get('accept-encoding') ?? '');
+  const response = new NextResponse(gzip ? upstream.body!.pipeThrough(new CompressionStream('gzip')) : upstream.body, {
     status: upstream.status,
-    headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/json' },
+    headers: { 'content-type': type, ...(gzip ? { 'content-encoding': 'gzip', vary: 'Accept-Encoding' } : {}) },
   });
   if (rotated) setSessionCookies(response, rotated);
   return response;

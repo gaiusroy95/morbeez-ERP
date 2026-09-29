@@ -95,7 +95,7 @@ describe('OrdersService', () => {
         {
           provide: ProcurementService,
           useValue: {
-            reserveLotsForOrderLine: jest.fn(),
+            reserveLotsForOrderLineWithClient: jest.fn(),
             releaseLotsForOrderLine: jest.fn(),
             consumeLotsForOrderLineWithClient: jest.fn(),
           },
@@ -194,7 +194,7 @@ describe('OrdersService', () => {
     await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toThrow(
       /owed 400\.00, other open orders 200\.00, this order 500\.00/,
     );
-    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
+    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
   });
 
   it('confirmOrder refuses a customer on credit hold, whatever the limit', async () => {
@@ -219,12 +219,12 @@ describe('OrdersService', () => {
     customers.getById.mockResolvedValue(baseCustomer);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
     approvals.evaluate.mockResolvedValue({ required: false });
-    procurement.reserveLotsForOrderLine.mockResolvedValue([]);
+    procurement.reserveLotsForOrderLineWithClient.mockResolvedValue([]);
     orders.confirmWithClient.mockResolvedValue({ ...baseOrder, status: 'confirmed', version: 2 });
 
     const result = await service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.reserveLotsForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', {
+    expect(procurement.reserveLotsForOrderLineWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'user-1', {
       orderLineId: 'line-1',
       productId: 'product-1',
       quantity: 10,
@@ -246,12 +246,12 @@ describe('OrdersService', () => {
 
     const result = await service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
+    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
     expect(result.status).toBe('placed');
     expect(result.approvalRequestId).toBe('req-1');
   });
 
-  it('confirmOrder releases every reservation made so far if a later line cannot be covered', async () => {
+  it('confirmOrder reserves every line in one transaction: a later line that can’t be covered leaves nothing reserved (PA-03)', async () => {
     const twoLineOrder: OrderRecord = {
       ...baseOrder,
       lines: [
@@ -260,16 +260,19 @@ describe('OrdersService', () => {
       ],
     };
     orders.findById.mockResolvedValue(twoLineOrder);
+    orders.findByIdWithClient.mockResolvedValue(twoLineOrder);
     orders.computeTotalWithClient.mockResolvedValue(600);
     customers.getById.mockResolvedValue(baseCustomer);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
     approvals.evaluate.mockResolvedValue({ required: false });
-    procurement.reserveLotsForOrderLine.mockResolvedValueOnce([]).mockRejectedValueOnce(new ConflictException('short'));
+    procurement.reserveLotsForOrderLineWithClient.mockResolvedValueOnce([]).mockRejectedValueOnce(new ConflictException('short'));
 
     await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toBeInstanceOf(
       ConflictException,
     );
-    expect(procurement.releaseLotsForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', 'line-1');
+    // The throw rolls the shared transaction back — no reservation to undo by hand.
+    expect(procurement.reserveLotsForOrderLineWithClient).toHaveBeenCalledTimes(2);
+    expect(procurement.releaseLotsForOrderLine).not.toHaveBeenCalled();
     expect(orders.confirmWithClient).not.toHaveBeenCalled();
   });
 
@@ -278,7 +281,7 @@ describe('OrdersService', () => {
     orders.findById.mockResolvedValue(awaiting);
     orders.findByIdWithClient.mockResolvedValue(awaiting);
     approvals.getRequest.mockResolvedValue({ status: 'approved' } as never);
-    procurement.reserveLotsForOrderLine.mockResolvedValue([]);
+    procurement.reserveLotsForOrderLineWithClient.mockResolvedValue([]);
     orders.confirmWithClient.mockResolvedValue({ ...awaiting, status: 'confirmed' });
     orders.computeTotalWithClient.mockResolvedValue(500);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
@@ -297,7 +300,7 @@ describe('OrdersService', () => {
     customers.getById.mockResolvedValue({ ...baseCustomer, creditHold: true, creditHoldReason: 'Overdue 60+ days' });
 
     await expect(service.finalizeConfirmation('tenant-1', 'user-1', 'order-1')).rejects.toBeInstanceOf(ConflictException);
-    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
+    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
   });
 
   it('finalizeConfirmation cancels the order once the approval request is rejected', async () => {
@@ -308,7 +311,7 @@ describe('OrdersService', () => {
 
     const result = await service.finalizeConfirmation('tenant-1', 'user-1', 'order-1');
 
-    expect(procurement.reserveLotsForOrderLine).not.toHaveBeenCalled();
+    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
     expect(result.status).toBe('cancelled');
   });
 

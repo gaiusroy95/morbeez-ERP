@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common';
 import { AiController } from './ai.controller';
 import { AiService } from './ai.service';
+import { AiRepository } from './repositories/ai.repository';
+import { AiDataRepository } from './repositories/ai-data.repository';
 
-// Bounded context: Ai
-// Owns its own schema (database/schemas/) and communicates with other
-// modules only through published events or public APIs (Constitution I.3-I.4).
+// Bounded context: AI Recommendations (Constitution I.3, Article VIII; AI
+// System design). Imports no other module and calls none: it reads the
+// business through a read-only role (DR.1) and writes only its own ai
+// schema. Nothing the business runs on can be changed from here.
 @Module({
-  imports: [],
   controllers: [AiController],
-  providers: [AiService],
-  exports: [AiService],
+  providers: [AiService, AiRepository, AiDataRepository],
 })
 export class AiModule {}

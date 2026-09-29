@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Ip, Patch, Post, UseGuards } from '@nestjs/common';
+import { RateLimiterService } from '../../infra/rate-limit/rate-limiter.service';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { TenantService } from './tenant.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -17,14 +18,19 @@ export class TenantController {
   constructor(
     private readonly tenantService: TenantService,
     private readonly authService: AuthService,
+    private readonly limiter: RateLimiterService,
   ) {}
 
   // The one unauthenticated write in the whole API — there is, by
   // definition, no auth context yet for a business that doesn't exist.
   // Returns tokens immediately (signup implies login) so the client
   // doesn't need a second round trip through /auth/login.
+  //
+  // Limited per IP (Security Audit SA-02): without it anyone could create
+  // businesses without end, and probe which emails already have a login.
   @Post()
-  async signUp(@Body() dto: CreateTenantDto): Promise<TokenPair> {
+  async signUp(@Body() dto: CreateTenantDto, @Ip() ip: string): Promise<TokenPair> {
+    await this.limiter.consume(`signup-ip:${ip}`, { max: 10, windowSeconds: 60 * 60 }, 'Too many new accounts from this network.');
     await this.tenantService.createBusinessAccount(
       dto.businessName,
       dto.ownerEmail,

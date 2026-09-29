@@ -118,7 +118,7 @@ export interface TripCashReport {
 // ---- Write-side records ----
 
 export type PaymentMethod = 'cash' | 'upi' | 'bank_transfer' | 'cheque';
-export type InvoiceKind = 'sale' | 'finance_charge';
+export type InvoiceKind = 'sale' | 'finance_charge' | 'crate_charge' | 'spot_sale';
 export type InvoiceState = 'open' | 'overdue' | 'paid';
 
 export interface InvoiceLineRecord {

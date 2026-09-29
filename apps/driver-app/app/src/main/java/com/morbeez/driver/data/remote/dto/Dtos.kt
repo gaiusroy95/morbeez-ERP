@@ -3,7 +3,8 @@ package com.morbeez.driver.data.remote.dto
 // Field names match the backend's JSON responses exactly (its entity
 // records already serialize as camelCase) — no @Json remapping needed.
 
-data class LoginRequest(val email: String, val password: String)
+// deviceId lets the owner revoke this phone's session on its own if it's lost (DRV.11).
+data class LoginRequest(val email: String, val password: String, val deviceId: String? = null)
 data class RefreshRequest(val refreshToken: String)
 
 data class PublicUserResponse(val id: String, val email: String, val status: String)
@@ -38,27 +39,15 @@ data class TripStopResponse(
     val arrivedAt: String?,
     val completedAt: String?,
     val notes: String?,
+    // Who the stop is for and what it carries, sent with the stops so the
+    // route needs one request (Performance Audit PA-02).
+    val party: StopPartyResponse? = null,
+    val items: List<StopItemResponse> = emptyList(),
 )
 
-data class PickupResponse(
-    val id: String,
-    val purchaseOrderId: String,
-    val farmerId: String,
-    val status: String,
-    val version: Int,
-)
+data class StopPartyResponse(val kind: String, val id: String, val name: String, val phone: String?)
 
-data class OrderLineResponse(val id: String, val productId: String, val quantity: String, val unitPrice: String)
-data class OrderResponse(
-    val id: String,
-    val customerId: String,
-    val status: String,
-    val version: Int,
-    val lines: List<OrderLineResponse>?,
-)
-
-data class FarmerResponse(val id: String, val name: String)
-data class CustomerResponse(val id: String, val name: String)
+data class StopItemResponse(val productName: String, val quantity: String, val uom: String)
 
 data class VersionRequest(val version: Int)
 

@@ -20,8 +20,10 @@ export function useAction<TInput, TResult>(
     mutationFn: run,
     onSuccess: async (result) => {
       // Almost every write posts to the ledger (deliveries, grading,
-      // payments, trip cash, write-offs), so the books always refresh too.
-      const keys = [...invalidates, KEYS.accounting];
+      // payments, trip cash, write-offs), many create tax records, and a
+      // completed trip records its driver's work — so the books, tax and
+      // workforce views always refresh too.
+      const keys = [...invalidates, KEYS.accounting, KEYS.tax, KEYS.workforce];
       await Promise.all(keys.map((queryKey) => client.invalidateQueries({ queryKey })));
       onDone?.(result);
     },
@@ -53,4 +55,11 @@ export const KEYS = {
   lookupCustomers: ['lookup', 'customers'],
   approvals: ['approvals'],
   accounting: ['accounting'],
+  tax: ['tax'],
+  workforce: ['workforce'],
+  fleet: ['fleet'],
+  crates: ['crates'],
+  lookupVehicles: ['lookup', 'vehicles'],
+  spot: ['spot'],
+  ai: ['ai'],
 } satisfies Record<string, QueryKey>;

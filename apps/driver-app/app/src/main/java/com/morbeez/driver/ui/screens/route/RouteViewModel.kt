@@ -3,7 +3,7 @@ package com.morbeez.driver.ui.screens.route
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.morbeez.driver.data.local.TripEntity
 import com.morbeez.driver.data.local.TripStopEntity
@@ -13,7 +13,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -42,7 +41,10 @@ class RouteViewModel @Inject constructor(
     private val tripRepository: TripRepository,
 ) : ViewModel() {
 
-    private val isSyncing = MutableStateFlow(false)
+    // Syncing while the requested pass is waiting for a network or running.
+    private val isSyncing = WorkManager.getInstance(appContext)
+        .getWorkInfosForUniqueWorkFlow(SyncWorker.NOW_WORK_NAME)
+        .map { infos -> infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING } }
 
     private val tripWithStops = tripRepository.observeActiveTrip().flatMapLatest { trip ->
         if (trip == null) {
@@ -56,16 +58,13 @@ class RouteViewModel @Inject constructor(
         base.copy(isSyncing = syncing)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RouteUiState())
 
+    /**
+     * Refresh goes through the same single sync as everything else. It used
+     * to also pull the route directly, which could land on top of actions
+     * not yet sent (DRV.9) and doubled the traffic (Performance Audit PA-11).
+     */
     fun requestSync() {
-        isSyncing.value = true
-        WorkManager.getInstance(appContext).enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
-        viewModelScope.launch {
-            // A best-effort local sync too, so a driver tapping "Refresh"
-            // while online doesn't have to wait for WorkManager's own
-            // scheduling latency.
-            runCatching { tripRepository.refreshMyTrips() }
-            isSyncing.value = false
-        }
+        SyncWorker.requestNow(appContext)
     }
 
     fun skipStop(stopId: String) {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
@@ -242,6 +242,56 @@ export class PayablesService {
       }
     }
     return payment;
+  }
+
+  // ---- Deductions (called by Crates, inside its transaction) ----
+
+  /**
+   * Takes a charge off what's owed to a farmer, oldest payable first — no
+   * money moves; the payables simply come to less:
+   *   Dr Accounts payable — farmer / Cr Crate loss recoveries
+   * Refused when less than the charge is owed. The caller records which
+   * payables it came off (money.farmer_payable_balance nets them), then
+   * calls announceLotsPaid after COMMIT for any lot it left fully settled.
+   */
+  async deductWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    input: { farmerId: string; amount: string; sourceType: string; sourceId: string; memo: string; occurredAt: Date },
+  ): Promise<{ entryId: string; deductions: { payableId: string; amount: string }[]; fullyPaidLots: string[] }> {
+    await this.payables.lockFarmerWithClient(client, input.farmerId);
+    const open = await this.payables.openPayablesForFarmerWithClient(client, input.farmerId);
+    const owed = sumMoney(open.map((o) => o.outstanding));
+    if (compareMoney(owed, input.amount) < 0) {
+      throw new ConflictException(`Only ${owed} is owed to this farmer — not enough to deduct ${input.amount} from`);
+    }
+    const { allocations } = allocateInOrder(input.amount, open);
+    const entryId = await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'crate_charge_deducted',
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      occurredAt: input.occurredAt,
+      memo: input.memo,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'accounts_payable_farmer', party: { type: 'farmer', id: input.farmerId }, debit: input.amount },
+        { account: 'crate_recoveries', credit: input.amount },
+      ],
+    });
+    const fullyPaidLots = allocations
+      .filter((a) => compareMoney(a.amount, open.find((o) => o.id === a.id)?.outstanding ?? '0') === 0)
+      .map((a) => open.find((o) => o.id === a.id)?.lotId as string);
+    return { entryId, deductions: allocations.map((a) => ({ payableId: a.id, amount: a.amount })), fullyPaidLots };
+  }
+
+  /** After COMMIT: lots a deduction left fully settled, for the same listeners a payment tells. */
+  async announceLotsPaid(tenantId: string, actorUserId: string, lotIds: string[]): Promise<void> {
+    if (lotIds.length === 0) return;
+    for (const listener of this.lotsPaidListeners) {
+      await listener(tenantId, actorUserId, lotIds).catch((err: Error) => this.logger.error(`lots-paid listener failed: ${err.message}`, err.stack));
+    }
   }
 
   // ---- Reads ----

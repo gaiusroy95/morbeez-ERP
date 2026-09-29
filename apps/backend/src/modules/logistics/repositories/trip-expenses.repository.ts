@@ -10,6 +10,7 @@ interface TripExpenseRow {
   notes: string | null;
   recorded_by: string;
   recorded_at: Date;
+  client_ref: string | null;
 }
 
 function toRecord(row: TripExpenseRow): TripExpenseRecord {
@@ -21,6 +22,7 @@ function toRecord(row: TripExpenseRow): TripExpenseRecord {
     notes: row.notes,
     recordedBy: row.recorded_by,
     recordedAt: row.recorded_at,
+    clientRef: row.client_ref,
   };
 }
 
@@ -37,15 +39,24 @@ export class TripExpensesRepository {
   async createWithClient(
     client: PoolClient,
     recordedBy: string,
-    fields: { tripId: string; category: ExpenseCategory; amount: number; notes: string | null },
+    fields: { tripId: string; category: ExpenseCategory; amount: number; notes: string | null; clientRef: string | null },
   ): Promise<TripExpenseRecord> {
     const result = await client.query<TripExpenseRow>(
-      `INSERT INTO fulfilment.trip_expense (trip_id, category, amount, notes, recorded_by)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO fulfilment.trip_expense (trip_id, category, amount, notes, recorded_by, client_ref)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [fields.tripId, fields.category, fields.amount, fields.notes, recordedBy],
+      [fields.tripId, fields.category, fields.amount, fields.notes, recordedBy, fields.clientRef],
     );
     return toRecord(result.rows[0]);
+  }
+
+  /** A retried request's earlier result, if that key was already used on this trip. */
+  async findByClientRefWithClient(client: PoolClient, tripId: string, clientRef: string): Promise<TripExpenseRecord | null> {
+    const result = await client.query<TripExpenseRow>(
+      'SELECT * FROM fulfilment.trip_expense WHERE trip_id = $1 AND client_ref = $2',
+      [tripId, clientRef],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
   async sumByTripWithClient(client: PoolClient, tripId: string): Promise<number> {

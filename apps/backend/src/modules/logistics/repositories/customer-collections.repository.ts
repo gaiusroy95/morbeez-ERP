@@ -12,6 +12,7 @@ interface CustomerCollectionRow {
   notes: string | null;
   collected_by: string;
   collected_at: Date;
+  client_ref: string | null;
 }
 
 function toRecord(row: CustomerCollectionRow): CustomerCollectionRecord {
@@ -25,6 +26,7 @@ function toRecord(row: CustomerCollectionRow): CustomerCollectionRecord {
     notes: row.notes,
     collectedBy: row.collected_by,
     collectedAt: row.collected_at,
+    clientRef: row.client_ref,
   };
 }
 
@@ -48,14 +50,24 @@ export class CustomerCollectionsRepository {
       amount: number;
       method: CollectionMethod;
       notes: string | null;
+      clientRef: string | null;
     },
   ): Promise<CustomerCollectionRecord> {
     const result = await client.query<CustomerCollectionRow>(
-      `INSERT INTO money.customer_collection (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO money.customer_collection (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by, client_ref)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [tenantId, fields.tripStopId, fields.orderId, fields.amount, fields.method, fields.notes, collectedBy],
+      [tenantId, fields.tripStopId, fields.orderId, fields.amount, fields.method, fields.notes, collectedBy, fields.clientRef],
     );
     return toRecord(result.rows[0]);
+  }
+
+  /** A retried request's earlier result, if that key was already used at this stop. */
+  async findByClientRefWithClient(client: PoolClient, tripStopId: string, clientRef: string): Promise<CustomerCollectionRecord | null> {
+    const result = await client.query<CustomerCollectionRow>(
+      'SELECT * FROM money.customer_collection WHERE trip_stop_id = $1 AND client_ref = $2',
+      [tripStopId, clientRef],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 }

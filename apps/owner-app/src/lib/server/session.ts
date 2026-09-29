@@ -67,14 +67,26 @@ export function clearSessionCookies(response: NextResponse): void {
 const inFlight = new Map<string, Promise<TokenPair | null>>();
 const RECENT_RESULT_MS = 10_000;
 
-export function refreshTokens(refreshToken: string): Promise<TokenPair | null> {
+/**
+ * The browser's address, passed on to the backend so its per-IP sign-in
+ * limits count each person separately rather than this server as one
+ * caller (Security Audit SA-02). Only the hop in front of this app (a load
+ * balancer in production) can be trusted to have set it; the backend's
+ * TRUST_PROXY decides how far back it believes the chain.
+ */
+export function forwardedFor(request: { headers: Headers }): Record<string, string> {
+  const chain = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
+  return chain ? { 'x-forwarded-for': chain } : {};
+}
+
+export function refreshTokens(refreshToken: string, forwarded: Record<string, string> = {}): Promise<TokenPair | null> {
   const existing = inFlight.get(refreshToken);
   if (existing) return existing;
 
   const attempt = (async () => {
     const response = await fetch(`${apiBaseUrl()}/auth/refresh`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...forwarded },
       body: JSON.stringify({ refreshToken }),
       cache: 'no-store',
     });

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { compareMoney, isPositiveMoney, normalizeMoney, subtractMoney, toCents } from '../../common/money';
+import { compareMoney, isPositiveMoney, normalizeMoney, subtractMoney, sumMoney, toCents } from '../../common/money';
 import { LedgerAccount, LedgerLineInput, LedgerPosting, LedgerRepository } from './repositories/ledger.repository';
 
 export type TripExpenseCategory = 'fuel' | 'toll' | 'labour' | 'other';
@@ -28,6 +28,11 @@ const EXPENSE_ACCOUNT: Record<TripExpenseCategory, LedgerAccount> = {
 @Injectable()
 export class LedgerService {
   constructor(private readonly ledger: LedgerRepository) {}
+
+  /** A posting to the engine's own system accounts, e.g. payroll (Workforce). */
+  postSystemWithClient(client: PoolClient, posting: LedgerPosting): Promise<string> {
+    return this.ledger.postWithClient(client, posting);
+  }
 
   /** Manual journals, reversals, and period closes — accounts from the tenant's own chart. */
   postManualWithClient(client: PoolClient, posting: LedgerPosting<string>): Promise<string> {
@@ -95,12 +100,14 @@ export class LedgerService {
       id: string;
       tripId: string;
       advanceAmount: string;
+      // Cash that came into the float on the road — spot sales paid in cash.
+      cashIn?: string;
       totalExpenses: string;
       cashReturned: string;
       occurredAt: Date;
     },
   ): Promise<void> {
-    const float = subtractMoney(reconciliation.advanceAmount, reconciliation.totalExpenses);
+    const float = subtractMoney(sumMoney([reconciliation.advanceAmount, reconciliation.cashIn ?? '0']), reconciliation.totalExpenses);
     const returned = normalizeMoney(reconciliation.cashReturned);
     const variance = subtractMoney(float, returned); // > 0: short; < 0: over
     const lines: LedgerLineInput[] = [{ account: 'cash_on_hand', debit: returned }];

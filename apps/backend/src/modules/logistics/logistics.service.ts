@@ -7,7 +7,9 @@ import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { Env } from '../../config/env.validation';
 import { VehiclesService } from '../vehicles/vehicles.service';
+import { FleetService } from '../vehicles/fleet.service';
 import { WorkforceService } from '../workforce/workforce.service';
+import { PayrollService } from '../workforce/payroll.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import { OrdersService } from '../orders/orders.service';
 import { ReceivablesService } from '../finance/receivables.service';
@@ -27,6 +29,8 @@ import { PhotoType, TripStopPhotoRecord } from './entities/trip-stop-photo.entit
 import { TripStopPodRecord } from './entities/trip-stop-pod.entity';
 import { CustomerCollectionRecord } from './entities/customer-collection.entity';
 import { clampPageSize, PaginatedResult } from '../../common/persistence/pagination';
+import { once } from '../../common/idempotency';
+import { toCents } from '../../common/money';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
@@ -66,6 +70,8 @@ export class LogisticsService {
     private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
     private readonly ledger: LedgerService,
+    private readonly payroll: PayrollService,
+    private readonly fleet: FleetService,
   ) {}
 
   // ---- Trips ----
@@ -149,6 +155,8 @@ export class LogisticsService {
     }
 
     return this.db.withTenant(tenantId, async (client) => {
+      // An expired insurance, PUC, fitness or permit keeps it off the road.
+      await this.fleet.assertRoadworthyWithClient(client, dto.vehicleId);
       const trip = await this.trips.createWithClient(client, tenantId, actorUserId, {
         vehicleId: dto.vehicleId,
         driverEmployeeId: dto.driverEmployeeId,
@@ -181,6 +189,8 @@ export class LogisticsService {
       if (stopCount === 0) {
         throw new ConflictException('Cannot start a trip with no stops on its route');
       }
+      // Checked again on departure: a document can lapse between planning and leaving.
+      await this.fleet.assertRoadworthyWithClient(client, before.vehicleId);
 
       const after = await this.trips.startWithClient(client, id, dto.version);
       // The driver leaves with the advance now — it moves to "Cash with drivers".
@@ -223,6 +233,8 @@ export class LogisticsService {
       }
 
       const after = await this.trips.completeWithClient(client, id, dto.version);
+      // The driver's day of work, for their pay (Workforce), with the trip.
+      await this.payroll.recordTripWorkWithClient(client, tenantId, actorUserId, id);
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -275,7 +287,11 @@ export class LogisticsService {
     tripId: string,
   ): Promise<TripStopRecord[]> {
     await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
-    return this.db.withTenant(tenantId, (client) => this.stops.listByTripWithClient(client, tripId));
+    return this.db.withTenant(tenantId, async (client) => {
+      const stops = await this.stops.listByTripWithClient(client, tripId);
+      const details = await this.stops.detailsForTripWithClient(client, tripId);
+      return stops.map((s) => ({ ...s, party: details.get(s.id)?.party ?? null, items: details.get(s.id)?.items ?? [] }));
+    });
   }
 
   /** Dispatch-only: attaches an already-scheduled Procurement pickup to this trip's route. */
@@ -353,6 +369,39 @@ export class LogisticsService {
         after: stop as unknown as Record<string, unknown>,
       });
       return stop;
+    });
+  }
+
+  /**
+   * Dispatch-only: puts a planned trip's stops in a new order — every stop
+   * exactly once. The trip's version moves on, so a stale plan can't
+   * overwrite a newer one.
+   */
+  async reorderStops(tenantId: string, actorUserId: string, tripId: string, version: number, stopIds: string[]): Promise<TripStopRecord[]> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const trip = await this.trips.findByIdWithClient(client, tripId);
+      if (!trip) throw new NotFoundException('Trip not found');
+      if (trip.status !== 'planned') throw new ConflictException('Stops can only be reordered while the trip is still planned');
+      if (trip.version !== version) throw new ConflictException('This trip was changed by someone else — reload and try again');
+      const before = await this.stops.listByTripWithClient(client, tripId);
+      const current = new Set(before.map((s) => s.id));
+      if (stopIds.length !== current.size || new Set(stopIds).size !== stopIds.length || !stopIds.every((id) => current.has(id))) {
+        throw new BadRequestException("Give every one of the trip's stops, each once");
+      }
+      await this.stops.resequenceWithClient(client, tripId, stopIds);
+      const bumped = await client.query('UPDATE fulfilment.trip SET version = version + 1, updated_at = now() WHERE id = $1 AND version = $2', [tripId, version]);
+      if (!bumped.rowCount) throw new ConflictException('This trip was changed by someone else — reload and try again');
+      const after = await this.stops.listByTripWithClient(client, tripId);
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: TRIP_ENTITY,
+        entityId: tripId,
+        before: { stopOrder: before.map((s) => s.id) },
+        after: { stopOrder: after.map((s) => s.id) },
+      });
+      return after;
     });
   }
 
@@ -560,28 +609,41 @@ export class LogisticsService {
     callerIsDispatcher: boolean,
     tripId: string,
     dto: RecordExpenseDto,
+    key: string | null = null,
   ): Promise<TripExpenseRecord> {
     const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
-    if (trip.status === 'cancelled' || trip.status === 'reconciled') {
-      throw new ConflictException(`Cannot record an expense against a ${trip.status} trip`);
-    }
+    const find = () => this.db.withTenant(tenantId, (client) => this.expenses.findByClientRefWithClient(client, tripId, key as string));
 
-    return this.db.withTenant(tenantId, async (client) => {
-      const expense = await this.expenses.createWithClient(client, actorUserId, {
-        tripId,
-        category: dto.category,
-        amount: dto.amount,
-        notes: dto.notes ?? null,
-      });
-      await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
-        id: expense.id,
-        tripId,
-        category: expense.category,
-        amount: expense.amount,
-        notes: expense.notes,
-        occurredAt: expense.recordedAt,
-      });
-      return expense;
+    // A retry of an expense that already went through gets it back, even if
+    // the trip has been reconciled since (Security Audit SA-03).
+    return once({
+      key,
+      constraint: 'trip_expense_client_ref_unique',
+      find,
+      sameRequest: (prior) => sameExpense(prior, dto),
+      write: async () => {
+        if (trip.status === 'cancelled' || trip.status === 'reconciled') {
+          throw new ConflictException(`Cannot record an expense against a ${trip.status} trip`);
+        }
+        return this.db.withTenant(tenantId, async (client) => {
+          const expense = await this.expenses.createWithClient(client, actorUserId, {
+            tripId,
+            category: dto.category,
+            amount: dto.amount,
+            notes: dto.notes ?? null,
+            clientRef: key,
+          });
+          await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
+            id: expense.id,
+            tripId,
+            category: expense.category,
+            amount: expense.amount,
+            notes: expense.notes,
+            occurredAt: expense.recordedAt,
+          });
+          return expense;
+        });
+      },
     });
   }
 
@@ -612,33 +674,50 @@ export class LogisticsService {
     tripId: string,
     stopId: string,
     dto: RecordCollectionDto,
+    key: string | null = null,
   ): Promise<CustomerCollectionRecord> {
-    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
     const stop = await this.getStopOnTrip(tenantId, tripId, stopId);
     if (stop.stopType !== 'delivery') {
       throw new BadRequestException('Collections can only be recorded against a delivery stop');
     }
 
     const order = await this.orders.getOrder(tenantId, stop.orderId as string);
+    const find = () => this.db.withTenant(tenantId, (client) => this.collections.findByClientRefWithClient(client, stopId, key as string));
 
-    return this.db.withTenant(tenantId, async (client) => {
-      const collection = await this.collections.createWithClient(client, tenantId, actorUserId, {
-        tripStopId: stopId,
-        orderId: order.id,
-        amount: dto.amount,
-        method: dto.method,
-        notes: dto.notes ?? null,
-      });
-      await this.receivables.recordCollectionPaymentWithClient(client, tenantId, actorUserId, {
-        collectionId: collection.id,
-        customerId: order.customerId,
-        orderId: order.id,
-        amount: collection.amount,
-        method: collection.method,
-        notes: collection.notes,
-        collectedAt: collection.collectedAt,
-      });
-      return collection;
+    // A retried collection gets the one already recorded back, never a second payment (Security Audit SA-03).
+    return once({
+      key,
+      constraint: 'customer_collection_client_ref_unique',
+      find,
+      sameRequest: (prior) => sameCollection(prior, dto),
+      write: () => {
+        // New cash on a reconciled trip would silently unbalance a settled
+        // reconciliation (a retry of one already recorded still comes back above).
+        if (trip.status === 'cancelled' || trip.status === 'reconciled') {
+          throw new ConflictException(`Cannot record a collection against a ${trip.status} trip`);
+        }
+        return this.db.withTenant(tenantId, async (client) => {
+          const collection = await this.collections.createWithClient(client, tenantId, actorUserId, {
+            tripStopId: stopId,
+            orderId: order.id,
+            amount: dto.amount,
+            method: dto.method,
+            notes: dto.notes ?? null,
+            clientRef: key,
+          });
+          await this.receivables.recordCollectionPaymentWithClient(client, tenantId, actorUserId, {
+            collectionId: collection.id,
+            customerId: order.customerId,
+            orderId: order.id,
+            amount: collection.amount,
+            method: collection.method,
+            notes: collection.notes,
+            collectedAt: collection.collectedAt,
+          });
+          return collection;
+        });
+      },
     });
   }
 
@@ -669,15 +748,21 @@ export class LogisticsService {
         throw new ConflictException(`Cannot reconcile a trip in status '${trip.status}'`);
       }
 
+      // Cash the driver took for spot sales is part of what they owe back.
+      const spot = await this.reconciliations.spotSalesWithClient(client, tripId);
+      if (spot.pending > 0) {
+        throw new ConflictException(`${spot.pending} spot sale(s) on this trip still await an approval decision — decide them first`);
+      }
       const totalExpenses = await this.expenses.sumByTripWithClient(client, tripId);
       const advanceAmount = Number(trip.advanceAmount);
-      const variance = advanceAmount - (totalExpenses + dto.cashReturned);
+      const variance = Math.round((advanceAmount + Number(spot.cash) - (totalExpenses + dto.cashReturned)) * 100) / 100;
 
       const reconciliation = await this.reconciliations.createWithClient(client, actorUserId, {
         tripId,
         advanceAmount,
         totalExpenses,
         cashReturned: dto.cashReturned,
+        spotCash: spot.cash,
         variance,
         notes: dto.notes ?? null,
       });
@@ -685,6 +770,7 @@ export class LogisticsService {
         id: reconciliation.id,
         tripId,
         advanceAmount: reconciliation.advanceAmount,
+        cashIn: reconciliation.spotCash,
         totalExpenses: reconciliation.totalExpenses,
         cashReturned: reconciliation.cashReturned,
         occurredAt: reconciliation.reconciledAt,
@@ -704,4 +790,13 @@ export class LogisticsService {
       return reconciliation;
     });
   }
+}
+
+// Same action retried, or a different one under a reused key? Amounts compared in paise.
+function sameExpense(prior: TripExpenseRecord, dto: RecordExpenseDto): boolean {
+  return prior.category === dto.category && toCents(prior.amount) === toCents(String(dto.amount));
+}
+
+function sameCollection(prior: CustomerCollectionRecord, dto: RecordCollectionDto): boolean {
+  return prior.method === dto.method && toCents(prior.amount) === toCents(String(dto.amount));
 }
