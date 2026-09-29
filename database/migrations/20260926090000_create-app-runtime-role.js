@@ -31,6 +31,12 @@ const SCHEMAS = [
 // in every environment but local dev (Constitution V.3), same pattern as
 // JWT_SECRET. Quotes escaped defensively; this is an internal
 // operator-controlled value, never end-user input.
+// Never let production fall back to the dev password: a migration run with
+// the secret missing would otherwise create the app role with a password
+// anyone reading this file knows.
+if (process.env.NODE_ENV === 'production' && !process.env.APP_DB_PASSWORD) {
+  throw new Error('APP_DB_PASSWORD must be set when migrating a production database');
+}
 const APP_DB_PASSWORD = (process.env.APP_DB_PASSWORD || 'morbeez_app_dev_only').replace(
   /'/g,
   "''",

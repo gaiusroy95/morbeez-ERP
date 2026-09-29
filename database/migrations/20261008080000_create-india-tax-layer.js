@@ -212,6 +212,13 @@ exports.up = (pgm) => {
   );
   isolateWithDefaults(pgm, 'tds_section');
 
+  // The defaults (tenant_id NULL) are written by the migration role, which
+  // owns these tables. FORCE applies RLS to the owner too, and a managed
+  // Postgres owner (RDS's master user) is no superuser to be exempt — so
+  // FORCE is lifted for exactly these two statements and restored after,
+  // leaving the tables as isolated as before.
+  pgm.sql('ALTER TABLE tax.gst_rate NO FORCE ROW LEVEL SECURITY');
+  pgm.sql('ALTER TABLE tax.tds_section NO FORCE ROW LEVEL SECURITY');
   pgm.sql(
     `INSERT INTO tax.gst_rate (tenant_id, hsn_code, description, supply_kind, taxability, rate, effective_from) VALUES
      ${GST_DEFAULTS.map(([code, text]) => `(NULL, ${literal(code)}, ${literal(text)}, 'goods', 'exempt', 0, '2017-07-01')`).join(',\n     ')}`,
@@ -224,6 +231,8 @@ exports.up = (pgm) => {
          `(NULL, ${literal(code)}, ${literal(text)}, ${ind}, ${other}, ${noPan}, ${single ?? 'NULL'}, ${annual ?? 'NULL'}, ${literal(basis)}, '2025-04-01')`,
      ).join(',\n     ')}`,
   );
+  pgm.sql('ALTER TABLE tax.gst_rate FORCE ROW LEVEL SECURITY');
+  pgm.sql('ALTER TABLE tax.tds_section FORCE ROW LEVEL SECURITY');
 
   // ---- Registrations of the parties and products Tax describes ----
   pgm.createTable(

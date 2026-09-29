@@ -35,8 +35,11 @@ import { Env } from '../../config/env.validation';
               ],
               censor: '[redacted]',
             },
+            // Read when the line is written (on response), after the JWT
+            // guard has put the caller on the request — every request log
+            // then carries its tenant, for per-tenant debugging and alarms.
             customProps: (req) => ({
-              tenantId: (req as { tenantId?: string }).tenantId,
+              tenantId: (req as { user?: { tenantId?: string } }).user?.tenantId,
             }),
           },
         };

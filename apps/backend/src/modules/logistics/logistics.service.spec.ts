@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { ObjectStorageService } from '../../infra/storage/object-storage.service';
 import { PoolClient } from 'pg';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { LogisticsService } from './logistics.service';
@@ -27,18 +27,7 @@ import { EmployeeRecord } from '../workforce/entities/employee.entity';
 import { PickupRecord } from '../procurement/entities/pickup.entity';
 import { OrderRecord } from '../orders/entities/customer-order.entity';
 
-// A partial mock — only the two fs.promises methods addPhoto actually
-// calls. Anything else (argon2's native-binary loader, required
-// transitively through Procurement -> Approvals -> Users, uses real fs
-// internals) keeps working against the real module.
-jest.mock('fs', () => ({
-  ...jest.requireActual('fs'),
-  promises: {
-    ...jest.requireActual('fs').promises,
-    mkdir: jest.fn().mockResolvedValue(undefined),
-    writeFile: jest.fn().mockResolvedValue(undefined),
-  },
-}));
+const storage = { put: jest.fn().mockResolvedValue(undefined) };
 
 const fakeClient = {} as PoolClient;
 
@@ -153,7 +142,7 @@ describe('LogisticsService', () => {
     const module = await Test.createTestingModule({
       providers: [
         LogisticsService,
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('/tmp/uploads') } },
+        { provide: ObjectStorageService, useValue: storage },
         {
           provide: TripsRepository,
           useValue: {
@@ -487,6 +476,8 @@ describe('LogisticsService', () => {
     });
 
     expect(result.photoType).toBe('pickup');
+    // Stored under tenant/stop with '/' separators, whatever the OS — the key S3 will use.
+    expect(storage.put).toHaveBeenCalledWith(expect.stringMatching(/^tenant-1\/stop-1\/[0-9a-f-]{36}\.jpg$/), expect.any(Buffer), 'image/jpeg');
     expect(photos.createWithClient).toHaveBeenCalledWith(
       fakeClient,
       'dispatcher-1',

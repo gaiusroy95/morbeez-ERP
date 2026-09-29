@@ -29,6 +29,14 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // A self-contained server for the container image (apps/owner-app/Dockerfile
+  // sets NEXT_OUTPUT), traced from the repository root so the workspace
+  // packages come along. Off for local builds: it links files, which Windows
+  // refuses without developer mode.
+  ...(process.env.NEXT_OUTPUT === 'standalone' && {
+    output: 'standalone',
+    experimental: { outputFileTracingRoot: require('path').join(__dirname, '../../') },
+  }),
   poweredByHeader: false,
   // Workspace packages ship TypeScript source, not built JS.
   transpilePackages: ['@morbeez/shared-types', '@morbeez/ui-kit'],

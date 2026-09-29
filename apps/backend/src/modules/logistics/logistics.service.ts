@@ -1,11 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { promises as fs } from 'fs';
-import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { ObjectStorageService } from '../../infra/storage/object-storage.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
-import { Env } from '../../config/env.validation';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { FleetService } from '../vehicles/fleet.service';
 import { WorkforceService } from '../workforce/workforce.service';
@@ -55,7 +52,7 @@ export interface UploadedPhoto {
 export class LogisticsService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly config: ConfigService<Env, true>,
+    private readonly storage: ObjectStorageService,
     private readonly trips: TripsRepository,
     private readonly stops: TripStopsRepository,
     private readonly expenses: TripExpensesRepository,
@@ -550,12 +547,7 @@ export class LogisticsService {
     return this.db.withTenant(tenantId, (client) => this.photos.listByStopWithClient(client, stopId));
   }
 
-  /**
-   * Writes the uploaded bytes to local disk (UPLOADS_DIR — a dev-local
-   * stand-in for the S3-compatible object storage Technology Stack
-   * §04/05 specifies for production; swapping the backend changes this
-   * method's write, not the table it records into or the API contract).
-   */
+  /** Stores the uploaded bytes (S3 in production, local disk in development) and records them against the stop. */
   async addPhoto(
     tenantId: string,
     actorUserId: string,
@@ -573,12 +565,8 @@ export class LogisticsService {
     }
 
     const extension = file.mimetype === 'image/png' ? 'png' : file.mimetype === 'image/webp' ? 'webp' : 'jpg';
-    const relativeKey = path.join(tenantId, stopId, `${randomUUID()}.${extension}`);
-    const uploadsDir = this.config.get('UPLOADS_DIR', { infer: true });
-    const absolutePath = path.join(uploadsDir, relativeKey);
-
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, file.buffer);
+    const relativeKey = `${tenantId}/${stopId}/${randomUUID()}.${extension}`;
+    await this.storage.put(relativeKey, file.buffer, file.mimetype);
 
     return this.db.withTenant(tenantId, (client) =>
       this.photos.createWithClient(client, actorUserId, {

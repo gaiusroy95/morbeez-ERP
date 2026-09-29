@@ -8,6 +8,7 @@ import { RedisModule } from './infra/redis/redis.module';
 import { LoggerModule } from './infra/logging/logger.module';
 import { AuditModule } from './infra/audit/audit.module';
 import { RateLimitModule } from './infra/rate-limit/rate-limit.module';
+import { StorageModule } from './infra/storage/storage.module';
 import { TenantRateLimitInterceptor } from './infra/rate-limit/tenant-rate-limit.interceptor';
 import { HealthModule } from './health/health.module';
 import { TenantModule } from './modules/tenant/tenant.module';
@@ -40,6 +41,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     DatabaseModule,
     RedisModule,
     RateLimitModule,
+    StorageModule,
     AuditModule,
     HealthModule,
     TenantModule,

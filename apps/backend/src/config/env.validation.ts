@@ -12,7 +12,10 @@ export const envSchema = z
     // Owner-privileged — DDL, used only by node-pg-migrate and
     // database/seeds/ (both outside this process). The running
     // application itself never connects with this.
-    DATABASE_URL: z.string().url(),
+    // Optional here: the API never reads it, and in production its container
+    // isn't given the owner's credentials at all — only the migration task
+    // has them (least privilege, Constitution V.2).
+    DATABASE_URL: z.string().url().optional(),
 
     // What DatabaseService actually connects with — the morbeez_app role,
     // DML-only, genuinely subject to Row-Level Security (Production
@@ -42,13 +45,13 @@ export const envSchema = z
     // boot instead of silently allowing every origin.
     CORS_ORIGIN: z.string().optional(),
 
-    // API documentation (Constitution IV.1) — on by default; the deploy
-    // pipeline is what should turn it off in production if that's ever
-    // the policy, not a code change.
+    // API documentation (Constitution IV.1) — on unless production, where
+    // the full API map shouldn't be public by default (Security Audit
+    // SA-17); set it explicitly to override either way.
     API_DOCS_ENABLED: z
-      .string()
-      .default('true')
-      .transform((v) => v === 'true'),
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === 'true')),
 
     // Sign-in attempts one network address may make a minute (Security Audit
     // SA-02). Generous on purpose: Indian mobile carriers put many phones
@@ -75,6 +78,12 @@ export const envSchema = z
     // production; swapping the storage backend is a change to where
     // TripStopPhotosRepository writes bytes, not to its API contract.
     UPLOADS_DIR: z.string().default('./uploads'),
+
+    // Production keeps uploads in S3 (the private, versioned uploads bucket);
+    // unset, they go to UPLOADS_DIR on local disk. The task role supplies
+    // credentials; AWS_REGION is set by ECS.
+    UPLOADS_BUCKET: z.string().optional(),
+    AWS_REGION: z.string().default('ap-south-1'),
   })
   // Order matters: check the raw (pre-default) value first, so production's
   // requirement can't be satisfied by the default that's about to be
@@ -91,6 +100,7 @@ export const envSchema = z
   .transform((env) => ({
     ...env,
     CORS_ORIGIN: env.CORS_ORIGIN ?? 'http://localhost:3001',
+    API_DOCS_ENABLED: env.API_DOCS_ENABLED ?? env.NODE_ENV !== 'production',
   }));
 
 export type Env = z.infer<typeof envSchema>;
