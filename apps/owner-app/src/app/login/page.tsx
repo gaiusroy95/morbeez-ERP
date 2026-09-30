@@ -52,6 +52,11 @@ function LoginForm() {
         <p className="page-subtitle">Use the email and password your administrator gave you.</p>
       </div>
 
+      {!error && searchParams.get('changed') === '1' && (
+        <p className="muted" role="status" style={{ margin: 0 }}>
+          Password changed. Sign in with your new password.
+        </p>
+      )}
       {error && (
         <div className="login-error" role="alert">
           {error}

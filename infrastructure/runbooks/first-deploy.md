@@ -46,9 +46,36 @@ Takes 30–45 minutes (the database and its standby are most of it). Then:
 - Run the migration task once by hand (it is the pipeline's job from now on):
   `NAME=morbeez-prod CLUSTER=morbeez-prod TAG=$TAG ... bash infrastructure/scripts/deploy.sh`
   with the variables from `terraform output`.
-- Open `https://app.<domain>/login`. Create the first business through signup;
-  **never run `database/seeds` against production** — they create dev users with
+- **Never run `database/seeds` against production.** They create dev users with
   a published password.
+
+## 4a. Onboarding a business (pilot: invite-only)
+
+Public signup is off in staging and production (`SIGNUP_ENABLED=false` in the
+API task; `POST /tenants` answers 403). The team creates each business as a
+one-off task on the API's own task definition, which already has the database
+secret and network access:
+
+```sh
+aws ecs run-task --cluster morbeez-prod --launch-type FARGATE \
+  --task-definition morbeez-prod-api \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}" \
+  --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/src/cli/provision-tenant.js","Sharma Vegetables","owner@sharmaveg.in"]}]}'
+```
+
+The task prints one JSON line to the API log group:
+`{"tenantId":…,"business":…,"ownerEmail":…,"oneTimePassword":…}`. It creates
+the tenant, chart of accounts, Owner role and owner login in one transaction.
+An email that already has a login is refused, and nothing is created.
+
+- Give the one-time password to the owner **by phone**, never by email or chat.
+- At first sign-in, the owner changes it from the menu: **You → Your account →
+  Change password**. That signs them out everywhere. The same day, confirm they
+  have done it. The old password is still in the log line, so until it is
+  changed, anyone who can read the logs can sign in.
+
+To open signup later, set `SIGNUP_ENABLED=true` in the API task definition
+(`modules/compute/main.tf`) and deploy.
 
 ## 4. Hand over to the pipeline
 

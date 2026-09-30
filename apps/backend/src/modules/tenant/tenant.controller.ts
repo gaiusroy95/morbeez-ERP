@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Ip, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Ip, Patch, Post, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Env } from '../../config/env.validation';
 import { RateLimiterService } from '../../infra/rate-limit/rate-limiter.service';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { TenantService } from './tenant.service';
@@ -19,6 +21,7 @@ export class TenantController {
     private readonly tenantService: TenantService,
     private readonly authService: AuthService,
     private readonly limiter: RateLimiterService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   // The one unauthenticated write in the whole API — there is, by
@@ -31,6 +34,9 @@ export class TenantController {
   @Post()
   async signUp(@Body() dto: CreateTenantDto, @Ip() ip: string): Promise<TokenPair> {
     await this.limiter.consume(`signup-ip:${ip}`, { max: 10, windowSeconds: 60 * 60 }, 'Too many new accounts from this network.');
+    if (!this.config.get('SIGNUP_ENABLED', { infer: true })) {
+      throw new ForbiddenException('New businesses are set up by the Morbeez team for now. Contact us to join.');
+    }
     await this.tenantService.createBusinessAccount(
       dto.businessName,
       dto.ownerEmail,

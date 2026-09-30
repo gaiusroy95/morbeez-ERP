@@ -61,7 +61,6 @@ const baseLot: LotRecord = {
 describe('ProcurementService', () => {
   let service: ProcurementService;
   let purchaseOrders: jest.Mocked<PurchaseOrdersRepository>;
-  let pickups: jest.Mocked<PickupsRepository>;
   let lots: jest.Mocked<LotsRepository>;
   let payables: jest.Mocked<PayablesService>;
   let lotsPaid: LotsPaidListener;
@@ -143,7 +142,6 @@ describe('ProcurementService', () => {
 
     service = module.get(ProcurementService);
     purchaseOrders = module.get(PurchaseOrdersRepository);
-    pickups = module.get(PickupsRepository);
     lots = module.get(LotsRepository);
     payables = module.get(PayablesService);
     module.get(ProcurementService).onModuleInit();

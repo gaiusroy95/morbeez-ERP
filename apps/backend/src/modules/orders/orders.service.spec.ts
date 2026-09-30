@@ -69,7 +69,6 @@ describe('OrdersService', () => {
   let procurement: jest.Mocked<ProcurementService>;
   let approvals: jest.Mocked<ApprovalsService>;
   let receivables: jest.Mocked<ReceivablesService>;
-  let audit: jest.Mocked<AuditService>;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
@@ -129,7 +128,6 @@ describe('OrdersService', () => {
     procurement = module.get(ProcurementService);
     approvals = module.get(ApprovalsService);
     receivables = module.get(ReceivablesService);
-    audit = module.get(AuditService);
   });
 
   it('is defined', () => {

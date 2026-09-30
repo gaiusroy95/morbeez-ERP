@@ -16,7 +16,7 @@ import { CompletePickupDto } from './dto/complete-pickup.dto';
 import { ReceiveGoodsDto } from './dto/receive-goods.dto';
 import { GradeLotDto } from './dto/grade-lot.dto';
 import { SettleFarmerDto } from './dto/settle-farmer.dto';
-import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
+import { PurchaseOrderRecord } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
 import { LotRecord } from './entities/lot.entity';
 import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';

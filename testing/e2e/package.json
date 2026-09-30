@@ -1,0 +1,13 @@
+{
+  "name": "@morbeez/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end suites: the real API and owner app, one fresh database per module",
+  "scripts": {
+    "e2e": "node run.js"
+  },
+  "dependencies": {
+    "pg": "^8.12.0",
+    "playwright-core": "^1.63.0"
+  }
+}

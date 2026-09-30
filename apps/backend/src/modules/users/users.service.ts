@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { UsersRepository } from './repositories/users.repository';
@@ -67,7 +66,9 @@ export class UsersService {
     if (!user) throw new NotFoundException('User not found');
 
     const matches = await this.password.verify(user.passwordHash, currentPassword);
-    if (!matches) throw new UnauthorizedException('Current password is incorrect');
+    // 400, not 401: the caller is signed in, they mistyped a field. A 401 would
+    // make the owner app treat it as an ended session and sign them out.
+    if (!matches) throw new BadRequestException('Current password is incorrect');
 
     if (newPassword === currentPassword) {
       throw new BadRequestException('New password must differ from the current password');

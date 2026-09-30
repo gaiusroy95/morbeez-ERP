@@ -50,4 +50,10 @@ export const NAV: NavGroup[] = [
       { href: '/tax', label: 'Tax', permission: 'tax:read' },
     ],
   },
+  {
+    // No permission: everyone can manage their own sign-in. Also the only way
+    // to it on a phone, where the top bar hides the email.
+    label: 'You',
+    items: [{ href: '/account', label: 'Your account' }],
+  },
 ];

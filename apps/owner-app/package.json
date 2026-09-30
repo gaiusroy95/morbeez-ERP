@@ -4,11 +4,12 @@
   "private": true,
   "description": "Morbeez ERP web application — owners, procurement, inventory, finance, and accounting staff. App shell, sign-in, and the owner dashboard are built; other module screens are placeholders.",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "test": "vitest"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "next": "^14.2.0",

@@ -59,6 +59,14 @@ export const envSchema = z
     // Per-account failure limits do the real work against guessing.
     LOGIN_ATTEMPTS_PER_IP_PER_MINUTE: z.coerce.number().int().positive().default(60),
 
+    // Whether anyone may create a business through POST /tenants. Off in
+    // production unless set: during the pilot the team provisions each
+    // business itself (src/cli/provision-tenant.ts).
+    SIGNUP_ENABLED: z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === 'true')),
+
     // Per-tenant request budget on authenticated routes (Constitution IV.7).
     TENANT_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(1200),
 
@@ -101,6 +109,7 @@ export const envSchema = z
     ...env,
     CORS_ORIGIN: env.CORS_ORIGIN ?? 'http://localhost:3001',
     API_DOCS_ENABLED: env.API_DOCS_ENABLED ?? env.NODE_ENV !== 'production',
+    SIGNUP_ENABLED: env.SIGNUP_ENABLED ?? env.NODE_ENV !== 'production',
   }));
 
 export type Env = z.infer<typeof envSchema>;

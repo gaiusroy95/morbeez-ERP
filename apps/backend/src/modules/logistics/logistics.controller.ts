@@ -34,7 +34,7 @@ import { ReconcileTripDto } from './dto/reconcile-trip.dto';
 import { CompleteDeliveryDto } from './dto/complete-delivery.dto';
 import { UploadPhotoDto } from './dto/upload-photo.dto';
 import { RecordCollectionDto } from './dto/record-collection.dto';
-import { TripRecord, TripStatus } from './entities/trip.entity';
+import { TripRecord } from './entities/trip.entity';
 import { TripStopRecord } from './entities/trip-stop.entity';
 import { TripExpenseRecord } from './entities/trip-expense.entity';
 import { TripReconciliationRecord } from './entities/trip-reconciliation.entity';

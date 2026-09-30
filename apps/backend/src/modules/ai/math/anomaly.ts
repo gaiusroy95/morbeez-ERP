@@ -17,7 +17,7 @@ export function mad(xs: number[]): number {
 /** 0.6745 × (x − median) / MAD; when MAD is 0, fall back to the mean absolute deviation, then to 0. */
 export function robustZ(x: number, xs: number[]): number {
   const m = median(xs);
-  let d = mad(xs);
+  const d = mad(xs);
   if (d === 0) {
     const meanAbs = xs.reduce((s, v) => s + Math.abs(v - m), 0) / (xs.length || 1);
     if (meanAbs === 0) return 0;

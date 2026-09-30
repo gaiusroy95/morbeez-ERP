@@ -2,3 +2,4 @@ packages:
   - "apps/backend"
   - "apps/owner-app"
   - "packages/*"
+  - "testing/e2e"

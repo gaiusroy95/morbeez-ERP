@@ -34,10 +34,10 @@ export async function seed(client: Client): Promise<void> {
     );
   }
 
-  // The seed script connects as the migration-owning role, which bypasses
-  // RLS by default (documented gap — see the identity-tables migration).
-  // Plain INSERTs work here for exactly that reason; the application
-  // itself never gets this shortcut.
+  // The seed connects as the database owner, which is no superuser on RDS
+  // or Neon — and FORCE ROW LEVEL SECURITY applies to the owner too. So it
+  // sets the tenant context the way the app does, for this session.
+  await client.query(`SELECT set_config('app.tenant_id', $1, false)`, [tenantId]);
 
   const roleResult = await client.query<{ id: string }>(
     `INSERT INTO identity.role (tenant_id, name)

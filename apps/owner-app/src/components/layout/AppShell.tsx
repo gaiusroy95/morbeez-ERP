@@ -67,7 +67,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <div className="topbar-spacer" />
           <div className="topbar-user">
-            {session && <span className="topbar-email">{session.email}</span>}
+            {session && (
+              <Link href="/account" className="topbar-email" title="Your account">
+                {session.email}
+              </Link>
+            )}
             <button type="button" className="button" onClick={signOut} disabled={signingOut}>
               {signingOut ? 'Signing out…' : 'Sign out'}
             </button>

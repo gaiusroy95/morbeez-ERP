@@ -1,7 +1,7 @@
 import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
-import configuration from './config/configuration';
+import { validateEnv } from './config/env.validation';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { DatabaseModule } from './infra/database/database.module';
 import { RedisModule } from './infra/redis/redis.module';
@@ -36,7 +36,12 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 // container (Constitution I.3).
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
+    // `validate`, not `load`: ConfigService.get() reads the validated env
+    // first and raw process.env next, so with `load` a flag set to "false"
+    // came back as the truthy string "false" and numbers as strings.
+    // Secrets are injected at runtime from the secrets manager in every
+    // environment but local dev (Constitution V.3) — never committed here.
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     LoggerModule,
     DatabaseModule,
     RedisModule,

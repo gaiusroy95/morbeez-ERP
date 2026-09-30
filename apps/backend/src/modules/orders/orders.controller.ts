@@ -10,7 +10,7 @@ import { PaginatedResult } from '../../common/persistence/pagination';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VersionDto } from './dto/version.dto';
-import { OrderRecord, OrderStatus } from './entities/customer-order.entity';
+import { OrderRecord } from './entities/customer-order.entity';
 
 @ApiTags('orders')
 @ApiBearerAuth()

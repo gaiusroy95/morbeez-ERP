@@ -42,7 +42,7 @@ COPY database/migrations ./database/migrations
 COPY database/scripts ./database/scripts
 WORKDIR /repo/apps/backend
 USER node
-CMD ["node_modules/.bin/node-pg-migrate", "--migration-file-language", "js", "--migrations-dir", "../../database/migrations", "up"]
+CMD ["node_modules/.bin/node-pg-migrate", "--migration-file-language", "js", "--migrations-dir", "../../database/migrations", "--ignore-pattern", "[^0-9].*", "up"]
 
 # ---- runtime: the API ----
 FROM node:20-alpine AS runtime
@@ -56,4 +56,6 @@ COPY --from=build --chown=node:node /out ./
 # Not root: a container escape should land in an unprivileged account.
 USER node
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+# nest builds src/ and worker/ side by side: the API is dist/src/main.js,
+# the worker (when it has work) dist/worker/main.js.
+CMD ["node", "dist/src/main.js"]

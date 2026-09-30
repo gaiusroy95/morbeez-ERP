@@ -16,7 +16,6 @@ import { CancelApprovalRequestDto } from './dto/cancel-approval-request.dto';
 import {
   ApprovalEvaluation,
   ApprovalRequestRecord,
-  ApprovalRequestStatus,
   ApprovalRoleLimitRecord,
   ApprovalRuleRecord,
 } from './entities/approval.entity';

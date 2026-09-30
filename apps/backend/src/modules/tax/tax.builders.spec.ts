@@ -124,7 +124,7 @@ describe('e-invoice', () => {
   it('is ready when everything is filled in, and builds the IRP schema', () => {
     expect(notApplicableReason(source, settings)).toBeNull();
     expect(missingData(source, settings)).toEqual([]);
-    const json = buildEinvoiceJson(source) as Record<string, any>;
+    const json = buildEinvoiceJson(source) as Record<string, unknown> & { ItemList: unknown[] };
     expect(json.Version).toBe('1.1');
     expect(json.DocDtls).toEqual({ Typ: 'INV', No: 'INV-000001', Dt: '10/09/2026' });
     expect(json.SellerDtls).toMatchObject({ Gstin: '27AAPFU0939F1ZV', Pin: 400703, Stcd: '27' });

@@ -171,6 +171,8 @@ export async function seed(client: Client): Promise<void> {
   );
   const tenantId = tenantResult.rows[0]?.id;
   if (!tenantId) throw new Error(`${DEV_TENANT_NAME} not found — did 001_dev_tenant run first?`);
+  // RLS applies to the (non-superuser) owner too — see 002.
+  await client.query(`SELECT set_config('app.tenant_id', $1, false)`, [tenantId]);
 
   const ownerRole = await client.query<{ id: string }>(
     `SELECT id FROM identity.role WHERE tenant_id = $1 AND name = 'Owner'`,

@@ -23,7 +23,6 @@ import { TripStopRecord } from './entities/trip-stop.entity';
 import { TripExpenseRecord } from './entities/trip-expense.entity';
 import { TripReconciliationRecord } from './entities/trip-reconciliation.entity';
 import { PhotoType, TripStopPhotoRecord } from './entities/trip-stop-photo.entity';
-import { TripStopPodRecord } from './entities/trip-stop-pod.entity';
 import { CustomerCollectionRecord } from './entities/customer-collection.entity';
 import { clampPageSize, PaginatedResult } from '../../common/persistence/pagination';
 import { once } from '../../common/idempotency';
