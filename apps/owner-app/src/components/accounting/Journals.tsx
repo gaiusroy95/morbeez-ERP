@@ -11,6 +11,7 @@ import { entryLabel, ROOT_LABEL } from '@/lib/accounting';
 import { formatAmount, formatDate } from '@/lib/format';
 import { parseMoney } from '@/lib/parse';
 import { sumMoney } from '@/lib/decimal';
+import { displayLogin } from '@/lib/phone';
 
 interface DraftLine {
   key: number;
@@ -323,7 +324,7 @@ export function JournalsTable({
                           </tbody>
                         </table>
                         <p className="footnote">
-                          Posted by {entry.createdByEmail ?? 'the system'}
+                          Posted by {entry.createdByEmail ? displayLogin(entry.createdByEmail) : 'the system'}
                           {entry.reversesEntryId && ' · reverses an earlier entry'}
                         </p>
                       </td>

@@ -6,7 +6,8 @@
 export interface AuthContext {
   userId: string;
   tenantId: string;
-  email: string;
+  /** What this person signs in with: their mobile number (E.164) or email. */
+  login: string;
   roles: string[];
   permissions: string[];
 }

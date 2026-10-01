@@ -72,7 +72,7 @@ async function api(token, method, p, body) {
 
   try {
     await page.goto(`${BASE}/login`);
-    await page.fill('#email', 'owner@dev.morbeez.local');
+    await page.fill('#login', 'owner@dev.morbeez.local');
     await page.fill('#password', PASSWORD);
     await page.click('button[type=submit]');
     await page.waitForURL((u) => !/\/login/.test(u.toString()));
@@ -435,7 +435,7 @@ async function api(token, method, p, body) {
       const c2 = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
       const p2 = await c2.newPage();
       await p2.goto(`${BASE}/login`);
-      await p2.fill('#email', email);
+      await p2.fill('#login', email);
       await p2.fill('#password', PASSWORD);
       await p2.click('button[type=submit]');
       await p2.waitForURL((u) => !/\/login/.test(u.toString()));

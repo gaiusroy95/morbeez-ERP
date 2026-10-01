@@ -8,22 +8,28 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import com.morbeez.driver.ui.theme.Fresh
 import java.io.ByteArrayOutputStream
 
 /**
@@ -42,13 +48,15 @@ fun SignaturePad(
 ) {
     val strokes = remember { mutableStateListOf<MutableList<Offset>>() }
 
+    val shape = RoundedCornerShape(18.dp)
     Column(modifier = modifier) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(190.dp)
+                .clip(shape)
                 .background(ComposeColor.White)
-                .border(1.dp, ComposeColor.Gray)
+                .border(1.dp, Fresh.borderStrong, shape)
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { offset ->
@@ -60,23 +68,44 @@ fun SignaturePad(
                     )
                 },
         ) {
+            // A dashed "sign here" line, only while the pad is empty.
+            if (strokes.isEmpty()) {
+                val y = size.height * 0.72f
+                drawLine(
+                    Fresh.borderStrong,
+                    Offset(24.dp.toPx(), y),
+                    Offset(size.width - 24.dp.toPx(), y),
+                    strokeWidth = 1.5.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f)),
+                )
+            }
             strokes.forEach { points ->
                 if (points.size < 2) return@forEach
                 val path = Path().apply {
                     moveTo(points.first().x, points.first().y)
                     points.drop(1).forEach { lineTo(it.x, it.y) }
                 }
-                drawPath(path, color = ComposeColor.Black, style = Stroke(width = 4f))
+                drawPath(path, color = Fresh.ink, style = Stroke(width = 5f))
             }
         }
 
-        Column {
-            OutlinedButton(onClick = { strokes.clear() }) {
-                Text("Clear")
-            }
-            Button(onClick = { onSigned(renderToBase64Png(strokes, widthPx = 800, heightPx = 360)) }) {
-                Text("Use signature")
-            }
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SecondaryAction("Clear", onClick = { strokes.clear() }, modifier = Modifier.weight(1f))
+            SecondaryAction(
+                "Use signature",
+                onClick = { onSigned(renderToBase64Png(strokes, widthPx = 800, heightPx = 360)) },
+                modifier = Modifier.weight(1f),
+                glyph = Glyph.Pen,
+                enabled = strokes.isNotEmpty(),
+            )
+        }
+        if (strokes.isEmpty()) {
+            Text(
+                "Ask the recipient to sign with a finger.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Fresh.inkFaint,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

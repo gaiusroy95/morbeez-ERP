@@ -15,6 +15,8 @@ const mockTenant: TenantRecord = {
   timezone: 'Asia/Kolkata',
   taxRegistration: null,
   branding: {},
+  trialEndsAt: null,
+  subscribedUntil: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -77,7 +79,8 @@ describe('TenantService', () => {
       return {
         id: 'user-1',
         tenantId: mockTenant.id,
-        email: 'owner@example.com',
+        email: null,
+        phone: '+919822011111',
         status: 'active',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -85,7 +88,7 @@ describe('TenantService', () => {
     });
     db.transaction.mockImplementation((work) => work(fakeClient));
 
-    await service.createBusinessAccount('Dev Wholesaler Co.', 'owner@example.com', 'pw');
+    await service.createBusinessAccount('Dev Wholesaler Co.', { phone: '+919822011111' }, 'pw');
 
     expect(callOrder).toEqual(['createTenant', 'setTenantContext', 'provisionOwner']);
     // provisionOwner must be told the tenant that was just created, not a
@@ -94,7 +97,7 @@ describe('TenantService', () => {
     expect(users.provisionOwner).toHaveBeenCalledWith(
       fakeClient,
       mockTenant.id,
-      'owner@example.com',
+      { phone: '+919822011111' },
       'pw',
     );
   });
@@ -112,8 +115,18 @@ describe('TenantService', () => {
     db.transaction.mockImplementation((work) => work(fakeClient));
 
     await expect(
-      service.createBusinessAccount('Dev Wholesaler Co.', 'owner@example.com', 'pw'),
+      service.createBusinessAccount('Dev Wholesaler Co.', { phone: '+919822011111' }, 'pw'),
     ).rejects.toThrow('boom');
+  });
+
+  it('a business that signs itself up starts on the 30-day trial', async () => {
+    tenants.createWithClient.mockResolvedValue(mockTenant);
+    users.provisionOwner.mockResolvedValue({} as never);
+    db.transaction.mockImplementation((work) => work(fakeClient));
+
+    await service.createBusinessAccount('Dev Wholesaler Co.', { phone: '+919822011111' }, 'pw');
+
+    expect(tenants.createWithClient).toHaveBeenCalledWith(fakeClient, 'Dev Wholesaler Co.', 'INR', 'Asia/Kolkata', 30);
   });
 
   it('getById throws NotFound rather than returning null for an unknown tenant', async () => {

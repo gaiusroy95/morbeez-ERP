@@ -7,7 +7,7 @@ type Row = Record<string, unknown>;
 const REC_SELECT = `
   SELECT r.id, r.run_id, r.type, r.subject_kind, r.subject_id, r.target_date::text AS target_date, r.title, r.proposal, r.evidence,
          r.explanation, r.expected_impact::text AS expected_impact, r.confidence, r.sensitive, r.producer, r.expires_at, r.created_at,
-         d.decision, d.decided_by, u.email AS decided_by_email, d.decided_at, d.submitted, d.reason, d.result_ref
+         d.decision, d.decided_by, COALESCE(u.phone, u.email::text) AS decided_by_email, d.decided_at, d.submitted, d.reason, d.result_ref
   FROM ai.recommendation r
   LEFT JOIN ai.recommendation_decision d ON d.recommendation_id = r.id
   LEFT JOIN identity.app_user u ON u.id = d.decided_by`;
@@ -94,7 +94,7 @@ export class AiRepository {
 
   async lastRun(client: PoolClient): Promise<{ id: string; startedAt: Date; finishedAt: Date; produced: Record<string, number>; suppressed: Record<string, string>; byEmail: string | null } | null> {
     const r = await client.query(
-      `SELECT r.id, r.started_at, r.finished_at, r.produced, r.suppressed, u.email FROM ai.run r LEFT JOIN identity.app_user u ON u.id = r.created_by
+      `SELECT r.id, r.started_at, r.finished_at, r.produced, r.suppressed, COALESCE(u.phone, u.email::text) AS email FROM ai.run r LEFT JOIN identity.app_user u ON u.id = r.created_by
        ORDER BY r.started_at DESC LIMIT 1`,
     );
     const x = r.rows[0];

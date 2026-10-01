@@ -2,6 +2,8 @@
 
 import { FormEvent, Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { AuthHero } from '@/components/auth/AuthHero';
 
 // Only same-app paths — `next` comes from the URL, so an absolute or
 // protocol-relative value would otherwise be an open redirect.
@@ -12,7 +14,7 @@ function safeNext(next: string | null): string {
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState('');
+  const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -25,7 +27,7 @@ function LoginForm() {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ login: login.trim(), password }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
@@ -42,14 +44,10 @@ function LoginForm() {
   }
 
   return (
-    <form className="panel login-card" onSubmit={onSubmit} noValidate>
+    <form className="login-card" onSubmit={onSubmit} noValidate>
       <div>
-        <div className="brand" style={{ padding: 0, marginBottom: 6 }}>
-          <span className="brand-mark" aria-hidden="true">M</span>
-          Morbeez
-        </div>
-        <h1 className="page-title">Sign in</h1>
-        <p className="page-subtitle">Use the email and password your administrator gave you.</p>
+        <h1 className="page-title">Welcome back</h1>
+        <p className="page-subtitle">Sign in with your mobile number and password.</p>
       </div>
 
       {!error && searchParams.get('changed') === '1' && (
@@ -64,15 +62,21 @@ function LoginForm() {
       )}
 
       <div className="field">
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <label htmlFor="login">Mobile number</label>
+        {/* Also takes an email: logins made before phone sign-in. */}
+        <div className="phone-input">
+          {!login.includes('@') && <span className="phone-prefix">+91</span>}
+          <input
+            id="login"
+            type="text"
+            inputMode={login.includes('@') ? 'email' : 'tel'}
+            autoComplete="username"
+            placeholder="98765 43210"
+            value={login}
+            onChange={(e) => setLogin(e.target.value)}
+            required
+          />
+        </div>
       </div>
       <div className="field">
         <label htmlFor="password">Password</label>
@@ -86,9 +90,13 @@ function LoginForm() {
         />
       </div>
 
-      <button className="button button-primary" type="submit" disabled={submitting || !email || !password}>
+      <button className="button button-primary" type="submit" disabled={submitting || !login || !password}>
         {submitting ? 'Signing in…' : 'Sign in'}
       </button>
+      <p className="login-switch">
+        New to Morbeez? <Link href="/signup">Start your free month</Link>
+      </p>
+      <p className="login-foot">Forgot your password? Ask the business owner to reset it.</p>
     </form>
   );
 }
@@ -96,9 +104,12 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <main className="login-page">
-      <Suspense>
-        <LoginForm />
-      </Suspense>
+      <AuthHero />
+      <div className="login-side">
+        <Suspense>
+          <LoginForm />
+        </Suspense>
+      </div>
     </main>
   );
 }

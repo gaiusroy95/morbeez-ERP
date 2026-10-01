@@ -18,7 +18,7 @@ async function signIn(browser, email) {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${BASE}/login`);
-  await page.fill('#email', email);
+  await page.fill('#login', email);
   await page.fill('#password', PASSWORD);
   await page.click('button[type=submit]');
   await page.waitForURL((u) => !/\/login/.test(u.toString()));
@@ -46,7 +46,7 @@ async function signIn(browser, email) {
     await page.getByRole('link', { name: 'Suggestions', exact: true }).click();
     await page.waitForSelector('article.suggestion');
     const note = (await page.locator('.run-note').textContent()).replace(/\s+/g, ' ');
-    if (!/Last worked out .* by owner@dev\.morbeez\.local/.test(note) || !/Customer \(Switched off in AI settings\)/.test(note)) throw new Error(note);
+    if (!/Last worked out .* by 98000 00001/.test(note) || !/Customer \(Switched off in AI settings\)/.test(note)) throw new Error(note);
     const buy = (await card(page, 'procurement').textContent()).replace(/\s+/g, ' ');
     if (!/Buy about .* of Tomato/.test(buy) || !/over the last 4 weeks200 kg, 190 kg, 210 kg, 205 kg/.test(buy) || !/Worth ₹/.test(buy)) throw new Error(buy.slice(0, 400));
     return `${await page.locator('article.suggestion').count()} open`;
@@ -71,7 +71,7 @@ async function signIn(browser, email) {
     const c = page.locator('article.suggestion', { hasText: buyTitle }).filter({ hasText: 'Changed by' });
     await c.waitFor();
     const t = (await c.textContent()).replace(/\s+/g, ' ');
-    if (!/Changed by owner@dev\.morbeez\.local/i.test(t)) throw new Error(t.slice(0, 300));
+    if (!/Changed by 98000 00001/i.test(t)) throw new Error(t.slice(0, 300));
   });
 
   await step('worth a look: dismiss one, with a reason', async () => {

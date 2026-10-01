@@ -34,7 +34,7 @@ export class UsersController {
     @CurrentUser() user: AuthContext,
     @Body() dto: RegisterUserDto,
   ): Promise<PublicUser> {
-    return this.usersService.create(user.tenantId, dto.email, dto.password);
+    return this.usersService.create(user.tenantId, { phone: dto.phone, email: dto.email ?? null }, dto.password);
   }
 
   @Post(':id/deactivate')

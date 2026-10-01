@@ -638,8 +638,9 @@ resource "aws_ecs_task_definition" "api" {
       { name = "DATABASE_POOL_MAX", value = tostring(var.database_pool_max) },
       { name = "LOGIN_ATTEMPTS_PER_IP_PER_MINUTE", value = "60" },
       { name = "TENANT_RATE_LIMIT_PER_MINUTE", value = "1200" },
-      # Invite-only for the pilot: businesses are created with provision-tenant (runbooks/first-deploy.md).
-      { name = "SIGNUP_ENABLED", value = "false" },
+      # Open signup: anyone can create a business, which starts on a 30-day free trial.
+      # "false" makes it invite-only again (provision-tenant, runbooks/first-deploy.md).
+      { name = "SIGNUP_ENABLED", value = "true" },
     ]
     secrets = [
       { name = "APP_DATABASE_URL", valueFrom = var.database_app_url_secret_arn },

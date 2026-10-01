@@ -11,6 +11,8 @@ import * as argon2 from 'argon2';
 const DEV_TENANT_NAME = 'Dev Wholesaler Co.';
 const OWNER_EMAIL = 'owner@dev.morbeez.local';
 const OWNER_PASSWORD = 'dev-only-change-me-123';
+// Dev logins sign in with a phone (or, for the e2e suites, their email).
+const OWNER_PHONE = '+919800000001';
 
 // Must match apps/backend/src/modules/users/security/password.service.ts —
 // duplicated here because the seed script runs outside the Nest DI
@@ -64,14 +66,22 @@ export async function seed(client: Client): Promise<void> {
     `SELECT 1 FROM identity.app_user WHERE tenant_id = $1 AND email = $2`,
     [tenantId, OWNER_EMAIL],
   );
-  if (existingUser.rows.length > 0) return;
+  if (existingUser.rows.length > 0) {
+    // Seeded before logins had phones.
+    await client.query(`UPDATE identity.app_user SET phone = $3 WHERE tenant_id = $1 AND email = $2 AND phone IS NULL`, [
+      tenantId,
+      OWNER_EMAIL,
+      OWNER_PHONE,
+    ]);
+    return;
+  }
 
   const passwordHash = await argon2.hash(OWNER_PASSWORD, HASH_OPTIONS);
   const userResult = await client.query<{ id: string }>(
-    `INSERT INTO identity.app_user (tenant_id, email, password_hash)
-     VALUES ($1, $2, $3)
+    `INSERT INTO identity.app_user (tenant_id, email, phone, password_hash)
+     VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [tenantId, OWNER_EMAIL, passwordHash],
+    [tenantId, OWNER_EMAIL, OWNER_PHONE, passwordHash],
   );
 
   await client.query(
@@ -79,5 +89,5 @@ export async function seed(client: Client): Promise<void> {
     [userResult.rows[0].id, ownerRoleId],
   );
 
-  console.log(`  Dev login: ${OWNER_EMAIL} / ${OWNER_PASSWORD}`);
+  console.log(`  Dev login: ${OWNER_PHONE} (or ${OWNER_EMAIL}) / ${OWNER_PASSWORD}`);
 }

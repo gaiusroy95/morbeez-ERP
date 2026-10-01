@@ -1,21 +1,34 @@
 package com.morbeez.driver.ui.screens.stopdetail
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.morbeez.driver.ui.components.Callout
+import com.morbeez.driver.ui.components.Eyebrow
+import com.morbeez.driver.ui.components.FieldCard
+import com.morbeez.driver.ui.components.FieldScreen
+import com.morbeez.driver.ui.components.Glyph
 import com.morbeez.driver.ui.components.PhotoCaptureButton
+import com.morbeez.driver.ui.components.Pill
+import com.morbeez.driver.ui.components.PrimaryAction
+import com.morbeez.driver.ui.components.SecondaryAction
+import com.morbeez.driver.ui.components.Tone
+import com.morbeez.driver.ui.theme.Fresh
 
 /**
  * A pickup stop completes right here (nothing more to capture than
@@ -35,58 +48,82 @@ fun StopDetailScreen(
 ) {
     LaunchedEffect(stopId) { viewModel.load(stopId) }
     val stop by viewModel.stop.collectAsStateWithLifecycle()
+    var photoTaken by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        val current = stop ?: return@Column
+    val current = stop
+    val isPickup = current?.stopType == "pickup"
+    val pending = current?.status == "pending"
 
-        Text(current.counterpartyName, style = MaterialTheme.typography.headlineSmall)
-        Text(current.summary, style = MaterialTheme.typography.bodyMedium)
-        if (!current.notes.isNullOrBlank()) {
-            Text("Notes: ${current.notes}", style = MaterialTheme.typography.bodySmall)
+    FieldScreen(
+        title = current?.counterpartyName ?: "Stop",
+        eyebrow = current?.let { "Stop ${it.sequenceNumber} · ${if (isPickup) "Pickup" else "Delivery"}" },
+        onBack = onBack,
+        headerExtra = {
+            if (current != null) {
+                Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when (current.status) {
+                        "completed" -> Pill("Completed", Tone.Good)
+                        "skipped" -> Pill("Skipped", Tone.Attention)
+                        else -> Pill("To do", Tone.Lime)
+                    }
+                    if (current.pendingSync) {
+                        Spacer(Modifier.width(8.dp))
+                        Pill("Saving…", Tone.Neutral, onDark = true)
+                    }
+                }
+            }
+        },
+        bottomBar = if (current != null && pending) {
+            {
+                if (isPickup) {
+                    PrimaryAction("Complete pickup", onClick = { viewModel.completePickup(tripId, stopId, onBack) }, glyph = Glyph.Check)
+                } else {
+                    PrimaryAction("Confirm delivery", onClick = { onOpenDelivery(stopId) }, glyph = Glyph.Arrow)
+                }
+            }
+        } else {
+            null
+        },
+    ) {
+        if (current == null) return@FieldScreen
+
+        FieldCard {
+            Eyebrow(if (isPickup) "What to collect" else "What to deliver")
+            Text(
+                current.summary,
+                style = MaterialTheme.typography.titleMedium,
+                color = Fresh.ink,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            if (!current.notes.isNullOrBlank()) {
+                Spacer(Modifier.padding(top = 12.dp))
+                Callout(current.notes, tone = Tone.Active, glyph = Glyph.Pin)
+            }
         }
 
         PhotoCaptureButton(
-            label = if (current.stopType == "pickup") "Photograph produce" else "Photograph delivery",
-            onCaptured = { path, mimeType ->
-                val photoType = if (current.stopType == "pickup") "pickup" else "delivery"
-                viewModel.capturePhoto(tripId, stopId, photoType, path, mimeType)
+            label = when {
+                photoTaken -> "Photo attached"
+                isPickup -> "Photograph the produce"
+                else -> "Photograph the delivery"
             },
-            modifier = Modifier.padding(top = 16.dp),
+            captured = photoTaken,
+            onCaptured = { path, mimeType ->
+                viewModel.capturePhoto(tripId, stopId, if (isPickup) "pickup" else "delivery", path, mimeType)
+                photoTaken = true
+            },
         )
 
-        if (current.status == "pending") {
-            if (current.stopType == "pickup") {
-                Button(
-                    onClick = { viewModel.completePickup(tripId, stopId, onBack) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                ) {
-                    Text("Complete pickup")
-                }
-            } else {
-                Button(
-                    onClick = { onOpenDelivery(stopId) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                ) {
-                    Text("Complete delivery")
-                }
-                OutlinedButton(
-                    onClick = { onOpenCollection(stopId) },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                ) {
-                    Text("Record cash / payment collected")
-                }
+        if (pending) {
+            if (!isPickup) {
+                SecondaryAction("Record cash or payment", onClick = { onOpenCollection(stopId) }, glyph = Glyph.Rupee)
             }
-
-            OutlinedButton(
-                onClick = { onOpenIssueReport(stopId) },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) {
-                Text("Skip / report an issue")
-            }
+            SecondaryAction("Skip or report a problem", onClick = { onOpenIssueReport(stopId) }, glyph = Glyph.Warning)
         } else {
-            Text(
-                "This stop is already ${current.status}.",
-                modifier = Modifier.padding(top = 16.dp),
+            Callout(
+                if (current.status == "completed") "This stop is done." else "This stop was skipped.",
+                tone = if (current.status == "completed") Tone.Good else Tone.Attention,
+                glyph = if (current.status == "completed") Glyph.Check else Glyph.Warning,
             )
         }
     }

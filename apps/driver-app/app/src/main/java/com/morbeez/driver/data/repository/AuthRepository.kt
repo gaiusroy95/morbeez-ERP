@@ -20,8 +20,8 @@ class AuthRepository @Inject constructor(
 ) {
     val isLoggedIn: Boolean get() = tokenStore.isLoggedIn()
 
-    suspend fun login(email: String, password: String) {
-        val tokens = api.login(LoginRequest(email, password, tokenStore.deviceId))
+    suspend fun login(login: String, password: String) {
+        val tokens = api.login(LoginRequest(login, password, tokenStore.deviceId))
         tokenStore.accessToken = tokens.accessToken
         tokenStore.refreshToken = tokens.refreshToken
     }

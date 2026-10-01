@@ -7,7 +7,8 @@ import { UsersRepository } from './repositories/users.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
 import { PasswordService } from './security/password.service';
 import { TokenService } from './security/token.service';
-import { PublicUser, toPublicUser } from './entities/user.entity';
+import { loginOf, PublicUser, toPublicUser, UserRecord } from './entities/user.entity';
+import { normalizeIndianMobile } from '../../common/phone';
 import { AuthContext } from '../../common/types/auth-context';
 
 export interface TokenPair {
@@ -27,14 +28,19 @@ export class AuthService {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
-  /** A real argon2 hash of nothing anyone knows — verified against when the email has no account, so both paths cost the same (Security Audit SA-13). */
+  /** A real argon2 hash of nothing anyone knows — verified against when the login has no account, so both paths cost the same (Security Audit SA-13). */
   private dummyHash?: Promise<string>;
   private dummy(): Promise<string> {
     return (this.dummyHash ??= this.password.hash(randomBytes(24).toString('base64url')));
   }
 
+  /**
+   * Signs in with a mobile number or an email ([login]): anything with an @
+   * is an email, anything else must be an Indian mobile number, in any of
+   * the ways people type one.
+   */
   async login(
-    email: string,
+    login: string,
     plaintextPassword: string,
     deviceInfo?: string,
     ip?: string,
@@ -44,7 +50,9 @@ export class AuthService {
     // account from this IP (so one person mistyping can't lock the real
     // owner out from elsewhere) and per account from anywhere (so guessing
     // spread across many IPs still runs out).
-    const account = email.trim().toLowerCase();
+    const typed = login.trim();
+    const phone = typed.includes('@') ? null : normalizeIndianMobile(typed);
+    const account = phone ?? typed.toLowerCase();
     const failKeys = [`login-fail:${account}:${ip ?? '-'}`, `login-fail:${account}`];
     if (ip) {
       const max = this.config.get('LOGIN_ATTEMPTS_PER_IP_PER_MINUTE', { infer: true });
@@ -53,7 +61,11 @@ export class AuthService {
     await this.limiter.assertUnder(failKeys[0], FAILS_PER_ACCOUNT_AND_IP, 'Too many failed sign-ins for this account.');
     await this.limiter.assertUnder(failKeys[1], FAILS_PER_ACCOUNT, 'Too many failed sign-ins for this account.');
 
-    const user = await this.users.findByEmailForLogin(email);
+    const user: UserRecord | null = typed.includes('@')
+      ? await this.users.findByEmailForLogin(typed)
+      : phone
+        ? await this.users.findByPhoneForLogin(phone)
+        : null;
 
     // Deliberately the same error, same shape, whether the email doesn't
     // exist or the password is wrong — a distinct "no such user" message
@@ -61,7 +73,7 @@ export class AuthService {
     const invalid = async () => {
       await this.limiter.record(failKeys[0], FAILS_PER_ACCOUNT_AND_IP.windowSeconds);
       await this.limiter.record(failKeys[1], FAILS_PER_ACCOUNT.windowSeconds);
-      return new UnauthorizedException('Invalid email or password');
+      return new UnauthorizedException('Wrong mobile number or password');
     };
 
     // Hash something either way, so an unknown email takes as long as a known one.
@@ -77,7 +89,7 @@ export class AuthService {
     const context: AuthContext = {
       userId: user.id,
       tenantId: user.tenantId,
-      email: user.email,
+      login: loginOf(user),
       roles,
       permissions,
     };
@@ -139,7 +151,7 @@ export class AuthService {
     const context: AuthContext = {
       userId: user.id,
       tenantId: user.tenantId,
-      email: user.email,
+      login: loginOf(user),
       roles,
       permissions,
     };

@@ -176,7 +176,7 @@ function Workforce({ today, timeZone }: { today: string; timeZone: string }) {
               id={settlement}
               currency={currency}
               timeZone={timeZone}
-              userEmail={session?.email ?? null}
+              userEmail={session?.login ?? null}
               canApprove={can('payroll:approve')}
               canPay={can('payroll:pay')}
               onClose={() => setSettlement(null)}

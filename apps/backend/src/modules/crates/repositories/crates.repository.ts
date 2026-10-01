@@ -23,7 +23,7 @@ const MOVEMENT_SELECT = `
          -- Money follows these two, so they're corrected in Finance, not reversed here.
          (EXISTS (SELECT 1 FROM crates.crate_loss l WHERE l.movement_id = m.id AND l.recovery <> 'absorbed')
           OR (m.kind = 'purchased' AND EXISTS (SELECT 1 FROM money.ledger_entry e WHERE e.entry_type = 'crates_purchased' AND e.source_id = m.batch_id))) AS money_attached,
-         u.email AS created_by_email
+         COALESCE(u.phone, u.email::text) AS created_by_email
   FROM crates.movement m
   JOIN crates.crate_type ct ON ct.id = m.crate_type_id
   LEFT JOIN identity.app_user u ON u.id = m.created_by

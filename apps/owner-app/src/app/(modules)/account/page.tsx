@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/ui/ListControls';
 import { Field } from '@/components/ui/Form';
 import { apiSend } from '@/lib/api/client';
 import { useSession } from '@/lib/hooks/use-tenant';
+import { displayLogin } from '@/lib/phone';
+import { Access, useAccess } from '@/lib/hooks/use-access';
 
 const MIN_LENGTH = 12;
 
@@ -43,7 +45,8 @@ export default function AccountPage() {
 
   return (
     <div className="stack">
-      <PageHeader title="Your account" subtitle={session?.email ?? ''} />
+      <PageHeader title="Your account" subtitle={displayLogin(session?.login)} />
+      <PlanPanel />
       <Panel title="Change password">
         <form className="form-grid" onSubmit={submit}>
           <Field label="Current password">
@@ -71,5 +74,39 @@ export default function AccountPage() {
         </form>
       </Panel>
     </div>
+  );
+}
+
+const dateFmt = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+
+function planLine(access: Access): string {
+  const on = (iso: string | null) => (iso ? dateFmt.format(new Date(iso)) : '');
+  switch (access.state) {
+    case 'trial':
+      return `Free trial until ${on(access.trialEndsAt)}. Everything works until then.`;
+    case 'ended':
+      return `The free trial ended on ${on(access.trialEndsAt)}. You can still see everything, but nothing can be added or changed until you subscribe.`;
+    case 'active':
+      return `Subscribed until ${on(access.subscribedUntil)}.`;
+    default:
+      return 'No time limit on this account.';
+  }
+}
+
+/** The free trial or subscription, and how to subscribe. */
+function PlanPanel() {
+  const { data: access } = useAccess();
+  if (!access) return null;
+  return (
+    <section id="plan">
+      <Panel title="Your plan">
+        <p style={{ margin: 0 }}>{planLine(access)}</p>
+        {(access.state === 'trial' || access.state === 'ended') && (
+          <p className="muted" style={{ margin: '8px 0 0' }}>
+            To subscribe, contact the Morbeez team. Your data stays exactly as it is.
+          </p>
+        )}
+      </Panel>
+    </section>
   );
 }

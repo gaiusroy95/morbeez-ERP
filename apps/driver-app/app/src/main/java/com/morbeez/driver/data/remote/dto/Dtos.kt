@@ -4,10 +4,12 @@ package com.morbeez.driver.data.remote.dto
 // records already serialize as camelCase) — no @Json remapping needed.
 
 // deviceId lets the owner revoke this phone's session on its own if it's lost (DRV.11).
-data class LoginRequest(val email: String, val password: String, val deviceId: String? = null)
+/** [login]: a mobile number in any common Indian format, or an email. */
+data class LoginRequest(val login: String, val password: String, val deviceId: String? = null)
 data class RefreshRequest(val refreshToken: String)
 
-data class PublicUserResponse(val id: String, val email: String, val status: String)
+// A login is a phone, an email, or both.
+data class PublicUserResponse(val id: String, val email: String?, val phone: String?, val status: String)
 data class TokenPairResponse(
     val accessToken: String,
     val refreshToken: String,

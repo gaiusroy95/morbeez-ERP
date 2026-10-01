@@ -11,6 +11,7 @@ const mockUser: UserRecord = {
   id: 'user-1',
   tenantId: 'tenant-1',
   email: 'owner@example.com',
+  phone: '+919822011111',
   passwordHash: 'hashed',
   status: 'active',
   createdAt: new Date(),
@@ -66,23 +67,23 @@ describe('UsersService', () => {
     password.hash.mockResolvedValue('hashed-value');
     usersRepo.create.mockResolvedValue(mockUser);
 
-    await service.create('tenant-1', 'owner@example.com', 'a-real-password');
+    await service.create('tenant-1', { phone: '+919822011111' }, 'a-real-password');
 
     expect(password.hash).toHaveBeenCalledWith('a-real-password');
     expect(usersRepo.create).toHaveBeenCalledWith(
       'tenant-1',
-      'owner@example.com',
+      { phone: '+919822011111' },
       'hashed-value',
     );
   });
 
-  it('translates a duplicate-email constraint violation into a 409, not a raw 500', async () => {
+  it('translates a duplicate-login constraint violation into a 409 naming what is taken', async () => {
     password.hash.mockResolvedValue('hashed-value');
-    usersRepo.create.mockRejectedValue({ code: '23505' });
+    usersRepo.create.mockRejectedValue({ code: '23505', constraint: 'app_user_phone_unique' });
 
-    await expect(
-      service.create('tenant-1', 'owner@example.com', 'a-real-password'),
-    ).rejects.toBeInstanceOf(ConflictException);
+    const attempt = service.create('tenant-1', { phone: '+919822011111' }, 'a-real-password');
+    await expect(attempt).rejects.toBeInstanceOf(ConflictException);
+    await expect(attempt).rejects.toThrow(/mobile number already has a Morbeez login/);
   });
 
   it('deactivating a user revokes every session they currently hold', async () => {

@@ -6,7 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 // only — the backend is the real gate (System Architecture FE.5).
 export interface Session {
   userId: string;
-  email: string;
+  /** A mobile number (+91…) or an email. */
+  login: string;
   roles: string[];
   permissions: string[];
 }

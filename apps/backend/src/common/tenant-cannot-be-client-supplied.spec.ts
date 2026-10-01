@@ -23,7 +23,7 @@ describe('tenantId can never arrive as a request field', () => {
     await expect(
       pipe.transform(
         {
-          email: 'owner@example.com',
+          phone: '98220 11111',
           password: 'a-real-password-123',
           tenantId: 'attacker-supplied-tenant-id',
         },
@@ -37,7 +37,7 @@ describe('tenantId can never arrive as a request field', () => {
       pipe.transform(
         {
           businessName: 'Forged Co.',
-          ownerEmail: 'owner@example.com',
+          ownerPhone: '98220 11111',
           ownerPassword: 'a-real-password-123',
           tenantId: 'attacker-supplied-tenant-id',
         },
@@ -57,9 +57,10 @@ describe('tenantId can never arrive as a request field', () => {
 
   it('accepts the same payloads once no extraneous field is present', async () => {
     const result = await pipe.transform(
-      { email: 'owner@example.com', password: 'a-real-password-123' },
+      { phone: '98220 11111', password: 'a-real-password-123' },
       { type: 'body', metatype: RegisterUserDto, data: '' },
     );
     expect(result).toBeInstanceOf(RegisterUserDto);
+    expect(result.phone).toBe('+919822011111'); // normalized on the way in
   });
 });

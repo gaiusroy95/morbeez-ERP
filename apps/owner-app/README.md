@@ -41,3 +41,17 @@ store. `src/middleware.ts` sends signed-out visitors to `/login`.
 
 Permissions hide menu items and panels for usability, but the backend is the
 real gate (FE.5) — nothing here is a security boundary.
+
+## Design
+
+"Fresh Ledger": a carbon frame (sidebar, sign-in) around a light workspace,
+emerald for the brand, lime for what is active. All colours are tokens at
+the top of `src/app/globals.css`; components never hard-code one. The same
+system is used by the Android app (`apps/driver-app/.../ui/theme/Theme.kt`).
+
+Every `color-mix()` sits in an `@supports` block at the end of
+`globals.css`, after a plain-colour fallback in the rule itself: Android
+WebViews older than Chrome 111 otherwise drop the whole declaration.
+
+Fonts: Inter and Bricolage Grotesque, SIL Open Font License 1.1, bundled in
+`src/app/fonts` (latin subset, variable weight), so no build needs Google.

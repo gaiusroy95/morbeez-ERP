@@ -8,7 +8,7 @@ import { AuthContext } from '../../../common/types/auth-context';
 export interface AccessTokenPayload {
   sub: string; // user id
   tenantId: string;
-  email: string;
+  login: string;
   roles: string[];
   permissions: string[];
 }
@@ -31,7 +31,7 @@ export class TokenService {
     const payload: AccessTokenPayload = {
       sub: context.userId,
       tenantId: context.tenantId,
-      email: context.email,
+      login: context.login,
       roles: context.roles,
       permissions: context.permissions,
     };

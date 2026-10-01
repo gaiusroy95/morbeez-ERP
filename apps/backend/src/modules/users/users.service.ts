@@ -9,7 +9,7 @@ import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
 import { PasswordService } from './security/password.service';
-import { PublicUser, toPublicUser } from './entities/user.entity';
+import { LoginIdentity, PublicUser, toPublicUser } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
@@ -25,18 +25,17 @@ export class UsersService {
     return records.map(toPublicUser);
   }
 
-  async create(tenantId: string, email: string, plaintextPassword: string): Promise<PublicUser> {
+  async create(tenantId: string, login: LoginIdentity, plaintextPassword: string): Promise<PublicUser> {
     const passwordHash = await this.password.hash(plaintextPassword);
     try {
-      const user = await this.users.create(tenantId, email, passwordHash);
+      const user = await this.users.create(tenantId, login, passwordHash);
       return toPublicUser(user);
     } catch (err) {
-      // An email is one login across every tenant (app_user_email_unique,
-      // Security Audit SA-01) — this is the one error translation worth
-      // doing here, so the API returns 409 instead of a raw 500.
-      if (isUniqueViolation(err)) {
-        throw new ConflictException('This email already has a Morbeez login');
-      }
+      // A phone or an email is one login across every tenant
+      // (app_user_phone_unique, app_user_email_unique; Security Audit
+      // SA-01) — the one error translation worth doing here, so the API
+      // returns 409 instead of a raw 500.
+      if (isUniqueViolation(err)) throw loginTaken(err);
       throw err;
     }
   }
@@ -107,11 +106,11 @@ export class UsersService {
   async provisionOwner(
     client: PoolClient,
     tenantId: string,
-    email: string,
+    login: LoginIdentity,
     plaintextPassword: string,
   ): Promise<PublicUser> {
     const passwordHash = await this.password.hash(plaintextPassword);
-    const user = await this.users.createWithClient(client, tenantId, email, passwordHash);
+    const user = await this.users.createWithClient(client, tenantId, login, passwordHash);
 
     const ownerRole = await this.roles.createWithClient(client, tenantId, 'Owner');
     const permissionCodes = await this.roles.listAllPermissionCodesWithClient(client);
@@ -124,6 +123,16 @@ export class UsersService {
   }
 }
 
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+/** A 409 naming which login is taken — the phone or the email. */
+export function loginTaken(err: unknown): ConflictException {
+  const constraint = (err as { constraint?: string }).constraint ?? '';
+  return new ConflictException(
+    constraint.includes('phone')
+      ? 'This mobile number already has a Morbeez login. Sign in instead, or use a different number.'
+      : 'This email already has a Morbeez login. Sign in instead, or use a different email.',
+  );
 }

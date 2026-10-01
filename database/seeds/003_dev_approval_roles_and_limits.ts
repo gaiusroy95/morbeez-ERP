@@ -120,6 +120,13 @@ async function grantPermissions(client: Client, roleId: string, codes: string[])
   }
 }
 
+// Dev logins sign in with a phone (or, for the e2e suites, their email).
+const PHONES: Record<string, string> = {
+  'ops-manager@dev.morbeez.local': '+919800000002',
+  'accountant@dev.morbeez.local': '+919800000003',
+  'driver@dev.morbeez.local': '+919800000004',
+};
+
 async function ensureUser(
   client: Client,
   tenantId: string,
@@ -127,22 +134,31 @@ async function ensureUser(
   password: string,
   roleId: string,
 ): Promise<void> {
+  const phone = PHONES[email] ?? null;
   const existing = await client.query(
     `SELECT 1 FROM identity.app_user WHERE tenant_id = $1 AND email = $2`,
     [tenantId, email],
   );
-  if (existing.rows.length > 0) return;
+  if (existing.rows.length > 0) {
+    // Seeded before logins had phones.
+    await client.query(`UPDATE identity.app_user SET phone = $3 WHERE tenant_id = $1 AND email = $2 AND phone IS NULL`, [
+      tenantId,
+      email,
+      phone,
+    ]);
+    return;
+  }
 
   const passwordHash = await argon2.hash(password, HASH_OPTIONS);
   const userResult = await client.query<{ id: string }>(
-    `INSERT INTO identity.app_user (tenant_id, email, password_hash) VALUES ($1, $2, $3) RETURNING id`,
-    [tenantId, email, passwordHash],
+    `INSERT INTO identity.app_user (tenant_id, email, phone, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [tenantId, email, phone, passwordHash],
   );
   await client.query(`INSERT INTO identity.user_role (user_id, role_id) VALUES ($1, $2)`, [
     userResult.rows[0].id,
     roleId,
   ]);
-  console.log(`  Dev login: ${email} / ${password}`);
+  console.log(`  Dev login: ${phone ?? email} (or ${email}) / ${password}`);
 }
 
 async function setLimit(

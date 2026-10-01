@@ -92,7 +92,7 @@ const ENTRY_SELECT = `
   SELECT e.id, e.entry_type, e.source_type, e.source_id, e.occurred_at,
          (e.occurred_at AT TIME ZONE $1)::date::text AS date,
          e.memo, e.reverses_entry_id, r.id AS reversed_by_entry_id,
-         e.created_by, u.email::text AS created_by_email, e.created_at,
+         e.created_by, COALESCE(u.phone, u.email::text) AS created_by_email, e.created_at,
          mj.journal_number, mj.reference,
          (SELECT ROUND(SUM(x.debit), 2)::text FROM money.ledger_line x WHERE x.entry_id = e.id) AS total
   FROM money.ledger_entry e
@@ -415,8 +415,8 @@ export class AccountingRepository {
   async listCloses(client: PoolClient): Promise<CloseRow[]> {
     const result = await client.query<CloseRow>(
       `SELECT pc.id, pc.period_start::text, pc.period_end::text, pc.net_income::text, pc.closing_entry_id, pc.notes,
-              pc.closed_by, cu.email::text AS closed_by_email, pc.closed_at,
-              pc.reopened_at, ru.email::text AS reopened_by_email, pc.reopen_reason
+              pc.closed_by, COALESCE(cu.phone, cu.email::text) AS closed_by_email, pc.closed_at,
+              pc.reopened_at, COALESCE(ru.phone, ru.email::text) AS reopened_by_email, pc.reopen_reason
        FROM money.period_close pc
        LEFT JOIN identity.app_user cu ON cu.id = pc.closed_by
        LEFT JOIN identity.app_user ru ON ru.id = pc.reopened_by

@@ -15,8 +15,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
-import okhttp3.asRequestBody
-import okhttp3.toRequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 
 enum class SyncResult { SUCCESS, PARTIAL }
 
@@ -64,6 +64,11 @@ class SyncEngine @Inject constructor(
             val outcome = runCatching { applyOperation(operation) }
             if (outcome.isSuccess) {
                 pendingOperationDao.delete(operation.idempotencyKey)
+            } else if (isReadOnlyAccount(outcome.exceptionOrNull())) {
+                // The business's free trial has ended (402): nothing is wrong
+                // with this action. Keep it queued, as it is, and send it once
+                // the business subscribes.
+                return false
             } else {
                 pendingOperationDao.markFailed(
                     operation.idempotencyKey,
@@ -129,6 +134,8 @@ class SyncEngine @Inject constructor(
             }
             if (outcome.isSuccess) {
                 pendingPhotoDao.delete(photo.id)
+            } else if (isReadOnlyAccount(outcome.exceptionOrNull())) {
+                return false // kept queued; see pushOperations
             } else {
                 pendingPhotoDao.updateStatus(photo.id, "failed_needs_review")
                 return false
@@ -136,6 +143,9 @@ class SyncEngine @Inject constructor(
         }
         return true
     }
+
+    private fun isReadOnlyAccount(error: Throwable?): Boolean =
+        error is retrofit2.HttpException && error.code() == 402
 
     private companion object {
         // Process-wide, not per instance: WorkManager builds a new engine for each run.

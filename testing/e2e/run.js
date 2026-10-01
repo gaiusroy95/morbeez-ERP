@@ -33,6 +33,8 @@ const CHAINS = {
   ],
   // Backdates invoices and closes periods of its own — on a database of its own.
   finance: ['owner-modules-e2e.js', 'finance-e2e.js'],
+  // Signs businesses up and ends a trial; needs nothing but the seed.
+  signup: ['signup-trial-e2e.js'],
 };
 
 const REPO = path.resolve(__dirname, '../..');

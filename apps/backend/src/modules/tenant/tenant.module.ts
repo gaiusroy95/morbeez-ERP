@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TenantController } from './tenant.controller';
 import { TenantService } from './tenant.service';
 import { TenantRepository } from './repositories/tenant.repository';
 import { UsersModule } from '../users/users.module';
+import { TrialAccessInterceptor } from './trial-access.interceptor';
 
 // Bounded context: Tenant — the subscribing business itself (Domain
 // Model, Tier 00). Owns tenant.tenant, which carries no tenant_id and has
@@ -15,7 +17,8 @@ import { UsersModule } from '../users/users.module';
 @Module({
   imports: [UsersModule],
   controllers: [TenantController],
-  providers: [TenantService, TenantRepository],
+  // Read-only once a free trial ends unpaid, on every signed-in route.
+  providers: [TenantService, TenantRepository, { provide: APP_INTERCEPTOR, useClass: TrialAccessInterceptor }],
   exports: [TenantService],
 })
 export class TenantModule {}

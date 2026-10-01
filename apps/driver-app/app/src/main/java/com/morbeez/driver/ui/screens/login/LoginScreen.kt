@@ -1,14 +1,20 @@
 package com.morbeez.driver.ui.screens.login
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,15 +22,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.morbeez.driver.ui.components.Callout
+import com.morbeez.driver.ui.components.CarbonHeader
+import com.morbeez.driver.ui.components.FreshTextField
+import com.morbeez.driver.ui.components.Glyph
+import com.morbeez.driver.ui.components.GlyphIcon
+import com.morbeez.driver.ui.components.PrimaryAction
+import com.morbeez.driver.ui.components.Tone
+import com.morbeez.driver.ui.theme.Fresh
 
 @Composable
-fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewModel()) {
-    var email by remember { mutableStateOf("") }
+fun LoginScreen(onLoggedIn: () -> Unit, onBack: (() -> Unit)? = null, viewModel: LoginViewModel = hiltViewModel()) {
+    var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -32,44 +49,68 @@ fun LoginScreen(onLoggedIn: () -> Unit, viewModel: LoginViewModel = hiltViewMode
         if (state is LoginState.Success) onLoggedIn()
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text("Morbeez Driver", style = MaterialTheme.typography.headlineMedium)
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
-            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
-        )
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        )
-
-        val errorState = state
-        if (errorState is LoginState.Error) {
+    Column(Modifier.fillMaxSize().background(Fresh.bg).imePadding()) {
+        CarbonHeader(title = "Driver sign in", eyebrow = "Field execution", onBack = onBack) {
             Text(
-                errorState.message,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 8.dp),
+                "Your route, deliveries and cash, on the road.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Fresh.onCarbonMuted,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
 
-        Button(
-            onClick = { viewModel.login(email.trim(), password) },
-            enabled = state !is LoginState.Loading && email.isNotBlank() && password.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(20.dp),
         ) {
-            if (state is LoginState.Loading) {
-                CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+            Box(
+                Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(Fresh.carbon),
+                contentAlignment = Alignment.Center,
+            ) {
+                GlyphIcon(Glyph.Truck, Fresh.accent, size = 26.dp)
             }
-            Text("Log in")
+            Spacer(Modifier.height(20.dp))
+
+            FreshTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                label = "Mobile number",
+                keyboardType = KeyboardType.Phone,
+                leading = Glyph.User,
+                prefix = "+91",
+            )
+            Spacer(Modifier.height(12.dp))
+            FreshTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = "Password",
+                keyboardType = KeyboardType.Password,
+                visualTransformation = PasswordVisualTransformation(),
+                leading = Glyph.Lock,
+            )
+
+            val errorState = state
+            if (errorState is LoginState.Error) {
+                Spacer(Modifier.height(12.dp))
+                Callout(errorState.message, tone = Tone.Bad)
+            }
+
+            Spacer(Modifier.height(24.dp))
+            PrimaryAction(
+                text = "Sign in",
+                onClick = { viewModel.login(phone.trim(), password) },
+                enabled = phone.isNotBlank() && password.isNotBlank(),
+                loading = state is LoginState.Loading,
+            )
+            Text(
+                "Forgot your password? Ask the business owner to reset it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Fresh.inkFaint,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            )
         }
     }
 }

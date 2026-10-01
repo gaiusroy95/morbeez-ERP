@@ -82,8 +82,8 @@ const toAdvance = (r: Record<string, unknown>): AdvanceRecord => ({
 const SETTLEMENT_SELECT = `
   SELECT s.id, s.settlement_number, s.employee_id, e.name AS employee_name, s.period_start::text AS period_start,
          s.period_end::text AS period_end, s.status, s.gross::text AS gross, s.deductions::text AS deductions,
-         s.net::text AS net, s.warnings, s.prepared_by, pu.email::text AS prepared_by_email, s.prepared_at,
-         au.email::text AS approved_by_email, s.approved_at, s.paid_at, s.paid_from, s.payment_reference,
+         s.net::text AS net, s.warnings, s.prepared_by, COALESCE(pu.phone, pu.email::text) AS prepared_by_email, s.prepared_at,
+         COALESCE(au.phone, au.email::text) AS approved_by_email, s.approved_at, s.paid_at, s.paid_from, s.payment_reference,
          s.voided_at, s.void_reason, s.version, s.approval_entry_id
   FROM workforce.settlement s
   JOIN trading_partners.employee e ON e.id = s.employee_id

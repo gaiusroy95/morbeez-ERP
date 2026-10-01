@@ -1,12 +1,49 @@
-# Morbeez Driver App
+# Morbeez (Android): owner and driver in one app
 
-Kotlin + Jetpack Compose, native Android (Technology Stack, Section 02) —
-the one client that has to work with no connectivity at all, for hours, and
-reconcile cleanly when it comes back. Implements the architecture in the
-"Morbeez Driver App Architecture" document (offline-first data, sync
-engine, secure local storage, trip-based permissions).
+Kotlin + Jetpack Compose, native Android (Technology Stack, Section 02).
+One install holds two apps. The first screen asks which one to open
+(`ui/screens/launcher`), and after that the phone reopens the one it used
+last. Back from either app's first screen returns to that choice.
 
-## Features
+- **Owner** (`ui/owner/OwnerActivity`) is the owner web app
+  (`apps/owner-app`), full screen in a hardened WebView. It isn't rebuilt
+  here: one set of owner screens serves the phone and any browser. It loads
+  only the owner app's own site; other links open in the phone's browser.
+  The web session is the web app's own httpOnly cookies, and the page has
+  no bridge into the app.
+- **Driver** is native: the one client that has to work with no connectivity
+  at all, for hours, and reconcile cleanly when it comes back. It
+  implements the "Morbeez Driver App Architecture" document (offline-first
+  data, sync engine, secure local storage, trip-based permissions).
+
+Which app someone opens only decides which sign-in they see. What they can
+do is decided by the server for the account that signs in.
+
+## Running against a local stack
+
+| Build | API (driver) | Owner app |
+|---|---|---|
+| debug | `http://10.0.2.2:3000/` | `http://10.0.2.2:3001/` |
+| release | `https://api.morbeez.in/` | `https://app.morbeez.in/` |
+
+`10.0.2.2` is the host PC as the Android emulator sees it. To use a real
+phone, either:
+
+- connect it by USB, run `adb reverse tcp:3000 tcp:3000` and
+  `adb reverse tcp:3001 tcp:3001`, and build with
+  `-Pmorbeez.apiUrl=http://localhost:3000/ -Pmorbeez.ownerUrl=http://localhost:3001/`; or
+- put it on the same Wi-Fi and build with the PC's address, for example
+  `-Pmorbeez.apiUrl=http://192.168.1.20:3000/`, allowing both ports through
+  the Windows firewall.
+
+Only debug builds may use plain `http` (`src/debug`).
+
+Inside the app, owner mode can't save the GST e-invoice JSON (it's made in
+the browser, which a WebView can't hand to Android's downloads), and the
+statements' Print button does nothing. The app says so when you try the
+download. Both work from a computer's browser.
+
+## Driver features
 
 - **Login** — `ui/screens/login`, session tokens in `TokenStore`.
 - **Assigned trips** — `ui/screens/route` (Today's Trip + Route), pulled
@@ -49,11 +86,13 @@ reasoning and the trade-off it makes explicit.
 
 ## Known gaps
 
-Written but not build-verified in this environment (no Android SDK/Gradle
-toolchain available) — unlike the backend, which is fully type-checked and
-tested. Two things a real build pass would need to confirm:
+`./gradlew assembleDebug` builds (JDK 17, Android SDK 34). The app has no
+automated tests yet, and it hasn't yet been walked through on a device or
+emulator.
 
-- Exact dependency versions in `app/build.gradle.kts` resolve together
-  (Compose BOM, Hilt, Room/KSP, SQLCipher).
-- `BASE_URL` in `di/NetworkModule.kt` is a placeholder — wire it to a real
-  per-environment build config before this talks to an actual backend.
+## Design
+
+The "Fresh Ledger" design system of the owner web app, as a Compose theme
+(`ui/theme/Theme.kt`) and a small kit (`ui/components/Kit.kt`: carbon header,
+cards, the big thumb-sized primary action, pills, choice tiles, line icons).
+Fonts: Inter and Bricolage Grotesque (`res/font`), SIL Open Font License 1.1.

@@ -49,33 +49,47 @@ Takes 30–45 minutes (the database and its standby are most of it). Then:
 - **Never run `database/seeds` against production.** They create dev users with
   a published password.
 
-## 4a. Onboarding a business (pilot: invite-only)
+## 4a. Businesses, trials and subscriptions
 
-Public signup is off in staging and production (`SIGNUP_ENABLED=false` in the
-API task; `POST /tenants` answers 403). The team creates each business as a
-one-off task on the API's own task definition, which already has the database
-secret and network access:
+**Signup is open** (`SIGNUP_ENABLED=true` in the API task,
+`modules/compute/main.tf`). Anyone can create a business at
+`https://app.<domain>/signup` with a business name, their mobile number and a
+password. Each business starts on a **30-day free trial**. When the trial
+ends and nothing is paid, the business is **read-only**: everyone can still
+sign in and see everything, but every change is refused (HTTP 402) until it
+subscribes. Signing out and changing a password still work.
+
+Payments aren't taken in the app yet. When a business pays, record it as a
+one-off task on the API's task definition, which already has the database
+secret and network access (`$TENANT_ID` is in `tenant.tenant`):
 
 ```sh
-aws ecs run-task --cluster morbeez-prod --launch-type FARGATE \
-  --task-definition morbeez-prod-api \
-  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}" \
-  --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/src/cli/provision-tenant.js","Sharma Vegetables","owner@sharmaveg.in"]}]}'
+aws ecs run-task --cluster morbeez-prod --launch-type FARGATE   --task-definition morbeez-prod-api   --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SECURITY_GROUP],assignPublicIp=DISABLED}"   --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/src/cli/set-subscription.js","'$TENANT_ID'","2027-03-31"]}]}'
 ```
 
-The task prints one JSON line to the API log group:
-`{"tenantId":…,"business":…,"ownerEmail":…,"oneTimePassword":…}`. It creates
-the tenant, chart of accounts, Owner role and owner login in one transaction.
-An email that already has a login is refused, and nothing is created.
+It's paid through the end of that day, India time; `none` clears it. The
+change reaches every API task within a minute.
 
-- Give the one-time password to the owner **by phone**, never by email or chat.
+**Setting up a business by hand** (a customer who wants help, or one on
+agreed terms): the same kind of task with `provision-tenant`, giving the
+owner's mobile number. `--no-trial` gives a business no time limit.
+
+```sh
+  --overrides '{"containerOverrides":[{"name":"api","command":["node","dist/src/cli/provision-tenant.js","Sharma Vegetables","9822011111"]}]}'
+```
+
+It prints one JSON line to the API log group:
+`{"tenantId":…,"business":…,"ownerPhone":…,"trialEndsAt":…,"oneTimePassword":…}`.
+A number that already has a login is refused, and nothing is created.
+
+- Give the one-time password to the owner **by phone call**, never by SMS or chat.
 - At first sign-in, the owner changes it from the menu: **You → Your account →
   Change password**. That signs them out everywhere. The same day, confirm they
   have done it. The old password is still in the log line, so until it is
   changed, anyone who can read the logs can sign in.
 
-To open signup later, set `SIGNUP_ENABLED=true` in the API task definition
-(`modules/compute/main.tf`) and deploy.
+To make signup invite-only again, set `SIGNUP_ENABLED=false` and deploy;
+`POST /tenants` then answers 403.
 
 ## 4. Hand over to the pipeline
 

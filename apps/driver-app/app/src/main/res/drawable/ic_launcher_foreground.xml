@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Morbeez mark: the leaf from the web app's brand, lime on carbon.
+     108dp adaptive canvas; the mark stays inside the central 66dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="30" android:translateY="30" android:scaleX="2" android:scaleY="2">
+        <path
+            android:pathData="M5,19C5,10 10,5 20,5C20,15 15,20 6,20ZM5,19L12,12"
+            android:strokeColor="#FFC4F25C"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

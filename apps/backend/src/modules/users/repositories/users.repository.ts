@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
-import { UserRecord, UserStatus } from '../entities/user.entity';
+import { LoginIdentity, UserRecord, UserStatus } from '../entities/user.entity';
 
 interface UserRow {
   id: string;
   tenant_id: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   password_hash: string;
   status: UserStatus;
   created_at: Date;
@@ -18,6 +19,7 @@ function toUserRecord(row: UserRow): UserRecord {
     id: row.id,
     tenantId: row.tenant_id,
     email: row.email,
+    phone: row.phone ?? null,
     passwordHash: row.password_hash,
     status: row.status,
     createdAt: row.created_at,
@@ -43,6 +45,15 @@ export class UsersRepository {
     return result.rows[0] ? toUserRecord(result.rows[0]) : null;
   }
 
+  /** The phone twin of findByEmailForLogin — same SECURITY DEFINER exception, for a normalized +91 number. */
+  async findByPhoneForLogin(phone: string): Promise<UserRecord | null> {
+    const result = await this.db.query<UserRow>(
+      'SELECT * FROM identity.find_user_for_login_by_phone($1)',
+      [phone],
+    );
+    return result.rows[0] ? toUserRecord(result.rows[0]) : null;
+  }
+
   async findById(tenantId: string, id: string): Promise<UserRecord | null> {
     return this.db.withTenant(tenantId, async (client) => {
       const result = await client.query<UserRow>(
@@ -64,18 +75,10 @@ export class UsersRepository {
 
   async create(
     tenantId: string,
-    email: string,
+    login: LoginIdentity,
     passwordHash: string,
   ): Promise<UserRecord> {
-    return this.db.withTenant(tenantId, async (client) => {
-      const result = await client.query<UserRow>(
-        `INSERT INTO identity.app_user (tenant_id, email, password_hash)
-         VALUES ($1, $2, $3)
-         RETURNING *`,
-        [tenantId, email, passwordHash],
-      );
-      return toUserRecord(result.rows[0]);
-    });
+    return this.db.withTenant(tenantId, (client) => this.createWithClient(client, tenantId, login, passwordHash));
   }
 
   async updateStatus(
@@ -112,14 +115,14 @@ export class UsersRepository {
   async createWithClient(
     client: PoolClient,
     tenantId: string,
-    email: string,
+    login: LoginIdentity,
     passwordHash: string,
   ): Promise<UserRecord> {
     const result = await client.query<UserRow>(
-      `INSERT INTO identity.app_user (tenant_id, email, password_hash)
-       VALUES ($1, $2, $3)
+      `INSERT INTO identity.app_user (tenant_id, email, phone, password_hash)
+       VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [tenantId, email, passwordHash],
+      [tenantId, login.email ?? null, login.phone ?? null, passwordHash],
     );
     return toUserRecord(result.rows[0]);
   }

@@ -1,10 +1,21 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 export class LoginDto {
-  @ApiProperty()
-  @IsEmail()
-  email!: string;
+  /** A mobile number (any common Indian format) or an email address. */
+  @ApiPropertyOptional({ example: '98220 11111' })
+  @ValidateIf((dto: LoginDto) => dto.email === undefined)
+  @IsString()
+  @MinLength(3)
+  @MaxLength(254)
+  login?: string;
+
+  /** Older clients send the login as `email`; accepted until they update. */
+  @ApiPropertyOptional({ deprecated: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(254)
+  email?: string;
 
   @ApiProperty()
   @IsString()

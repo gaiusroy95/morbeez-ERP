@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.MorbeezDriver" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Carbon behind the first frame, so the app opens without a white flash
+         (the launcher and every driver screen start on carbon). -->
+    <style name="Theme.MorbeezDriver" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/carbon</item>
+        <item name="android:statusBarColor">@color/carbon</item>
+        <item name="android:navigationBarColor">@color/carbon</item>
+    </style>
 </resources>

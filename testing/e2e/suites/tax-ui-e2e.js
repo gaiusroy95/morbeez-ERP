@@ -18,7 +18,7 @@ async function signIn(browser, email, viewport = { width: 1440, height: 1000 }) 
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${BASE}/login`);
-  await page.fill('#email', email);
+  await page.fill('#login', email);
   await page.fill('#password', PASSWORD);
   await page.click('button[type=submit]');
   await page.waitForURL((u) => !/\/login/.test(u.toString()));

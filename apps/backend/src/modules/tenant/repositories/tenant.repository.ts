@@ -11,6 +11,8 @@ interface TenantRow {
   timezone: string;
   tax_registration: string | null;
   branding: Record<string, unknown>;
+  trial_ends_at: Date | null;
+  subscribed_until: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -24,6 +26,8 @@ function toTenantRecord(row: TenantRow): TenantRecord {
     timezone: row.timezone,
     taxRegistration: row.tax_registration,
     branding: row.branding,
+    trialEndsAt: row.trial_ends_at ?? null,
+    subscribedUntil: row.subscribed_until ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -50,19 +54,30 @@ export class TenantRepository {
     return result.rows[0] ? toTenantRecord(result.rows[0]) : null;
   }
 
+  /** [trialDays] null: no trial limit (a business the team sets up on its own terms). */
   async createWithClient(
     client: PoolClient,
     name: string,
     currency: string,
     timezone: string,
+    trialDays: number | null = null,
   ): Promise<TenantRecord> {
     const result = await client.query<TenantRow>(
-      `INSERT INTO tenant.tenant (name, currency, timezone)
-       VALUES ($1, $2, $3)
+      `INSERT INTO tenant.tenant (name, currency, timezone, trial_ends_at)
+       VALUES ($1, $2, $3, CASE WHEN $4::int IS NULL THEN NULL ELSE now() + make_interval(days => $4::int) END)
        RETURNING *`,
-      [name, currency, timezone],
+      [name, currency, timezone, trialDays],
     );
     return toTenantRecord(result.rows[0]);
+  }
+
+  /** Records a payment: paid through [until]. For the team (provision/subscription CLI), never a request body. */
+  async setSubscribedUntil(id: string, until: Date | null): Promise<TenantRecord | null> {
+    const result = await this.db.query<TenantRow>(
+      'UPDATE tenant.tenant SET subscribed_until = $2, updated_at = now() WHERE id = $1 RETURNING *',
+      [id, until],
+    );
+    return result.rows[0] ? toTenantRecord(result.rows[0]) : null;
   }
 
   /** Cleanup for a signup attempt that failed after the tenant row was created but before it had a usable owner. */

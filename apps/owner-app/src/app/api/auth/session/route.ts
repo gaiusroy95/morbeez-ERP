@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const response = NextResponse.json({
     userId: claims.userId,
-    email: claims.email,
+    login: claims.login,
     roles: claims.roles,
     permissions: claims.permissions,
   });

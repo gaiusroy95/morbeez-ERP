@@ -5,6 +5,8 @@ plugins {
     id("com.google.dagger.hilt.android")
 }
 
+fun setting(name: String, default: String): String = (findProperty(name) as String?) ?: default
+
 android {
     namespace = "com.morbeez.driver"
     compileSdk = 34
@@ -21,6 +23,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {
@@ -36,9 +39,20 @@ android {
         jvmTarget = "17"
     }
 
+    // Where the app finds the API (driver mode) and the owner web app (owner
+    // mode). Override either per build: ./gradlew assembleDebug
+    // -Pmorbeez.apiUrl=http://192.168.1.20:3000/ -Pmorbeez.ownerUrl=http://192.168.1.20:3001/
     buildTypes {
+        debug {
+            // 10.0.2.2 is the host machine, as the Android emulator sees it.
+            buildConfigField("String", "API_BASE_URL", "\"${setting("morbeez.apiUrl", "http://10.0.2.2:3000/")}\"")
+            buildConfigField("String", "OWNER_WEB_URL", "\"${setting("morbeez.ownerUrl", "http://10.0.2.2:3001/")}\"")
+        }
         release {
             isMinifyEnabled = false
+            // The hosts the production stack serves (infrastructure/terraform/modules/compute).
+            buildConfigField("String", "API_BASE_URL", "\"${setting("morbeez.apiUrl", "https://api.morbeez.in/")}\"")
+            buildConfigField("String", "OWNER_WEB_URL", "\"${setting("morbeez.ownerUrl", "https://app.morbeez.in/")}\"")
         }
     }
 }
@@ -51,8 +65,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.1")
+    // Lifecycle 2.7, not 2.8: 2.8's collectAsStateWithLifecycle reads a
+    // LocalLifecycleOwner that only Compose 1.7 provides, and this BOM is
+    // Compose 1.6 — every screen crashed on first composition. Move both together.
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
@@ -91,7 +108,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

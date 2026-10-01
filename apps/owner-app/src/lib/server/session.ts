@@ -23,7 +23,8 @@ export interface TokenPair {
 export interface SessionClaims {
   userId: string;
   tenantId: string;
-  email: string;
+  /** What they sign in with: a mobile number (+91…) or an email. */
+  login: string;
   roles: string[];
   permissions: string[];
   expiresAt: number; // epoch seconds
@@ -114,7 +115,8 @@ export function decodeAccessToken(token: string): SessionClaims | null {
     const json = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       sub: string;
       tenantId: string;
-      email: string;
+      login?: string;
+      email?: string;
       roles?: string[];
       permissions?: string[];
       exp: number;
@@ -122,7 +124,8 @@ export function decodeAccessToken(token: string): SessionClaims | null {
     return {
       userId: json.sub,
       tenantId: json.tenantId,
-      email: json.email,
+      // email: tokens issued before phone sign-in, until they expire.
+      login: json.login ?? json.email ?? '',
       roles: json.roles ?? [],
       permissions: json.permissions ?? [],
       expiresAt: json.exp,

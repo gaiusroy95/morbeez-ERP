@@ -14,6 +14,7 @@ import { formatAmount, formatDate, formatDateTime, formatMoney } from '@/lib/for
 import { parseMoney } from '@/lib/parse';
 import { sumMoney } from '@/lib/decimal';
 import type { DateRange } from '@/lib/hooks/use-accounting';
+import { displayLogin } from '@/lib/phone';
 
 const LINE_LABEL: Record<SettlementLine['kind'], string> = {
   basic: 'Pay',
@@ -364,8 +365,8 @@ export function SettlementPanel({
         items={[
           ['Period', `${formatDate(s.periodStart)} – ${formatDate(s.periodEnd)}`],
           ['Status', <StatusBadge key="s" status={s.status} tone={STATUS_TONE[s.status]} label={STATUS_LABEL[s.status]} />],
-          ['Prepared', `${s.preparedByEmail ?? '—'} · ${formatDateTime(s.preparedAt, timeZone)}`],
-          ['Approved', s.approvedAt ? `${s.approvedByEmail ?? '—'} · ${formatDateTime(s.approvedAt, timeZone)}` : '—'],
+          ['Prepared', `${s.preparedByEmail ? displayLogin(s.preparedByEmail) : '—'} · ${formatDateTime(s.preparedAt, timeZone)}`],
+          ['Approved', s.approvedAt ? `${s.approvedByEmail ? displayLogin(s.approvedByEmail) : '—'} · ${formatDateTime(s.approvedAt, timeZone)}` : '—'],
           ['Paid', s.paidAt ? `${formatDateTime(s.paidAt, timeZone)} · ${s.paidFrom === 'bank' ? 'Bank' : 'Cash'}${s.paymentReference ? ` · ${s.paymentReference}` : ''}` : '—'],
         ]}
       />

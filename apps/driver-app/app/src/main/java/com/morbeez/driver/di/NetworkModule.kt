@@ -1,5 +1,6 @@
 package com.morbeez.driver.di
 
+import com.morbeez.driver.BuildConfig
 import com.morbeez.driver.data.remote.ApiService
 import com.morbeez.driver.data.remote.AuthInterceptor
 import com.morbeez.driver.data.remote.TokenAuthenticator
@@ -11,16 +12,18 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import java.util.concurrent.TimeUnit
+import javax.inject.Named
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
-// The backend base URL — build-config'd per environment in a real release
-// pipeline (dev/staging/prod); hardcoded here since this module is
-// structure-and-logic, not a deployment configuration exercise.
-private const val BASE_URL = "https://api.morbeez.example/"
+// The backend base URL, per build type (app/build.gradle.kts).
+private const val BASE_URL = BuildConfig.API_BASE_URL
+
+// The un-authenticated client, told apart from the authenticated ApiService.
+private const val PLAIN_API = "plainApi"
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -35,6 +38,7 @@ object NetworkModule {
     // client there would recurse into itself on every 401.
     @Provides
     @Singleton
+    @Named(PLAIN_API)
     fun providePlainApiService(moshi: Moshi): ApiService {
         val client = OkHttpClient.Builder().build()
         return Retrofit.Builder()
@@ -47,7 +51,7 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(tokenStore: TokenStore, plainApiService: ApiService): OkHttpClient {
+    fun provideOkHttpClient(tokenStore: TokenStore, @Named(PLAIN_API) plainApiService: ApiService): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             // Headers/body are never logged — tokens and cash amounts don't
             // belong in a log line (Driver App Architecture, DRV.12).

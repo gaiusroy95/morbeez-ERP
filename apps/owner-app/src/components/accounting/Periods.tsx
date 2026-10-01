@@ -11,6 +11,7 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useClosePreview } from '@/lib/hooks/use-accounting';
 import { ROOT_LABEL } from '@/lib/accounting';
 import { formatAmount, formatDate, formatDateTime } from '@/lib/format';
+import { displayLogin } from '@/lib/phone';
 
 const addDays = (date: string, n: number) => {
   const d = new Date(`${date}T00:00:00Z`);
@@ -231,7 +232,7 @@ export function PeriodsView({
                   </td>
                   <td>
                     {formatDateTime(c.closedAt, timeZone)}
-                    <div className="cell-sub">{c.closedByEmail}</div>
+                    <div className="cell-sub">{displayLogin(c.closedByEmail)}</div>
                   </td>
                   <td>
                     {c.reopenedAt ? (

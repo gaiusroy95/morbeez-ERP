@@ -10,6 +10,7 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useActiveDrivers, useActiveFarmers } from '@/lib/hooks/use-lookups';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { optionalText, parseDecimal, parseMoney, parseQuantity, parseWholeNumber } from '@/lib/parse';
+import { displayLogin } from '@/lib/phone';
 
 // Acting on a suggestion is the owner's own action: these dialogs call the
 // ordinary endpoints with the owner's session, then record what was done
@@ -53,7 +54,7 @@ export function SuggestionCard({ rec, currency, timeZone, permissions }: { rec: 
         ) : (
           <span className="suggestion-when">
             {DECISION_LABEL[rec.status as keyof typeof DECISION_LABEL]}
-            {rec.decision?.decidedByEmail ? ` by ${rec.decision.decidedByEmail}` : ''}
+            {rec.decision?.decidedByEmail ? ` by ${displayLogin(rec.decision.decidedByEmail)}` : ''}
             {rec.decision?.reason ? ` — ${rec.decision.reason}` : ''}
           </span>
         )}

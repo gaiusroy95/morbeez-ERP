@@ -1,9 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { TenantRepository } from './repositories/tenant.repository';
-import { TenantRecord } from './entities/tenant.entity';
-import { UsersService } from '../users/users.service';
-import { PublicUser } from '../users/entities/user.entity';
+import { accessOf, TenantAccess, TenantRecord, TRIAL_DAYS } from './entities/tenant.entity';
+import { isUniqueViolation, loginTaken, UsersService } from '../users/users.service';
+import { LoginIdentity, PublicUser } from '../users/entities/user.entity';
 
 export interface NewBusinessAccount {
   tenant: TenantRecord;
@@ -30,8 +30,9 @@ export class TenantService {
    */
   async createBusinessAccount(
     businessName: string,
-    ownerEmail: string,
+    ownerLogin: LoginIdentity,
     ownerPassword: string,
+    trialDays: number | null = TRIAL_DAYS,
   ): Promise<NewBusinessAccount> {
     try {
       return await this.db.transaction(async (client) => {
@@ -40,12 +41,13 @@ export class TenantService {
           businessName,
           'INR',
           'Asia/Kolkata',
+          trialDays,
         );
         await this.db.setTenantContext(client, tenant.id);
         const owner = await this.users.provisionOwner(
           client,
           tenant.id,
-          ownerEmail,
+          ownerLogin,
           ownerPassword,
         );
         return { tenant, owner };
@@ -54,14 +56,33 @@ export class TenantService {
       // (DatabaseService.transaction) — no orphaned tenant row, no manual
       // cleanup needed.
     } catch (err) {
-      // The email already logs in somewhere (app_user_email_unique,
-      // Security Audit SA-01). Saying so does confirm the address has an
-      // account; signup is rate-limited per IP for that reason (SA-02).
-      if ((err as { code?: string }).code === '23505') {
-        throw new ConflictException('This email already has a Morbeez login. Sign in instead, or use a different email.');
-      }
+      // The phone or email already logs in somewhere (Security Audit
+      // SA-01). Saying so does confirm it has an account; signup is
+      // rate-limited per IP for that reason (SA-02).
+      if (isUniqueViolation(err)) throw loginTaken(err);
       throw err;
     }
+  }
+
+  // Where each business stands, for the check on every write
+  // (TrialAccessInterceptor). Cached briefly: the answer changes once a
+  // month, and a write shouldn't cost an extra query.
+  private readonly accessCache = new Map<string, { access: TenantAccess; at: number }>();
+
+  async access(tenantId: string): Promise<TenantAccess> {
+    const hit = this.accessCache.get(tenantId);
+    if (hit && Date.now() - hit.at < ACCESS_CACHE_MS) return hit.access;
+    const access = accessOf(await this.getById(tenantId));
+    this.accessCache.set(tenantId, { access, at: Date.now() });
+    return access;
+  }
+
+  /** Records that a business has paid through [until] (the team's CLI). */
+  async setSubscribedUntil(tenantId: string, until: Date | null): Promise<TenantRecord> {
+    const tenant = await this.tenants.setSubscribedUntil(tenantId, until);
+    if (!tenant) throw new NotFoundException('Tenant not found');
+    this.accessCache.delete(tenantId);
+    return tenant;
   }
 
   async getById(tenantId: string): Promise<TenantRecord> {
@@ -84,3 +105,5 @@ export class TenantService {
     return tenant;
   }
 }
+
+const ACCESS_CACHE_MS = 60_000;

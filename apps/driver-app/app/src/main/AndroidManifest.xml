@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -8,7 +9,9 @@
 
     <application
         android:name=".MorbeezDriverApp"
-        android:label="Morbeez Driver"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
         android:theme="@style/Theme.MorbeezDriver">
 
@@ -21,6 +24,15 @@
             </intent-filter>
         </activity>
 
+        <!-- Owner mode: the owner web app, full screen. Rotation and the
+             keyboard don't recreate it, so the page (and anything typed
+             into it) survives them. -->
+        <activity
+            android:name=".ui.owner.OwnerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Scoped access for the camera intent to write a captured photo
              into the app's own storage before it's attached to a stop
              (Driver App Architecture, DRV.19 — Photos/POD). -->
@@ -32,6 +44,21 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- WorkManager must start with MorbeezDriverApp's configuration (the
+             Hilt worker factory), not its default one — otherwise it can't
+             create SyncWorker and nothing ever syncs. Removing the default
+             initializer hands WorkManager's start to Configuration.Provider. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
         </provider>
 
     </application>

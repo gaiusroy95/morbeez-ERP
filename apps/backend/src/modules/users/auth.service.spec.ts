@@ -16,6 +16,7 @@ describe('AuthService', () => {
   beforeEach(() => {
     users = {
       findByEmailForLogin: jest.fn().mockResolvedValue(user),
+      findByPhoneForLogin: jest.fn().mockResolvedValue({ ...user, phone: '+919822011111' }),
       findById: jest.fn().mockResolvedValue(user),
       findRolesAndPermissions: jest.fn().mockResolvedValue({ roles: ['Owner'], permissions: [] }),
     };
@@ -39,6 +40,30 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
+    it('signs in with a mobile number however it is typed, looked up in one form', async () => {
+      await expect(service.login('098220-11111', 'right', undefined, '1.1.1.1')).resolves.toMatchObject({ accessToken: 'access' });
+      expect(users.findByPhoneForLogin).toHaveBeenCalledWith('+919822011111');
+      expect(users.findByEmailForLogin).not.toHaveBeenCalled();
+      expect(tokens.signAccessToken).toHaveBeenCalledWith(expect.objectContaining({ login: '+919822011111' }));
+    });
+
+    it('something that is neither a mobile number nor an email is the same 401, after the same hash', async () => {
+      await expect(service.login('12345', 'guess', undefined, '1.1.1.1')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(users.findByPhoneForLogin).not.toHaveBeenCalled();
+      expect(password.verify).toHaveBeenCalledWith('dummy-hash', 'guess');
+    });
+
+    it('failures count against the number, not how it was typed', async () => {
+      password.verify.mockResolvedValue(false);
+      for (let i = 0; i < 10; i++) {
+        const typed = i % 2 ? '98220 11111' : '+91 9822011111';
+        await service.login(typed, 'wrong', undefined, '1.1.1.1').catch(() => undefined);
+      }
+      password.verify.mockResolvedValue(true);
+      const err = await service.login('9822011111', 'right', undefined, '1.1.1.1').catch((e) => e);
+      expect((err as HttpException).getStatus()).toBe(429);
+    });
+
     it('an unknown email still runs a password hash, so it takes as long as a known one', async () => {
       users.findByEmailForLogin.mockResolvedValue(null);
       await expect(service.login('nobody@x.test', 'guess', undefined, '1.1.1.1')).rejects.toBeInstanceOf(UnauthorizedException);

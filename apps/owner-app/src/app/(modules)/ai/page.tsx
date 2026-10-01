@@ -14,6 +14,7 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { formatDateTime } from '@/lib/format';
 import { useCurrency, useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
+import { displayLogin } from '@/lib/phone';
 
 type Section = 'open' | 'decided' | 'profit' | 'record' | 'settings';
 const SECTIONS: { value: Section; label: string; needs?: string }[] = [
@@ -105,7 +106,7 @@ function Suggestions({ today, timeZone }: { today: string; timeZone: string }) {
               {section === 'open' && (
                 <p className="muted run-note" role="status">
                   {refresh.error ? `Couldn't compute: ${(refresh.error as Error).message}. ` : ''}
-                  {run ? `Last worked out ${formatDateTime(run.finishedAt, timeZone)}${run.byEmail ? ` by ${run.byEmail}` : ''}.` : 'No suggestions worked out yet.'}
+                  {run ? `Last worked out ${formatDateTime(run.finishedAt, timeZone)}${run.byEmail ? ` by ${displayLogin(run.byEmail)}` : ''}.` : 'No suggestions worked out yet.'}
                   {suppressed.length > 0 && ` Not suggested: ${suppressed.map(([t, why]) => `${TYPE_LABEL[t as AiRecommendationType] ?? t} (${why})`).join('; ')}.`}
                 </p>
               )}

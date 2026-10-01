@@ -19,7 +19,7 @@ export class AuthController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent?: string,
   ): Promise<TokenPair> {
-    return this.authService.login(dto.email, dto.password, userAgent, ip, dto.deviceId);
+    return this.authService.login(dto.login ?? dto.email ?? '', dto.password, userAgent, ip, dto.deviceId);
   }
 
   @Post('refresh')

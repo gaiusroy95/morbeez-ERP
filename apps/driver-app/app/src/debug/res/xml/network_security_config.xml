@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- The emulator's 10.0.2.2, localhost over `adb reverse`, or a PC's LAN
+         address: a debug build may talk to any of them unencrypted. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
