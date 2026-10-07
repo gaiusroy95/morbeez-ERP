@@ -15,6 +15,8 @@ COPY packages ./packages
 RUN pnpm install --frozen-lockfile --filter @morbeez/owner-app...
 
 FROM deps AS build
+# apps/owner-app/tsconfig.json extends it.
+COPY tsconfig.base.json ./
 COPY apps/owner-app ./apps/owner-app
 ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
 RUN pnpm --filter @morbeez/owner-app build

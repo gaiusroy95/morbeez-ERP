@@ -27,6 +27,8 @@ RUN pnpm install --frozen-lockfile --filter @morbeez/backend...
 
 # ---- build: compile, then a self-contained production-only copy ----
 FROM deps AS build
+# apps/backend/tsconfig.json extends it.
+COPY tsconfig.base.json ./
 COPY apps/backend ./apps/backend
 RUN pnpm --filter @morbeez/backend build
 # pnpm deploy resolves the workspace's symlinked node_modules into a plain

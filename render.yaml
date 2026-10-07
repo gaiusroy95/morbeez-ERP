@@ -1,0 +1,62 @@
+# Render Blueprint — a hosted PREVIEW of Morbeez for the client to try
+# (infrastructure/runbooks/render-preview.md). Not the production stack:
+# production is AWS, in infrastructure/terraform.
+#
+#   morbeez-api    the NestJS API     (apps/backend/Dockerfile)
+#   morbeez-redis  Redis (Render Key Value)
+#
+# The owner web app is on Vercel and the database on Neon (the runbook).
+# Values marked `sync: false` are asked for once when the Blueprint is
+# first applied, and are never stored in this file.
+
+services:
+  - type: web
+    name: morbeez-api
+    runtime: docker
+    region: ohio # next to the Neon database (us-east-2) and Vercel (iad1)
+    plan: free
+    dockerfilePath: ./apps/backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # morbeez_app — the RLS-bound role. Never the Neon owner (neondb_owner).
+      - key: APP_DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: morbeez-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      # Encrypts farmers' bank details. Keep it once data exists: changing
+      # it makes what's stored unreadable.
+      - key: FIELD_ENCRYPTION_KEY
+        sync: false
+      # The owner app's address on Vercel, e.g. https://morbeez-owner.vercel.app
+      - key: CORS_ORIGIN
+        sync: false
+      # One proxy hop in front of the API: Render's load balancer.
+      - key: TRUST_PROXY
+        value: "1"
+      # Lets the client create their own business from the sign-in page.
+      - key: SIGNUP_ENABLED
+        value: "true"
+      # Render's disk is wiped on every deploy and restart: photos taken in a
+      # preview don't survive one (the runbook, "Photos"). Production uses S3.
+      - key: UPLOADS_DIR
+        value: /tmp/morbeez-uploads
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_POOL_MAX
+        value: "5"
+
+  - type: keyvalue
+    name: morbeez-redis
+    region: ohio
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: [] # reachable only from this account's services
