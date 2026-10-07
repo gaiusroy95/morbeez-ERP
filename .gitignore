@@ -40,3 +40,6 @@ npm-debug.log*
 
 # E2E screenshots
 testing/e2e/.shots/
+
+# JVM heap dumps (a crashed Gradle daemon leaves these; hundreds of MB)
+*.hprof
