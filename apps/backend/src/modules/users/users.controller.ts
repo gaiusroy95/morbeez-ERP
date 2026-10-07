@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -9,6 +9,7 @@ import { UsersService } from './users.service';
 import { RegisterUserDto } from './dto/register-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { PreferencesDto } from './dto/preferences.dto';
 import { PublicUser } from './entities/user.entity';
 
 // User management within an already-authenticated tenant — creating the
@@ -65,6 +66,17 @@ export class UsersController {
     return this.usersService
       .assignRole(user.tenantId, id, dto.roleId)
       .then(() => ({ ok: true as const }));
+  }
+
+  /** Your own settings: the language the apps speak to you in. Self-service. */
+  @Get('me/preferences')
+  preferences(@CurrentUser() user: AuthContext): Promise<{ language: string }> {
+    return this.usersService.preferences(user.tenantId, user.userId);
+  }
+
+  @Patch('me/preferences')
+  setPreferences(@CurrentUser() user: AuthContext, @Body() dto: PreferencesDto): Promise<{ language: string }> {
+    return this.usersService.setPreferences(user.tenantId, user.userId, dto);
   }
 
   // Self-service: no permission required beyond being authenticated as

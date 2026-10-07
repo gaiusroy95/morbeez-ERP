@@ -1,11 +1,13 @@
 package com.morbeez.driver
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.morbeez.driver.data.i18n.AppLanguage
 import com.morbeez.driver.data.mode.AppModeStore
 import com.morbeez.driver.data.security.TokenStore
 import com.morbeez.driver.data.sync.SyncWorker
@@ -26,6 +28,11 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var tokenStore: TokenStore
     @Inject lateinit var modeStore: AppModeStore
+
+    // Every screen speaks the language chosen on this phone.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

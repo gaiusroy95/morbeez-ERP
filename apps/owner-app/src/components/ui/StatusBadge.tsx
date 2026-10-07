@@ -1,3 +1,7 @@
+'use client';
+
+import { useT } from '@/lib/i18n';
+
 // One badge for every workflow status in the app. Tone carries the
 // meaning (needs attention / in motion / done / stopped); the label always
 // says it in words, so colour is never the only signal.
@@ -24,7 +28,8 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
   planned: { label: 'Planned', tone: 'muted' },
   in_progress: { label: 'On the road', tone: 'active' },
   completed: { label: 'Completed', tone: 'done' },
-  reconciled: { label: 'Reconciled', tone: 'done' },
+  reconciled: { label: 'Closed', tone: 'done' },
+  on_hold: { label: 'On hold', tone: 'attention' },
   pending: { label: 'Pending', tone: 'muted' },
   skipped: { label: 'Skipped', tone: 'bad' },
   scheduled: { label: 'Scheduled', tone: 'muted' },
@@ -34,10 +39,11 @@ const STATUS: Record<string, { label: string; tone: Tone }> = {
 };
 
 export function StatusBadge({ status, tone, label }: { status: string; tone?: Tone; label?: string }) {
+  const t = useT();
   const known = STATUS[status];
   return (
     <span className="badge" data-tone={tone ?? known?.tone ?? 'muted'}>
-      {label ?? known?.label ?? status.replace(/_/g, ' ')}
+      {t(label ?? known?.label ?? status.replace(/_/g, ' '))}
     </span>
   );
 }

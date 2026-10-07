@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import type { CreateOrderBody, OrderRecord, OrderStatus } from '@morbeez/shared-types';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { CreateOrderBody, OrderRecord, OrderStatus, PriceSuggestion } from '@morbeez/shared-types';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { EmptyRow, FilterTabs, PageHeader, Pager, SelectableRow } from '@/components/ui/ListControls';
@@ -9,7 +10,7 @@ import { DetailPanel, KeyValues } from '@/components/ui/DetailPanel';
 import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
 import { ApprovalGate } from '@/components/forms/ApprovalGate';
 import { emptyLine, LinesEditor, parseLines, type LineDraft } from '@/components/forms/LinesEditor';
-import { apiSend } from '@/lib/api/client';
+import { apiGet, apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useCustomerCredit, useOrder, useOrders } from '@/lib/hooks/use-modules';
 import {
@@ -23,6 +24,7 @@ import {
 } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 const FILTERS = [
   { value: 'all' as const, label: 'All' },
@@ -46,13 +48,14 @@ function orderBadge(order: OrderRecord) {
 // ---- New order ----
 
 function CreditHint({ customerId }: { customerId: string }) {
+  const t = useT();
   const { data: session } = useSession();
   const { data } = useCustomerCredit(customerId, hasPermission(session, 'finance:read'));
   if (!data) return null;
   if (data.creditHold) {
     return (
       <p className="action-note form-wide" data-tone="bad">
-        <strong>On credit hold</strong>
+        <strong>{t('On credit hold')}</strong>
         {data.creditHoldReason ? ` — ${data.creditHoldReason}` : ''}. New orders for this customer can be placed but
         won&apos;t confirm until the hold is lifted.
       </p>
@@ -61,7 +64,7 @@ function CreditHint({ customerId }: { customerId: string }) {
   const available = Number(data.available);
   return (
     <p className="action-note form-wide" data-tone={available <= 0 ? 'bad' : 'info'}>
-      Credit available: <strong>{formatMoney(data.available, data.currency)}</strong> of{' '}
+      Credit available: <strong>{formatMoney(data.available, data.currency)}</strong> {t('of')}{' '}
       {formatMoney(data.creditLimit, data.currency)} (owes {formatMoney(data.balance, data.currency)}, plus{' '}
       {formatMoney(data.openOrderValue, data.currency)} confirmed and not yet delivered). The order is checked against
       this when it&apos;s confirmed.
@@ -70,12 +73,22 @@ function CreditHint({ customerId }: { customerId: string }) {
 }
 
 function NewOrderDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (order: OrderRecord) => void }) {
+  const t = useT();
   const customers = useActiveCustomers();
   const products = useActiveProducts();
   const currency = useCurrency();
   const [customerId, setCustomerId] = useState('');
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [problem, setProblem] = useState<string | null>(null);
+  // The last actual price for this customer and each chosen product (client Q&A, pricing).
+  const productIds = [...new Set(lines.map((l) => l.productId).filter(Boolean))].sort();
+  const suggestions = useQuery({
+    queryKey: ['orders', 'price-suggestions', customerId, productIds.join(',')],
+    queryFn: () => apiGet<PriceSuggestion[]>('orders/price-suggestions', { customerId, productIds: productIds.join(',') }),
+    enabled: !!customerId && productIds.length > 0,
+    staleTime: 60_000,
+  });
+  const hints = useMemo(() => new Map((suggestions.data ?? []).map((s) => [s.productId, s])), [suggestions.data]);
   const create = useAction(
     (body: CreateOrderBody) => apiSend<OrderRecord>('POST', 'orders', body),
     ORDER_EFFECTS,
@@ -83,8 +96,8 @@ function NewOrderDialog({ onClose, onCreated }: { onClose: () => void; onCreated
   );
 
   const submit = () => {
-    if (!customerId) return setProblem('Choose the customer.');
-    const parsed = parseLines(lines, true);
+    if (!customerId) return setProblem(t('Choose the customer.'));
+    const parsed = parseLines(lines, true, products.records);
     if (!parsed.ok) return setProblem(parsed.error);
     setProblem(null);
     create.mutate({
@@ -95,16 +108,21 @@ function NewOrderDialog({ onClose, onCreated }: { onClose: () => void; onCreated
 
   return (
     <FormDialog
-      title="New customer order"
-      description={<p>Leave a rate blank to use the product&apos;s list price. The order is placed now and confirmed separately.</p>}
-      submitLabel="Place order"
+      title={t('New customer order')}
+      description={
+        <p>
+          Each rate starts at the last price this customer paid (or the product&apos;s last selling price); change it if
+          today&apos;s deal differs. The order is placed now and confirmed separately.
+        </p>
+      }
+      submitLabel={t('Place order')}
       size="wide"
       pending={create.isPending}
       error={problem ?? create.error}
       onClose={onClose}
       onSubmit={submit}
     >
-      <Field label="Customer" wide>
+      <Field label={t('Customer')} wide>
         {(props) => (
           <select {...props} value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             <option value="">{customers.isPending ? 'Loading…' : 'Choose a customer…'}</option>
@@ -124,6 +142,7 @@ function NewOrderDialog({ onClose, onCreated }: { onClose: () => void; onCreated
         currency={currency}
         priceLabel="Rate"
         priceOptional
+        hints={customerId ? hints : undefined}
       />
     </FormDialog>
   );
@@ -132,6 +151,7 @@ function NewOrderDialog({ onClose, onCreated }: { onClose: () => void; onCreated
 // ---- Detail ----
 
 function OrderActions({ order, canWrite }: { order: OrderRecord; canWrite: boolean }) {
+  const t = useT();
   const [open, setOpen] = useState<'confirm' | 'cancel' | null>(null);
   const close = () => setOpen(null);
   const confirm = useAction(
@@ -153,23 +173,23 @@ function OrderActions({ order, canWrite }: { order: OrderRecord; canWrite: boole
       <ActionBar>
         {order.status === 'placed' && !awaiting && (
           <button type="button" className="button button-primary" onClick={() => setOpen('confirm')}>
-            Confirm order
+            {t('Confirm order')}
           </button>
         )}
         <button type="button" className="button button-danger" onClick={() => setOpen('cancel')}>
-          Cancel order
+          {t('Cancel order')}
         </button>
       </ActionBar>
       {open === 'confirm' && (
         <FormDialog
-          title="Confirm this order?"
+          title={t('Confirm this order?')}
           description={
             <>
-              <p>Confirming checks the customer&apos;s credit and reserves a graded stock lot for every line.</p>
-              <p>If the order is over your approval threshold, it goes for approval instead.</p>
+              <p>{t("Confirming checks the customer's credit and reserves a graded stock lot for every line.")}</p>
+              <p>{t('If the order is over your approval threshold, it goes for approval instead.')}</p>
             </>
           }
-          submitLabel="Confirm order"
+          submitLabel={t('Confirm order')}
           pending={confirm.isPending}
           error={confirm.error}
           onClose={close}
@@ -178,15 +198,15 @@ function OrderActions({ order, canWrite }: { order: OrderRecord; canWrite: boole
       )}
       {open === 'cancel' && (
         <FormDialog
-          title="Cancel this order?"
+          title={t('Cancel this order?')}
           description={
             order.status === 'confirmed' ? (
-              <p>The stock lots reserved for it go back to being available. This can&apos;t be undone.</p>
+              <p>{t("The stock lots reserved for it go back to being available. This can't be undone.")}</p>
             ) : (
-              <p>This can&apos;t be undone.</p>
+              <p>{t("This can't be undone.")}</p>
             )
           }
-          submitLabel="Cancel order"
+          submitLabel={t('Cancel order')}
           tone="danger"
           pending={cancel.isPending}
           error={cancel.error}
@@ -199,6 +219,7 @@ function OrderActions({ order, canWrite }: { order: OrderRecord; canWrite: boole
 }
 
 function OrderDetail({ id, canWrite, onClose }: { id: string; canWrite: boolean; onClose: () => void }) {
+  const t = useT();
   const { data, error, isPending, refetch } = useOrder(id);
   const currency = useCurrency();
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
@@ -207,7 +228,7 @@ function OrderDetail({ id, canWrite, onClose }: { id: string; canWrite: boolean;
   const productUom = useProductUom();
 
   return (
-    <DetailPanel title="Order" onClose={onClose}>
+    <DetailPanel title={t('Order')} onClose={onClose}>
       {isPending ? (
         <SkeletonLines lines={5} />
       ) : error ? (
@@ -234,15 +255,15 @@ function OrderDetail({ id, canWrite, onClose }: { id: string; canWrite: boolean;
             />
           )}
           <OrderActions order={data} canWrite={canWrite} />
-          <h3 className="detail-subhead">Lines</h3>
+          <h3 className="detail-subhead">{t('Lines')}</h3>
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Product</th>
-                  <th className="align-right">Quantity</th>
-                  <th className="align-right">Price</th>
-                  <th className="align-right">Value</th>
+                  <th>{t('Product')}</th>
+                  <th className="align-right">{t('Quantity')}</th>
+                  <th className="align-right">{t('Price')}</th>
+                  <th className="align-right">{t('Value')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -261,8 +282,7 @@ function OrderDetail({ id, canWrite, onClose }: { id: string; canWrite: boolean;
             </table>
           </div>
           <p className="footnote">
-            An order is delivered from a trip&apos;s delivery stop (Trips). Delivery consumes the reserved stock and issues
-            the invoice, which then shows under Finance → Receivables.
+            {t("An order is delivered from a trip's delivery stop (Trips). Delivery consumes the reserved stock and issues the invoice, which then shows under Finance → Receivables.")}
           </p>
         </>
       )}
@@ -271,6 +291,7 @@ function OrderDetail({ id, canWrite, onClose }: { id: string; canWrite: boolean;
 }
 
 export default function OrdersPage() {
+  const t = useT();
   const [status, setStatus] = useState<OrderStatus | 'all'>('all');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
@@ -285,12 +306,12 @@ export default function OrdersPage() {
   return (
     <div className="stack">
       <PageHeader
-        title="Orders"
-        subtitle="Customer orders — what's waiting on you, what's on its way, what's done."
+        title={t('Orders')}
+        subtitle={t("Customer orders — what's waiting on you, what's on its way, what's done.")}
         actions={
           canWrite && (
             <button type="button" className="button button-primary" onClick={() => setCreating(true)}>
-              New order
+              {t('New order')}
             </button>
           )
         }
@@ -306,10 +327,10 @@ export default function OrdersPage() {
       )}
       <div className="split" data-detail={selected ? 'open' : undefined}>
         <Panel
-          title="Customer orders"
+          title={t('Customer orders')}
           meta={
             <FilterTabs
-              label="Filter by status"
+              label={t('Filter by status')}
               options={FILTERS}
               value={status}
               onChange={(value) => {
@@ -330,14 +351,14 @@ export default function OrdersPage() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Placed</th>
-                      <th>Customer</th>
-                      <th>Status</th>
-                      <th className="align-right">Value</th>
+                      <th>{t('Placed')}</th>
+                      <th>{t('Customer')}</th>
+                      <th>{t('Status')}</th>
+                      <th className="align-right">{t('Value')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.length === 0 && <EmptyRow colSpan={4}>No orders here.</EmptyRow>}
+                    {data.items.length === 0 && <EmptyRow colSpan={4}>{t('No orders here.')}</EmptyRow>}
                     {data.items.map((order) => (
                       <SelectableRow
                         key={order.id}

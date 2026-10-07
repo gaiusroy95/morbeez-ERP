@@ -9,7 +9,7 @@ const SALE_SELECT = `
          e.name AS driver_name, s.buyer_name, s.buyer_phone, s.payment_method, s.payment_reference, s.status,
          s.subtotal::text AS subtotal, s.exception_value::text AS exception_value, s.tax_total::text AS tax_total,
          s.total::text AS total, s.cost_total::text AS cost_total, s.approval_request_id, r.status AS approval_status,
-         COALESCE(ru.phone, ru.email::text) AS requested_by_email, r.decision_note, s.invoice_id, i.invoice_number, s.sold_at, s.completed_at,
+         COALESCE(ru.phone, ru.email::text) AS requested_by_email, r.requested_by, r.decision_note, s.invoice_id, i.invoice_number, s.sold_at, s.completed_at,
          s.closed_reason, s.version, s.created_by
   FROM spot.spot_sale s
   JOIN trading_partners.vehicle v ON v.id = s.vehicle_id
@@ -43,6 +43,7 @@ const toSale = (r: Row, lines: SpotSaleLine[]): SpotSaleRecord => {
     approvalRequestId: r.approval_request_id as string | null,
     approvalStatus: r.approval_status as SpotSaleRecord['approvalStatus'],
     requestedByEmail: r.requested_by_email as string | null,
+    requestedBy: (r.requested_by as string | null) ?? null,
     decisionNote: r.decision_note as string | null,
     invoiceId: r.invoice_id as string | null,
     invoiceNumber: r.invoice_number as string | null,

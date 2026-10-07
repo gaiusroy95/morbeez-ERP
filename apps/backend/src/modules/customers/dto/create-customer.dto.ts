@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -11,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
+import { LANGUAGES } from '../../../common/languages';
 
 export class CreateCustomerDto {
   @ApiProperty()
@@ -36,4 +38,9 @@ export class CreateCustomerDto {
   @Min(0)
   @Max(180)
   paymentTermsDays?: number;
+
+  @ApiPropertyOptional({ enum: LANGUAGES, description: "The customer's language for statements, reminders and WhatsApp; tax invoices stay English" })
+  @IsOptional()
+  @IsIn(LANGUAGES)
+  preferredLanguage?: string;
 }

@@ -21,6 +21,7 @@ export const NAV: NavGroup[] = [
     label: 'Overview',
     items: [
       { href: '/dashboard', icon: 'dashboard', label: 'Dashboard', permission: 'dashboard:read' },
+      { href: '/alerts', icon: 'bell', label: 'Alerts & summary', permission: 'dashboard:read' },
       { href: '/ai', icon: 'sparkles', label: 'Suggestions', permission: 'ai:read' },
     ],
   },
@@ -31,6 +32,7 @@ export const NAV: NavGroup[] = [
       { href: '/procurement', icon: 'basket', label: 'Procurement', permission: 'procurement:read' },
       { href: '/inventory', icon: 'boxes', label: 'Inventory', permission: 'inventory:read' },
       { href: '/logistics', icon: 'truck', label: 'Trips', permission: 'logistics:dispatch' },
+      { href: '/delegation', icon: 'key', label: 'Delegation', permission: 'logistics:dispatch' },
       { href: '/spot-sales', icon: 'bolt', label: 'Spot sales', permission: 'spot_sales:read' },
       { href: '/crates', icon: 'crate', label: 'Crates', permission: 'crates:read' },
     ],

@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -178,7 +180,7 @@ fun CarbonHeader(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)) {
             if (onBack != null) {
-                RoundIconButton(Glyph.Back, "Back", onBack)
+                RoundIconButton(Glyph.Back, stringResource(R.string.back), onBack)
                 Spacer(Modifier.width(10.dp))
             }
             if (eyebrow != null) Eyebrow(eyebrow, color = Fresh.onCarbonMuted, modifier = Modifier.weight(1f)) else Spacer(Modifier.weight(1f))

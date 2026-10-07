@@ -63,6 +63,7 @@ export type LedgerEntryType =
   | 'trip_advance_issued'
   | 'trip_expense_recorded'
   | 'trip_reconciled'
+  | 'trip_cash_deposited'
   | 'inventory_written_off'
   | 'manual_journal'
   | 'journal_reversal'

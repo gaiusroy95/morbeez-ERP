@@ -4,6 +4,7 @@ import type { DashboardKpis, KpiValue } from '@morbeez/shared-types';
 import { useDashboardKpis } from '@/lib/hooks/use-dashboard';
 import { computeDelta, formatCount, formatDate, formatMoney } from '@/lib/format';
 import { ErrorState, SkeletonLines } from '../ui/Panel';
+import { useT } from '@/lib/i18n';
 
 // Whether a rise is good news. Costs going up isn't; collections going up
 // is; for some figures (bookings volume vs. value) direction alone says
@@ -54,18 +55,19 @@ function toneFor(direction: 'up' | 'down' | 'flat', polarity: Polarity): 'good' 
 
 function Kpi({ spec, value, currency }: { spec: KpiSpec; value: KpiValue; currency: string }) {
   const display = value.kind === 'money' ? formatMoney(value.value, currency) : formatCount(value.value);
+  const t = useT();
   const delta = computeDelta(value.value, value.previous);
   const arrow = delta?.direction === 'up' ? '↑' : delta?.direction === 'down' ? '↓' : '';
   return (
     <div className="kpi">
-      <div className="kpi-label">{spec.label}</div>
+      <div className="kpi-label">{t(spec.label)}</div>
       <div className="kpi-value">{display}</div>
       {delta && (
-        <div className="kpi-delta" data-tone={toneFor(delta.direction, spec.polarity)} title="Compared with the previous period">
-          {arrow} {delta.label}
+        <div className="kpi-delta" data-tone={toneFor(delta.direction, spec.polarity)} title={t('Compared with the previous period')}>
+          {arrow} {t(delta.label)}
         </div>
       )}
-      {spec.note && <div className="kpi-note">{spec.note}</div>}
+      {spec.note && <div className="kpi-note">{t(spec.note)}</div>}
     </div>
   );
 }
@@ -79,13 +81,18 @@ function periodLength(from: string, to: string): number {
 
 export function KpiSection({ days }: { days: number }) {
   const { data, error, isPending, isPlaceholderData, refetch } = useDashboardKpis(days);
+  const t = useT();
 
   return (
     <section aria-labelledby="kpi-heading" aria-busy={isPlaceholderData}>
       <h2 id="kpi-heading" className="section-label">
         {data
-          ? `${formatDate(data.period.from)} – ${formatDate(data.period.to)} · compared with the ${periodLength(data.period.from, data.period.to)} days before${isPlaceholderData ? ' · updating…' : ''}`
-          : 'Key figures'}
+          ? t('{from} – {to} · compared with the {days} days before', {
+              from: formatDate(data.period.from),
+              to: formatDate(data.period.to),
+              days: periodLength(data.period.from, data.period.to),
+            }) + (isPlaceholderData ? ` · ${t('updating…')}` : '')
+          : t('Key figures')}
       </h2>
       {isPending ? (
         <div className="kpi-groups">
@@ -103,7 +110,7 @@ export function KpiSection({ days }: { days: number }) {
         <div className="kpi-groups" data-updating={isPlaceholderData}>
           {GROUPS.map((group) => (
             <div key={group.title} className="kpi-group">
-              <div className="kpi-group-title">{group.title}</div>
+              <div className="kpi-group-title">{t(group.title)}</div>
               {group.items.map((spec) => (
                 <Kpi key={spec.key} spec={spec} value={data[spec.key]} currency={data.period.currency} />
               ))}

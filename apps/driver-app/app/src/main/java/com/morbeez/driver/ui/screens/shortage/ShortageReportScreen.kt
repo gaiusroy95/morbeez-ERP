@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screens.shortage
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -8,6 +10,7 @@ import androidx.compose.runtime.setValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.morbeez.driver.ui.components.Callout
 import com.morbeez.driver.ui.components.FieldScreen
+import com.morbeez.driver.ui.components.FreshTextField
 import com.morbeez.driver.ui.components.Glyph
 import com.morbeez.driver.ui.components.PhotoCaptureButton
 import com.morbeez.driver.ui.components.PrimaryAction
@@ -27,21 +30,23 @@ fun ShortageReportScreen(
     viewModel: ShortageReportViewModel = hiltViewModel(),
 ) {
     var photoCaptured by remember { mutableStateOf(false) }
+    var reason by remember { mutableStateOf("") }
 
     FieldScreen(
-        title = "Report a problem",
-        eyebrow = "Skip this stop",
+        title = stringResource(R.string.report_problem),
+        eyebrow = stringResource(R.string.skip_eyebrow),
         onBack = onBack,
         bottomBar = {
-            PrimaryAction("Report and skip this stop", onClick = { viewModel.reportAndSkip(tripId, stopId, onDone) }, glyph = Glyph.Warning, danger = true)
+            PrimaryAction(stringResource(R.string.report_and_skip), onClick = { viewModel.reportAndSkip(tripId, stopId, reason, onDone) }, glyph = Glyph.Warning, danger = true)
         },
     ) {
         Callout(
-            "Photograph the shortage, spoilage, or whatever stops this stop being done as planned. The office sees it straight away.",
+            stringResource(R.string.skip_intro),
             tone = Tone.Attention,
         )
+        FreshTextField(value = reason, onValueChange = { reason = it }, label = stringResource(R.string.what_happened), singleLine = false)
         PhotoCaptureButton(
-            label = if (photoCaptured) "Photo of the problem attached" else "Photograph the problem",
+            label = stringResource(if (photoCaptured) R.string.photo_problem_attached else R.string.photo_problem),
             captured = photoCaptured,
             onCaptured = { path, mimeType ->
                 viewModel.captureIssuePhoto(tripId, stopId, path, mimeType)

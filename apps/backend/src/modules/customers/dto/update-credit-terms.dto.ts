@@ -23,7 +23,14 @@ export class UpdateCreditTermsDto {
   @Max(180)
   paymentTermsDays?: number;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 5, description: 'Percent per 30 days on overdue invoices; 0 turns finance charges off' })
+  @ApiPropertyOptional({ minimum: 0, maximum: 60, description: 'Percent a year on overdue invoices, charged per day (÷ 365); 0 turns finance charges off' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(60)
+  financeChargeRateAnnual?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: 5, deprecated: true, description: 'Older clients: percent per 30 days, converted to the annual rate (× 365 ÷ 30)' })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

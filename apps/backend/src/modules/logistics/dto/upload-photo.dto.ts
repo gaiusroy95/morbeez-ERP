@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsIn } from 'class-validator';
 import { PhotoType } from '../entities/trip-stop-photo.entity';
 
-const VALID_PHOTO_TYPES: PhotoType[] = ['pickup', 'delivery', 'pod', 'issue'];
+const VALID_PHOTO_TYPES: PhotoType[] = ['pickup', 'delivery', 'pod', 'issue', 'weighment'];
 
 // The file itself travels as multipart form data (field name "file"); this
 // DTO only covers the accompanying text field.

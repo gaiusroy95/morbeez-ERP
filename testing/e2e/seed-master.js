@@ -24,7 +24,8 @@ const { DB_URL } = require('./lib/env');
   await mk('trading_partners.product', ['name', 'base_uom', 'base_price'], ['Tomato', 'kg', 32]);
   await mk('trading_partners.product', ['name', 'base_uom', 'base_price'], ['Onion', 'kg', 30]);
   const vehicle = await mk('trading_partners.vehicle', ['registration_number', 'capacity_kg', 'fuel_type'], ['MH12AB4521', 1500, 'diesel']);
-  await mk('trading_partners.employee', ['name', 'role_type'], ['Suresh Kale', 'driver']);
+  // A seasoned driver: runs whole routes on his own (delegation level 4, standing).
+  await mk('trading_partners.employee', ['name', 'role_type', 'delegation_level', 'standing_delegation'], ['Suresh Kale', 'driver', 4, true]);
   await mk('stock.location', ['name', 'type'], ['Main warehouse', 'warehouse']);
   await mk('stock.location', ['name', 'type'], ['Cold room', 'warehouse']);
   console.log('seeded master data; vehicle', vehicle.id);

@@ -5,8 +5,13 @@ import com.morbeez.driver.data.local.PendingOperationEntity
 import com.morbeez.driver.data.local.PendingPhotoDao
 import com.morbeez.driver.data.remote.ApiService
 import com.morbeez.driver.data.remote.dto.CompleteDeliveryRequest
+import com.morbeez.driver.data.remote.dto.CompletePickupRequest
 import com.morbeez.driver.data.remote.dto.RecordCollectionRequest
+import com.morbeez.driver.data.remote.dto.RecordDepositRequest
 import com.morbeez.driver.data.remote.dto.RecordExpenseRequest
+import com.morbeez.driver.data.remote.dto.ReportProblemRequest
+import com.morbeez.driver.data.remote.dto.SkipStopRequest
+import com.morbeez.driver.data.remote.dto.SubmitTripRequest
 import com.morbeez.driver.data.repository.TripRepository
 import com.squareup.moshi.Moshi
 import java.io.File
@@ -85,19 +90,22 @@ class SyncEngine @Inject constructor(
         when (PendingOperationType.valueOf(operation.operationType)) {
             PendingOperationType.COMPLETE_PICKUP_STOP -> {
                 val payload = parse<CompletePickupPayload>(operation.payloadJson)
-                api.completePickupStop(operation.tripId, payload.stopId)
+                api.completePickupStop(operation.tripId, payload.stopId, CompletePickupRequest(payload.weights))
             }
             PendingOperationType.COMPLETE_DELIVERY_STOP -> {
                 val payload = parse<CompleteDeliveryPayload>(operation.payloadJson)
+                // The stop's own photos first: the owner may require a photo of
+                // the customer's scale before a customer weight is accepted.
+                if (!pushPhotos(payload.stopId)) error("The delivery's photos haven't uploaded yet")
                 api.completeDeliveryStop(
                     operation.tripId,
                     payload.stopId,
-                    CompleteDeliveryRequest(payload.recipientName, payload.signatureData),
+                    CompleteDeliveryRequest(payload.recipientName, payload.signatureData, payload.lines),
                 )
             }
             PendingOperationType.SKIP_STOP -> {
                 val payload = parse<SkipStopPayload>(operation.payloadJson)
-                api.skipStop(operation.tripId, payload.stopId)
+                api.skipStop(operation.tripId, payload.stopId, SkipStopRequest(payload.reason))
             }
             PendingOperationType.RECORD_EXPENSE -> {
                 val payload = parse<RecordExpensePayload>(operation.payloadJson)
@@ -116,14 +124,36 @@ class SyncEngine @Inject constructor(
                     operation.idempotencyKey,
                 )
             }
+            PendingOperationType.RECORD_DEPOSIT -> {
+                val payload = parse<RecordDepositPayload>(operation.payloadJson)
+                api.recordDeposit(
+                    operation.tripId,
+                    RecordDepositRequest(payload.amount, payload.bankAccount, payload.reference, payload.depositedAt),
+                    operation.idempotencyKey,
+                )
+            }
+            PendingOperationType.REPORT_PROBLEM -> {
+                val payload = parse<ReportProblemPayload>(operation.payloadJson)
+                api.reportProblem(operation.tripId, ReportProblemRequest(payload.kind, payload.note), operation.idempotencyKey)
+            }
+            PendingOperationType.SUBMIT_TRIP -> {
+                val payload = parse<SubmitTripPayload>(operation.payloadJson)
+                // The server's current version: the owner may have returned
+                // the trip since this phone last pulled it.
+                val trip = api.getTrip(operation.tripId)
+                if (trip.status != "completed") {
+                    api.completeTrip(operation.tripId, SubmitTripRequest(trip.version, payload.cashDeclared, payload.note))
+                }
+            }
         }
     }
 
     private inline fun <reified T> parse(json: String): T =
         moshi.adapter(T::class.java).fromJson(json) ?: error("Malformed pending-operation payload")
 
-    private suspend fun pushPhotos(): Boolean {
-        for (photo in pendingPhotoDao.nextBatch()) {
+    /** Uploads queued photos — every one, or only one stop's ([stopId]). */
+    private suspend fun pushPhotos(stopId: String? = null): Boolean {
+        for (photo in pendingPhotoDao.nextBatch().filter { stopId == null || it.stopId == stopId }) {
             val outcome = runCatching {
                 val file = File(photo.localPath)
                 val mediaType = photo.mimeType.toMediaTypeOrNull()

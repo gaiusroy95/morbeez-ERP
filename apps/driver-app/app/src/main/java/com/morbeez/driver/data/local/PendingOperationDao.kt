@@ -31,6 +31,9 @@ interface PendingOperationDao {
     @Query("SELECT count(*) FROM pending_operations")
     suspend fun count(): Int
 
+    @Query("SELECT count(*) FROM pending_operations WHERE status = 'pending'")
+    fun observePendingCount(): Flow<Int>
+
     @Query("SELECT COALESCE(MAX(sequence), 0) FROM pending_operations")
     suspend fun maxSequence(): Long
 }

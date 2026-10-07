@@ -14,8 +14,15 @@ data class TripEntity(
     val vehicleId: String,
     val vehicleRegistrationNumber: String,
     val driverEmployeeId: String,
-    val status: String, // planned | in_progress | completed | cancelled | reconciled
+    // planned | in_progress | completed (submitted, awaiting the owner) | on_hold | cancelled | reconciled
+    val status: String,
     val plannedDate: String?,
     val advanceAmount: String,
     val version: Int,
+    /** The owner's note when they returned the trip to the driver, or put it on hold. */
+    val reviewNote: String? = null,
+    /** The cash the driver said they're handing over, once submitted. */
+    val cashDeclared: String? = null,
+    /** Delegation level on this trip (1–4); 0 = waiting for the owner's approval; null = not known yet. */
+    val authorityLevel: Int? = null,
 )

@@ -42,7 +42,7 @@ function setup(overrides: Partial<Record<keyof SpotSalesRepository, jest.Mock>> 
   const receivables = { issueSpotSaleWithClient: jest.fn().mockResolvedValue({ invoiceId: 'inv-1', invoiceNumber: 'SPT-000001', taxableValue: '1200.00', total: '1200.00', paymentId: 'pay-1' }) };
   const audit = { record: jest.fn() };
   const db = { withTenant: jest.fn((_t: string, work: (c: PoolClient) => unknown) => work(client)) };
-  const service = new SpotSalesService(db as never, repo, approvals as never, workforce as never, ledger as never, receivables as never, audit as never);
+  const service = new SpotSalesService(db as never, repo, approvals as never, workforce as never, ledger as never, receivables as never, audit as never, { assertCan: jest.fn() } as never);
   return { service, repo, approvals, workforce, ledger, receivables };
 }
 

@@ -47,6 +47,7 @@ export class CustomersService {
         contact: { ...dto.contact },
         creditLimit: dto.creditLimit ?? 0,
         paymentTermsDays: dto.paymentTermsDays ?? 0,
+        preferredLanguage: dto.preferredLanguage,
       });
       await this.audit.record(client, {
         tenantId,
@@ -73,6 +74,7 @@ export class CustomersService {
       const after = await this.customers.updateWithClient(client, id, dto.version, {
         name: dto.name,
         contact: dto.contact && { ...dto.contact },
+        preferredLanguage: dto.preferredLanguage,
       });
 
       await this.audit.record(client, {
@@ -98,10 +100,16 @@ export class CustomersService {
       const before = await this.customers.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Customer not found');
 
+      // The annual rate is what's charged (÷ 365, client Q&A, finance); a
+      // monthly rate from an older client converts at the same daily cost.
+      const annual =
+        dto.financeChargeRateAnnual ??
+        (dto.financeChargeRateMonthly !== undefined ? Math.round((dto.financeChargeRateMonthly * 365 * 100) / 30) / 100 : undefined);
       const after = await this.customers.updateCreditTermsWithClient(client, id, dto.version, {
         creditLimit: dto.creditLimit,
         paymentTermsDays: dto.paymentTermsDays,
-        financeChargeRateMonthly: dto.financeChargeRateMonthly,
+        financeChargeRateAnnual: annual,
+        financeChargeRateMonthly: annual === undefined ? undefined : Math.round((annual * 30 * 100) / 365) / 100,
         financeChargeGraceDays: dto.financeChargeGraceDays,
         creditHold: dto.creditHold,
         creditHoldReason: dto.creditHoldReason ?? null,

@@ -3,6 +3,8 @@ import { CustomersModule } from '../customers/customers.module';
 import { FarmersModule } from '../farmers/farmers.module';
 import { TaxRulesModule } from '../tax-rules/tax-rules.module';
 import { FinanceController } from './finance.controller';
+import { DisputesController } from './disputes.controller';
+import { DisputesService } from './disputes.service';
 import { FinanceService } from './finance.service';
 import { ReceivablesService } from './receivables.service';
 import { PayablesService } from './payables.service';
@@ -28,8 +30,9 @@ import { FinanceCostsRepository } from './repositories/finance-costs.repository'
 // reverse, so there is no cycle.
 @Module({
   imports: [CustomersModule, FarmersModule, TaxRulesModule],
-  controllers: [FinanceController],
+  controllers: [FinanceController, DisputesController],
   providers: [
+    DisputesService,
     FinanceService,
     ReceivablesService,
     PayablesService,

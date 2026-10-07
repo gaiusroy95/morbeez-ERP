@@ -197,6 +197,7 @@ export interface CustomerCreditStatus {
   creditLimit: string;
   paymentTermsDays: number;
   financeChargeRateMonthly: string;
+  financeChargeRateAnnual: string;
   financeChargeGraceDays: number;
   creditHold: boolean;
   creditHoldReason: string | null;
@@ -231,4 +232,25 @@ export interface RecordFarmerPaymentBody {
   notes?: string;
   paidAt?: IsoDateTime;
   allocations?: { lotId: string; amount: number }[];
+}
+
+/** An invoice dispute (client Q&A, finance): finance charges pause on its amount while it's open. */
+export interface InvoiceDispute {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  amount: string;
+  reason: string;
+  status: 'open' | 'resolved' | 'withdrawn';
+  notes: { at: IsoDateTime; by: string; text: string }[];
+  raisedBy: string;
+  raisedAt: IsoDateTime;
+  lastActivityAt: IsoDateTime;
+  /** Days since anyone last touched it; 30 makes it a critical exception. */
+  idleDays: number;
+  resolvedAt: IsoDateTime | null;
+  resolution: string | null;
+  version: number;
 }

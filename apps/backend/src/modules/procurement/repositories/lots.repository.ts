@@ -401,6 +401,25 @@ export class LotsRepository {
     if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
     return toRecord(result.rows[0]);
   }
+
+  /** An egg lot's breakage at grading against the owner's tolerance; null for anything but eggs. */
+  async breakageWithClient(
+    client: PoolClient,
+    lotId: string,
+  ): Promise<{ product: string; farmer: string; received: string; rejected: string; pct: string; tolerance: string } | null> {
+    const result = await client.query<{ product: string; farmer: string; received: string; rejected: string; pct: string; tolerance: string }>(
+      `SELECT p.name AS product, f.name AS farmer, l.received_quantity::text AS received, l.rejected_quantity::text AS rejected,
+              round(l.rejected_quantity * 100 / l.received_quantity, 2)::text AS pct,
+              COALESCE(p.loss_tolerance_pct, t.default_breakage_tolerance_pct)::text AS tolerance
+         FROM commerce.lot l
+         JOIN trading_partners.product p ON p.id = l.product_id
+         JOIN trading_partners.farmer f ON f.id = l.farmer_id
+         JOIN tenant.tenant t ON t.id = l.tenant_id
+        WHERE l.id = $1 AND p.kind = 'egg' AND l.received_quantity > 0`,
+      [lotId],
+    );
+    return result.rows[0] ?? null;
+  }
 }
 
 // Every row a lock batch returns stays locked until commit, so keep

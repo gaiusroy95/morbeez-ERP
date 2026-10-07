@@ -85,7 +85,10 @@ export interface FinanceChargeRecord {
   periodStart: string;
   periodEnd: string;
   principal: string;
-  rateMonthlyPercent: string;
+  /** Charges before the pilot formula: percent per 30 days. */
+  rateMonthlyPercent: string | null;
+  /** Percent a year, charged per day (÷ 365). */
+  rateAnnualPercent: string | null;
   days: number;
   amount: string;
   createdAt: Date;
@@ -139,6 +142,7 @@ export interface CustomerCreditStatus {
   creditLimit: string;
   paymentTermsDays: number;
   financeChargeRateMonthly: string;
+  financeChargeRateAnnual: string;
   financeChargeGraceDays: number;
   creditHold: boolean;
   creditHoldReason: string | null;

@@ -151,4 +151,17 @@ export class UsersRepository {
       };
     });
   }
+
+  async languageOf(tenantId: string, userId: string): Promise<string> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const result = await client.query<{ language: string }>('SELECT language FROM identity.app_user WHERE id = $1', [userId]);
+      return result.rows[0]?.language ?? 'en';
+    });
+  }
+
+  async setLanguage(tenantId: string, userId: string, language: string): Promise<void> {
+    await this.db.withTenant(tenantId, (client) =>
+      client.query('UPDATE identity.app_user SET language = $2, updated_at = now() WHERE id = $1', [userId, language]),
+    );
+  }
 }

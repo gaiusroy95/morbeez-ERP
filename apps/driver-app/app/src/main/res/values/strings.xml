@@ -1,4 +1,246 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app's words, in English. values-ml (Malayalam), values-kn (Kannada) and
+  values-ta (Tamil) carry the same keys. Those are drafts: per the client's
+  process they go to native-speaker review by the pilot businesses before
+  release (client Q&A: "AI/translation draft → native speaker review").
+-->
 <resources>
     <string name="app_name">Morbeez</string>
+
+    <!-- Language -->
+    <string name="language">Language</string>
+    <string name="language_choose">Choose your language</string>
+
+    <!-- Common -->
+    <string name="back">Back</string>
+    <string name="cancel">Cancel</string>
+    <string name="send">Send</string>
+    <string name="retry">Try again</string>
+    <string name="saving">Saving…</string>
+    <string name="syncing">Syncing…</string>
+    <string name="sync_now">Sync now</string>
+    <string name="rupees">₹%1$s</string>
+    <string name="kind_pickup">Pickup</string>
+    <string name="kind_delivery">Delivery</string>
+    <string name="field_execution">Field execution</string>
+    <string name="what_happened">What happened?</string>
+
+    <!-- Launcher -->
+    <string name="launcher_tagline">Vegetable trade, run live</string>
+    <string name="launcher_headline_1">One business.</string>
+    <string name="launcher_headline_2">Two ways in.</string>
+    <string name="launcher_intro">Pick your workspace. Both share the same stock, trips and books, and stay in sync.</string>
+    <string name="launcher_owner">Owner</string>
+    <string name="launcher_owner_kicker">Control tower</string>
+    <string name="launcher_owner_desc">Orders, buying, trips, cash, workforce, vehicles, the books and AI suggestions.</string>
+    <string name="launcher_driver">Driver</string>
+    <string name="launcher_driver_desc">Today\'s route, proof of delivery and cash collected. Works offline.</string>
+    <string name="chip_synced">Synced live</string>
+    <string name="chip_offline">Offline-ready</string>
+    <string name="chip_secure">Secure</string>
+
+    <!-- Sign in -->
+    <string name="login_title">Driver sign in</string>
+    <string name="login_subtitle">Your route, deliveries and cash, on the road.</string>
+    <string name="welcome_back">Welcome back</string>
+    <string name="enter_pin_for">Enter your PIN for %1$s.</string>
+    <string name="pin">PIN</string>
+    <string name="mobile_number">Mobile number</string>
+    <string name="password">Password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="use_password">Use password instead</string>
+    <string name="forgot_password">Forgot your password? Ask the business owner to reset it.</string>
+    <string name="err_pin_off">Too many wrong PINs, so the PIN is off on this phone. Sign in with your password.</string>
+    <string name="err_wrong_login">Wrong mobile number or password.</string>
+    <string name="err_too_many">Too many tries. Wait a few minutes, then try again.</string>
+    <string name="err_enter_login">Enter your 10-digit mobile number and password.</string>
+    <string name="err_offline">Can\'t reach Morbeez. Check the phone\'s internet, then try again.</string>
+    <string name="err_sign_in">Couldn\'t sign in. Try again.</string>
+    <string name="err_wrong_pin">Wrong PIN. After 5 wrong tries the PIN switches off.</string>
+
+    <!-- Set PIN -->
+    <string name="pin_title">Quick sign-in</string>
+    <string name="pin_eyebrow">This phone</string>
+    <string name="pin_intro">Set a PIN to sign in on this phone without your password. It works on this phone only.</string>
+    <string name="pin_new">New PIN (4 to 6 digits)</string>
+    <string name="pin_again">Same PIN again</string>
+    <string name="pin_save">Save PIN</string>
+    <string name="pin_mismatch">The two PINs don\'t match.</string>
+    <string name="pin_weak">Pick a PIN that\'s harder to guess — not repeated or consecutive digits.</string>
+    <string name="pin_failed">Couldn\'t save the PIN. Check the internet and try again.</string>
+    <string name="not_now">Not now</string>
+
+    <!-- Route -->
+    <string name="route_title">Today\'s route</string>
+    <string name="stops_done">Stops done</string>
+    <string name="n_of_m">%1$d of %2$d</string>
+    <string name="advance">Advance</string>
+    <string name="returned_by_owner">Returned by the owner: %1$s</string>
+    <plurals name="route_stops">
+        <item quantity="one">Route · %d stop</item>
+        <item quantity="other">Route · %d stops</item>
+    </plurals>
+    <string name="next_stop">Next: %1$s</string>
+    <string name="handover_submit">Hand over &amp; submit trip</string>
+    <string name="trip_summary_link">Trip summary &amp; handover</string>
+    <string name="report_problem">Report a problem</string>
+    <string name="authority_waiting">Waiting for the owner\'s approval</string>
+    <string name="authority_1">Level 1 · Delivery</string>
+    <string name="authority_2">Level 2 · Delivery + collection</string>
+    <string name="authority_3">Level 3 · Buying + delivery</string>
+    <string name="authority_4">Level 4 · Full route</string>
+    <string name="problem_cant_continue">I can\'t continue</string>
+    <string name="problem_blocked">Trip can\'t go on</string>
+    <string name="problem_other">Other problem</string>
+    <string name="problem_security">Safety / security</string>
+    <string name="problem_title">Tell the owner now</string>
+    <string name="problem_hint">The owner gets this at once. With no signal, it goes as soon as there is.</string>
+    <string name="pill_next">Next</string>
+    <string name="pill_done">Done</string>
+    <string name="pill_skipped">Skipped</string>
+    <string name="collect_amount">Collect ₹%1$s</string>
+    <string name="on_credit">On credit — nothing to collect</string>
+    <string name="no_trip">No trip yet</string>
+    <string name="checking_route">Checking for your route…</string>
+    <string name="no_trip_hint">When dispatch plans your route it appears here. Tap sync to check now.</string>
+    <string name="status_planned">Planned</string>
+    <string name="status_in_progress">On the road</string>
+    <string name="status_completed">Awaiting owner</string>
+    <string name="status_on_hold">On hold</string>
+    <string name="status_reconciled">Closed</string>
+    <string name="status_cancelled">Cancelled</string>
+
+    <!-- Stop -->
+    <string name="stop">Stop</string>
+    <string name="stop_eyebrow">Stop %1$d · %2$s</string>
+    <string name="pill_completed">Completed</string>
+    <string name="pill_to_do">To do</string>
+    <string name="complete_pickup">Complete pickup</string>
+    <string name="confirm_delivery">Confirm delivery</string>
+    <string name="what_to_collect">What to collect</string>
+    <string name="what_to_deliver">What to deliver</string>
+    <string name="not_approved_yet">The owner hasn\'t approved this trip for you yet. Tap sync once they have.</string>
+    <string name="needs_level_3">Buying from farmers needs delegation level 3. Ask the owner.</string>
+    <string name="needs_level_2">Taking payments needs delegation level 2 — deliver, and the office collects.</string>
+    <string name="weighed_at_farm">Weighed at the farm</string>
+    <string name="weighed_at_farm_hint">The net weight as weighed — the farmer is paid on it.</string>
+    <string name="farm_weight_label">%1$s, net %2$s</string>
+    <string name="eggs">eggs</string>
+    <string name="photo_attached">Photo attached</string>
+    <string name="photo_produce">Photograph the produce</string>
+    <string name="photo_delivery">Photograph the delivery</string>
+    <string name="record_payment">Record cash or payment</string>
+    <string name="skip_or_report">Skip or report a problem</string>
+    <string name="stop_done">This stop is done.</string>
+    <string name="stop_skipped">This stop was skipped.</string>
+
+    <!-- Delivery -->
+    <string name="pod_title">Proof of delivery</string>
+    <string name="who_received">Who received it</string>
+    <string name="recipient_name">Recipient name</string>
+    <string name="proof_step">Proof: a signature or a photo</string>
+    <string name="signature_saved">Signature saved.</string>
+    <string name="or">or</string>
+    <string name="photo_goods_attached">Photo of the goods attached</string>
+    <string name="photo_goods">Photograph the delivered goods</string>
+    <string name="at_customer">At the customer (if measured)</string>
+    <string name="photo_scale_attached">Photo of the scale attached</string>
+    <string name="photo_scale">Photograph the customer\'s scale</string>
+    <string name="farm_weight">Farm weight %1$s kg</string>
+    <string name="customer_scale">Customer\'s scale, net kg</string>
+    <string name="shrinkage_less">%1$s kg less — %2$s%% shrinkage. They\'re invoiced on their weight.</string>
+    <string name="shrinkage_more">%1$s kg more on their scale. They\'re invoiced on their weight.</string>
+    <string name="egg_count">%1$s eggs</string>
+    <string name="egg_count_trays">%1$s eggs (%2$s trays)</string>
+    <string name="broken_eggs">Broken eggs</string>
+    <string name="more_than_loaded">More than were loaded.</string>
+    <string name="clear">Clear</string>
+    <string name="use_signature">Use signature</string>
+    <string name="sign_hint">Ask the recipient to sign with a finger.</string>
+    <string name="retake">Retake</string>
+
+    <!-- Collection -->
+    <string name="collect_payment">Collect payment</string>
+    <string name="record_amount">Record ₹%1$s</string>
+    <string name="record_collection">Record collection</string>
+    <string name="amount_received">Amount received</string>
+    <string name="how_they_paid">How they paid</string>
+    <string name="notes_optional">Notes (optional)</string>
+    <string name="method_cash">Cash</string>
+    <string name="method_upi">UPI</string>
+    <string name="method_bank">Bank transfer</string>
+    <string name="method_cheque">Cheque</string>
+
+    <!-- Problem / skip -->
+    <string name="skip_eyebrow">Skip this stop</string>
+    <string name="report_and_skip">Report and skip this stop</string>
+    <string name="skip_intro">Say what happened and photograph it: the customer refused, the shop was shut, the farmer had nothing. The owner hears at once.</string>
+    <string name="photo_problem_attached">Photo of the problem attached</string>
+    <string name="photo_problem">Photograph the problem</string>
+
+    <!-- Trip summary / handover -->
+    <string name="summary_title">Trip summary</string>
+    <string name="summary_eyebrow">Handover</string>
+    <string name="to_hand_over">To hand over</string>
+    <string name="spent">Spent</string>
+    <string name="submitted_callout">Submitted. The owner checks the trip and the cash, then closes it.</string>
+    <string name="submitted_callout_cash">Submitted. The owner checks the trip and the cash (you\'re handing over ₹%1$s), then closes it.</string>
+    <string name="on_hold_callout">The owner has put this trip on hold: %1$s.</string>
+    <string name="checking_it">checking it</string>
+    <string name="returned_callout">Returned by the owner: %1$s. Correct it, then submit again.</string>
+    <string name="expense_approval_note">Record what you pay. At your delegation level the owner approves expenses when closing the trip.</string>
+    <string name="cash_to_hand_over">Cash to hand over</string>
+    <string name="offline_total">Connect to the internet to see the total. Everything you record is kept on this phone until then.</string>
+    <string name="opening_cash">Opening cash</string>
+    <string name="plus_cash_collected">+ Cash collected</string>
+    <string name="plus_spot_cash">+ Spot-sale cash</string>
+    <string name="minus_expenses">− Expenses</string>
+    <string name="minus_deposited">− Deposited in bank</string>
+    <string name="direct_payments_note">₹%1$s was paid by UPI/bank straight to the business — nothing to hand over for it.</string>
+    <string name="expenses">Expenses</string>
+    <string name="nothing_yet">Nothing yet.</string>
+    <string name="add_expense_title">Add an expense</string>
+    <string name="amount_rupees">Amount (₹)</string>
+    <string name="add_expense">Add expense</string>
+    <string name="cat_fuel">Fuel</string>
+    <string name="cat_toll">Toll</string>
+    <string name="cat_labour">Labour</string>
+    <string name="cat_other">Other</string>
+    <string name="deposit_title">Deposited cash in the bank?</string>
+    <string name="deposit_hint">Record it here so it isn\'t counted in your handover.</string>
+    <string name="bank_account">Bank account (e.g. SBI ••4321)</string>
+    <string name="slip_reference">Slip or transaction reference</string>
+    <string name="deposit_recorded">Deposit recorded.</string>
+    <string name="record_deposit">Record deposit</string>
+    <string name="hand_over_cash">Hand over the cash</string>
+    <string name="cash_handing_over">Cash you\'re handing over (₹)</string>
+    <string name="less_than_expected">That\'s ₹%1$s less than expected. Add a note for the owner.</string>
+    <string name="more_than_expected">That\'s ₹%1$s more than expected. Add a note for the owner.</string>
+    <string name="note_for_owner">Note for the owner (optional)</string>
+    <string name="submit_step">Submit the trip</string>
+    <string name="finish_stops_first">Finish every stop first (%1$d left).</string>
+    <string name="submit_trip">Submit trip</string>
+
+    <!-- Stop summaries (built when the route syncs) -->
+    <string name="farmer_pickup">Farmer pickup</string>
+    <string name="customer_delivery">Customer delivery</string>
+    <string name="po_pickup">Purchase order pickup</string>
+    <string name="no_items">No items</string>
+    <string name="and_n_more">%1$s and %2$d more</string>
+    <plurals name="trays">
+        <item quantity="one">%d tray</item>
+        <item quantity="other">%d trays</item>
+    </plurals>
+    <plurals name="loose_eggs">
+        <item quantity="one">%d egg</item>
+        <item quantity="other">%d eggs</item>
+    </plurals>
+    <string name="eggs_total">(%1$d eggs)</string>
+
+    <!-- Owner mode -->
+    <string name="cant_reach">Can\'t reach Morbeez</string>
+    <string name="check_internet">Check the phone\'s internet connection, then try again.</string>
+    <string name="download_in_browser">Download this file from Morbeez in a computer\'s browser.</string>
+    <string name="no_app_for_link">No app on this phone can open that link.</string>
 </resources>

@@ -10,9 +10,11 @@ interface CustomerRow {
   tenant_id: string;
   name: string;
   contact: Record<string, unknown>;
+  preferred_language: string;
   credit_limit: string;
   payment_terms_days: number;
   finance_charge_rate_monthly: string;
+  finance_charge_rate_annual: string;
   finance_charge_grace_days: number;
   credit_hold: boolean;
   credit_hold_reason: string | null;
@@ -29,9 +31,11 @@ function toRecord(row: CustomerRow): CustomerRecord {
     tenantId: row.tenant_id,
     name: row.name,
     contact: row.contact ?? {},
+    preferredLanguage: row.preferred_language ?? 'en',
     creditLimit: row.credit_limit,
     paymentTermsDays: row.payment_terms_days,
     financeChargeRateMonthly: row.finance_charge_rate_monthly,
+    financeChargeRateAnnual: row.finance_charge_rate_annual ?? '0.00',
     financeChargeGraceDays: row.finance_charge_grace_days,
     creditHold: row.credit_hold,
     creditHoldReason: row.credit_hold_reason,
@@ -97,12 +101,13 @@ export class CustomersRepository {
       contact: Record<string, unknown>;
       creditLimit: number;
       paymentTermsDays: number;
+      preferredLanguage?: string;
     },
   ): Promise<CustomerRecord> {
     const result = await client.query<CustomerRow>(
       `INSERT INTO trading_partners.customer
-         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by, preferred_language)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         tenantId,
@@ -111,6 +116,7 @@ export class CustomersRepository {
         fields.creditLimit,
         fields.paymentTermsDays,
         createdBy,
+        fields.preferredLanguage ?? 'en',
       ],
     );
     return toRecord(result.rows[0]);
@@ -129,12 +135,14 @@ export class CustomersRepository {
     fields: Partial<{
       name: string;
       contact: Record<string, unknown>;
+      preferredLanguage: string;
     }>,
   ): Promise<CustomerRecord> {
     const result = await client.query<CustomerRow>(
       `UPDATE trading_partners.customer SET
          name = COALESCE($3, name),
          contact = COALESCE($4, contact),
+         preferred_language = COALESCE($5, preferred_language),
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -144,6 +152,7 @@ export class CustomersRepository {
         expectedVersion,
         fields.name,
         fields.contact ? JSON.stringify(fields.contact) : null,
+        fields.preferredLanguage ?? null,
       ],
     );
     if (result.rowCount === 0) {
@@ -165,6 +174,7 @@ export class CustomersRepository {
       creditLimit?: number;
       paymentTermsDays?: number;
       financeChargeRateMonthly?: number;
+      financeChargeRateAnnual?: number;
       financeChargeGraceDays?: number;
       creditHold?: boolean;
       creditHoldReason?: string | null;
@@ -178,6 +188,7 @@ export class CustomersRepository {
          finance_charge_grace_days = COALESCE($6, finance_charge_grace_days),
          credit_hold = COALESCE($7, credit_hold),
          credit_hold_reason = CASE WHEN COALESCE($7, credit_hold) THEN COALESCE($8, credit_hold_reason) ELSE NULL END,
+         finance_charge_rate_annual = COALESCE($9, finance_charge_rate_annual),
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -191,6 +202,7 @@ export class CustomersRepository {
         fields.financeChargeGraceDays ?? null,
         fields.creditHold ?? null,
         fields.creditHoldReason ?? null,
+        fields.financeChargeRateAnnual ?? null,
       ],
     );
     if (result.rowCount === 0) {

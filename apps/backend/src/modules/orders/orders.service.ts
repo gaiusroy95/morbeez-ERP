@@ -51,11 +51,30 @@ export class OrdersService {
   }
 
   /**
-   * Pricing: a line prices at the product's current basePrice unless the
-   * caller supplies its own unitPrice (a negotiated rate for this order) —
-   * either way the price is captured on the line at creation time and
-   * never recomputed later, so a later basePrice change doesn't retroactively
-   * reprice a standing order.
+   * What to suggest for each product on a new order for this customer (client
+   * Q&A, pricing — no permanent base price): the last price this customer
+   * actually paid; failing that, the last price anyone paid; failing that,
+   * the product's reference price if the owner set one; otherwise nothing,
+   * and the price must be entered. Only ever a starting point.
+   */
+  async priceSuggestions(tenantId: string, customerId: string, productIds: string[]): Promise<PriceSuggestion[]> {
+    const products = await Promise.all(productIds.map((id) => this.products.getById(tenantId, id)));
+    const last = await this.db.withTenant(tenantId, (client) => this.orders.lastPricesWithClient(client, customerId, productIds));
+    return products.map((p) => {
+      const l = last.get(p.id);
+      if (l?.customer) return { productId: p.id, price: l.customer.price, source: 'customer_last', at: l.customer.at };
+      if (l?.any) return { productId: p.id, price: l.any.price, source: 'product_last', at: l.any.at };
+      if (p.basePrice !== null) return { productId: p.id, price: p.basePrice, source: 'reference', at: null };
+      return { productId: p.id, price: null, source: null, at: null };
+    });
+  }
+
+  /**
+   * Pricing: a line takes the caller's unitPrice — the price agreed for
+   * this order — or else the suggestion above; with neither, the order is
+   * refused rather than priced at an invented number. Either way the price
+   * is captured on the line and never recomputed later: past transactions
+   * are never silently changed.
    */
   async createOrder(tenantId: string, actorUserId: string, dto: CreateOrderDto): Promise<OrderRecord> {
     const customer = await this.customers.getById(tenantId, dto.customerId);
@@ -63,17 +82,21 @@ export class OrdersService {
       throw new ConflictException('Cannot place an order for an archived customer');
     }
 
+    const unpriced = [...new Set(dto.lines.filter((l) => l.unitPrice === undefined).map((l) => l.productId))];
+    const suggested = new Map(
+      (unpriced.length ? await this.priceSuggestions(tenantId, dto.customerId, unpriced) : []).map((s) => [s.productId, s.price]),
+    );
     const lines: { productId: string; quantity: number; unitPrice: number }[] = [];
     for (const line of dto.lines) {
       const product = await this.products.getById(tenantId, line.productId);
       if (product.status !== 'active') {
         throw new ConflictException(`Product '${product.name}' is archived and cannot be ordered`);
       }
-      lines.push({
-        productId: line.productId,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice ?? Number(product.basePrice),
-      });
+      const price = line.unitPrice ?? (suggested.get(line.productId) != null ? Number(suggested.get(line.productId)) : null);
+      if (price === null) {
+        throw new BadRequestException(`'${product.name}' has never been sold — enter its price`);
+      }
+      lines.push({ productId: line.productId, quantity: line.quantity, unitPrice: price });
     }
 
     return this.db.withTenant(tenantId, async (client) => {
@@ -225,7 +248,19 @@ export class OrdersService {
    * Catalog, Delivery Completed / Invoice Issued). Either all of it
    * happens or none of it does.
    */
-  async markDelivered(tenantId: string, actorUserId: string, id: string, expectedVersion: number): Promise<OrderRecord> {
+  /**
+   * [settled]: per order line, what the customer is charged for when it
+   * differs from what was ordered — the customer-end weight of live birds,
+   * or eggs less those broken. The stock that left is consumed in full
+   * either way; the difference is the loss.
+   */
+  async markDelivered(
+    tenantId: string,
+    actorUserId: string,
+    id: string,
+    expectedVersion: number,
+    settled: Map<string, string> = new Map(),
+  ): Promise<OrderRecord> {
     const order = await this.getOrder(tenantId, id);
     // Names for the invoice lines, read before the transaction opens so it
     // never waits on a second pooled connection.
@@ -272,7 +307,7 @@ export class OrdersService {
           orderLineId: line.id,
           productId: line.productId,
           description: names.get(line.productId) ?? 'Product',
-          quantity: line.quantity,
+          quantity: settled.get(line.id) ?? line.quantity,
           unitPrice: line.unitPrice,
         })),
         costOfGoods: lineCosts.length > 0 ? sumMoney(lineCosts) : null,
@@ -355,4 +390,12 @@ export class OrdersService {
       return after;
     });
   }
+}
+
+export interface PriceSuggestion {
+  productId: string;
+  /** null: never sold and no reference price — the price must be entered. */
+  price: string | null;
+  source: 'customer_last' | 'product_last' | 'reference' | null;
+  at: Date | null;
 }

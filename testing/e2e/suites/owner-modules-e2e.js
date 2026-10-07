@@ -328,13 +328,22 @@ async function api(token, method, p, body) {
       must(await submit('Complete trip'));
       await page.waitForFunction(() => /To reconcile/.test(document.querySelector('.detail .key-values').textContent));
     });
-    await step('trip: reconcile ₹50 short', async () => {
-      await detail().getByRole('button', { name: 'Reconcile cash' }).click();
-      const expected = await dialog().getByLabel(/Cash handed back/).inputValue();
-      await fill(/Cash handed back/, '550');
+    await step('trip: the owner sees the handover and every check', async () => {
+      await page.waitForSelector('.closure .checklist');
+      const text = (await page.locator('.closure').textContent()).replace(/\s+/g, ' ');
+      for (const want of ['Cash to hand over', 'Money handover', 'Deliveries', 'Procurement']) {
+        if (!text.includes(want)) throw new Error(`missing "${want}": ${text.slice(0, 400)}`);
+      }
+    });
+    await step('trip: closing ₹50 short is an exception that needs a reason', async () => {
+      await detail().getByRole('button', { name: 'Count cash & close' }).click();
+      const expected = await dialog().getByLabel(/Cash received/).inputValue();
+      await fill(/Cash received/, '550');
       const hint = await dialog().locator('.field-hint').first().textContent();
-      await fill('Notes (optional)', 'Driver to repay');
-      must(await submit('Reconcile'));
+      if (!/₹50(\.00)? short/.test(hint)) throw new Error(hint);
+      await fill(/Reason for approving/, 'Driver to repay');
+      must(await submit('Approve with exception & close'));
+      await page.waitForFunction(() => /Approved with exception/.test(document.querySelector('.detail').textContent));
       await page.waitForFunction(() => /short/.test(document.querySelector('.detail').textContent));
       return `expected ${expected}; preview "${hint}"`;
     });

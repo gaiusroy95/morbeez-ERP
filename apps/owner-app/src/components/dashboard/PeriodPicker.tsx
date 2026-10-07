@@ -1,6 +1,7 @@
 'use client';
 
 import { DashboardRange, useUiStore } from '@/lib/stores/ui-store';
+import { useT } from '@/lib/i18n';
 
 const OPTIONS: { value: DashboardRange; label: string }[] = [
   { value: 7, label: '7 days' },
@@ -11,9 +12,10 @@ const OPTIONS: { value: DashboardRange; label: string }[] = [
 export function PeriodPicker() {
   const range = useUiStore((s) => s.dashboardRange);
   const setRange = useUiStore((s) => s.setDashboardRange);
+  const t = useT();
 
   return (
-    <div className="segmented" role="group" aria-label="Reporting period">
+    <div className="segmented" role="group" aria-label={t('Reporting period')}>
       {OPTIONS.map((option) => (
         <button
           key={option.value}
@@ -21,7 +23,7 @@ export function PeriodPicker() {
           aria-pressed={range === option.value}
           onClick={() => setRange(option.value)}
         >
-          {option.label}
+          {t(option.label)}
         </button>
       ))}
     </div>

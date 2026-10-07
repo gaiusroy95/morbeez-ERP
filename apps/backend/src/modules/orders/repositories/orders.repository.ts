@@ -225,4 +225,36 @@ export class OrdersRepository {
     if (result.rowCount === 0) throw new OptimisticLockException('Order', id);
     return toRecord(result.rows[0]);
   }
+
+  /**
+   * The last price each product actually sold at — to this customer, and to
+   * anyone — from orders that went ahead (confirmed or delivered). The basis
+   * of a new order line's suggested price (client Q&A, pricing).
+   */
+  async lastPricesWithClient(client: PoolClient, customerId: string, productIds: string[]): Promise<Map<string, LastPrices>> {
+    const rows = await client.query<{ product_id: string; scope: 'customer' | 'any'; unit_price: string; at: Date }>(
+      `(SELECT DISTINCT ON (ol.product_id) ol.product_id, 'customer' AS scope, ol.unit_price::text AS unit_price, o.created_at AS at
+          FROM commerce.customer_order_line ol JOIN commerce.customer_order o ON o.id = ol.order_id
+         WHERE o.customer_id = $1 AND ol.product_id = ANY($2::uuid[]) AND o.status IN ('confirmed', 'delivered')
+         ORDER BY ol.product_id, o.created_at DESC)
+       UNION ALL
+       (SELECT DISTINCT ON (ol.product_id) ol.product_id, 'any', ol.unit_price::text, o.created_at
+          FROM commerce.customer_order_line ol JOIN commerce.customer_order o ON o.id = ol.order_id
+         WHERE ol.product_id = ANY($2::uuid[]) AND o.status IN ('confirmed', 'delivered')
+         ORDER BY ol.product_id, o.created_at DESC)`,
+      [customerId, productIds],
+    );
+    const out = new Map<string, LastPrices>();
+    for (const r of rows.rows) {
+      const entry = out.get(r.product_id) ?? { customer: null, any: null };
+      entry[r.scope] = { price: r.unit_price, at: r.at };
+      out.set(r.product_id, entry);
+    }
+    return out;
+  }
+}
+
+export interface LastPrices {
+  customer: { price: string; at: Date } | null;
+  any: { price: string; at: Date } | null;
 }

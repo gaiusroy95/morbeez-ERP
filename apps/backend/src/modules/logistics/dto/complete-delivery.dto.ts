@@ -1,5 +1,29 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsNumber, IsOptional, IsString, IsUUID, Min, MinLength, ValidateNested } from 'class-validator';
+
+/**
+ * What the customer end measured on one order line (client Q&A, live chicken
+ * and eggs): the net weight on the customer's scale for live birds — it
+ * settles the sale — or the eggs broken on the way.
+ */
+export class DeliveryLineMeasureDto {
+  @ApiProperty()
+  @IsUUID()
+  orderLineId!: string;
+
+  @ApiPropertyOptional({ description: 'Live birds: net kg on the customer\'s scale' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  customerWeight?: number;
+
+  @ApiPropertyOptional({ description: 'Eggs: pieces broken on the way' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 0 })
+  @Min(0)
+  brokenQuantity?: number;
+}
 
 // signatureData is optional — a 'pod'-type photo already uploaded for this
 // stop can satisfy proof on its own; LogisticsService requires at least
@@ -15,4 +39,12 @@ export class CompleteDeliveryDto {
   @IsOptional()
   @IsString()
   signatureData?: string;
+
+  @ApiPropertyOptional({ type: [DeliveryLineMeasureDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => DeliveryLineMeasureDto)
+  lines?: DeliveryLineMeasureDto[];
 }

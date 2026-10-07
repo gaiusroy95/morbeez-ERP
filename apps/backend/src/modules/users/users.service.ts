@@ -20,6 +20,16 @@ export class UsersService {
     private readonly password: PasswordService,
   ) {}
 
+  /** The signed-in person's own settings. */
+  async preferences(tenantId: string, userId: string): Promise<{ language: string }> {
+    return { language: await this.users.languageOf(tenantId, userId) };
+  }
+
+  async setPreferences(tenantId: string, userId: string, prefs: { language: string }): Promise<{ language: string }> {
+    await this.users.setLanguage(tenantId, userId, prefs.language);
+    return { language: prefs.language };
+  }
+
   async list(tenantId: string): Promise<PublicUser[]> {
     const records = await this.users.list(tenantId);
     return records.map(toPublicUser);

@@ -79,7 +79,7 @@ function SpotSales({ today, timeZone }: { today: string; timeZone: string }) {
               </div>
             )}
           </Panel>
-          {selected && <SalePanel key={selected} id={selected} currency={currency} timeZone={timeZone} userEmail={session?.login ?? null} onClose={() => setSelected(null)} />}
+          {selected && <SalePanel key={selected} id={selected} currency={currency} timeZone={timeZone} userId={session?.userId ?? null} onClose={() => setSelected(null)} />}
         </div>
       )}
       {section === 'bands' && (

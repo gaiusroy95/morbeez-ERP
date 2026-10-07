@@ -336,7 +336,7 @@ export function SettlementPanel({
   id,
   currency,
   timeZone,
-  userEmail,
+  userId,
   canApprove,
   canPay,
   onClose,
@@ -344,7 +344,7 @@ export function SettlementPanel({
   id: string;
   currency: string;
   timeZone: string;
-  userEmail: string | null;
+  userId: string | null;
   canApprove: boolean;
   canPay: boolean;
   onClose: () => void;
@@ -358,7 +358,8 @@ export function SettlementPanel({
       </DetailPanel>
     );
   }
-  const own = s.preparedByEmail !== null && s.preparedByEmail === userEmail;
+  // By id: a login can be a phone or an email, the same person either way.
+  const own = userId !== null && s.preparedBy === userId;
   return (
     <DetailPanel title={`Settlement #${s.settlementNumber} · ${s.employeeName}`} onClose={onClose}>
       <KeyValues

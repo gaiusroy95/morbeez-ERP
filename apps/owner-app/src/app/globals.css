@@ -2817,3 +2817,434 @@ button {
   font-size: 12.5px;
   font-weight: 650;
 }
+
+/* ---------- Trip closure: handover and checks ---------- */
+
+.closure {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.closure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.closure .detail-subhead:first-child {
+  margin-top: 0;
+}
+
+.handover-table td {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.checklist li[data-status='exception'] {
+  border-color: rgba(168, 98, 10, 0.35);
+  background: var(--warning-tint);
+}
+
+.checklist-mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--primary-tint);
+  color: var(--good);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.checklist li[data-status='exception'] .checklist-mark {
+  background: var(--warning);
+  color: #fff;
+}
+
+.checklist-detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* ---- Owner independence: delegation, day-off mode, alerts ---- */
+
+.alert-bell {
+  position: relative;
+}
+
+.alert-count {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.alert-count[data-critical] {
+  background: var(--critical);
+}
+
+.dayoff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-radius: var(--radius);
+  background: var(--carbon);
+  color: var(--on-carbon);
+}
+
+.dayoff[data-away] {
+  background: var(--primary-tint);
+  color: var(--ink);
+  border: 1px solid var(--primary);
+}
+
+.dayoff-text {
+  display: grid;
+  gap: 4px;
+  max-width: 62ch;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.dayoff-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.dayoff[data-away] .dayoff-eyebrow {
+  color: var(--primary);
+}
+
+.dayoff-title {
+  font-size: 18px;
+}
+
+.dayoff:not([data-away]) .dayoff-text > span:last-child {
+  color: var(--on-carbon-muted);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.field .check-row {
+  font-weight: 400;
+}
+
+.check-row input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  accent-color: var(--primary);
+}
+
+.handover-trips {
+  display: grid;
+  gap: 8px;
+}
+
+.field-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.handover-sheet {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.table-compact td,
+.table-compact th {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.input-compact {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.input-compact:focus {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.split-even {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+}
+
+.levels {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.levels li {
+  display: grid;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.levels span {
+  color: var(--ink-muted);
+}
+
+.settings-form {
+  grid-template-columns: 1fr;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.owner-alerts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alert-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.alert-item[data-severity='critical'] {
+  border-left-color: var(--critical);
+}
+
+.alert-item[data-read] {
+  border-left-color: var(--border-strong);
+  opacity: 0.75;
+}
+
+.alert-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.alert-time {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.alert-title {
+  font-size: 15px;
+}
+
+.alert-detail {
+  font-size: 14px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.owner-alert-link {
+  justify-self: start;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.summary-away {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-tint);
+  font-weight: 600;
+}
+
+.summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+}
+
+.summary-figure {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.summary-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.summary-value {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-note {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.summary-exceptions {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+
+/* ---- Live birds, eggs and pricing ---- */
+
+.line-row {
+  align-items: start;
+}
+
+.line-qty,
+.line-price {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.line-qty {
+  flex-direction: row;
+}
+
+.line-qty select {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.line-hint {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  line-height: 1.3;
+}
+
+.panel-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+/* ---- Languages ---- */
+
+.lang-switch select {
+  min-height: 34px;
+  padding: 5px 28px 5px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background-color: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Inter and Bricolage carry Latin only; Malayalam, Kannada and Tamil text
+   falls back to the phone's or computer's own Noto (Android ships them). */
+html:lang(ml-IN) body,
+html:lang(kn-IN) body,
+html:lang(ta-IN) body {
+  line-height: 1.6;
+}
+
+.login-lang {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.lang-panel {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}

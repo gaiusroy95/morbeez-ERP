@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screens.cash
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
@@ -26,7 +28,7 @@ import com.morbeez.driver.ui.components.Glyph
 import com.morbeez.driver.ui.components.PrimaryAction
 import com.morbeez.driver.ui.theme.Fresh
 
-private val METHODS = listOf("cash" to "Cash", "upi" to "UPI", "bank_transfer" to "Bank transfer", "cheque" to "Cheque")
+private val METHODS = listOf("cash" to R.string.method_cash, "upi" to R.string.method_upi, "bank_transfer" to R.string.method_bank, "cheque" to R.string.method_cheque)
 
 @Composable
 fun CashCollectionScreen(
@@ -42,12 +44,12 @@ fun CashCollectionScreen(
     val amount = amountText.toDoubleOrNull()
 
     FieldScreen(
-        title = "Collect payment",
-        eyebrow = "Delivery",
+        title = stringResource(R.string.collect_payment),
+        eyebrow = stringResource(R.string.kind_delivery),
         onBack = onBack,
         bottomBar = {
             PrimaryAction(
-                text = if (amount != null && amount > 0) "Record ₹$amountText" else "Record collection",
+                text = if (amount != null && amount > 0) stringResource(R.string.record_amount, amountText) else stringResource(R.string.record_collection),
                 onClick = { viewModel.recordCollection(tripId, stopId, amount ?: 0.0, method, notes.ifBlank { null }, onDone) },
                 enabled = amount != null && amount > 0,
                 glyph = Glyph.Check,
@@ -56,7 +58,7 @@ fun CashCollectionScreen(
     ) {
         // The amount is the point of this screen, so it's typed big.
         FieldCard {
-            Eyebrow("Amount received")
+            Eyebrow(stringResource(R.string.amount_received))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                 Text("₹", style = MaterialTheme.typography.displaySmall, color = Fresh.inkFaint)
                 BasicTextField(
@@ -76,10 +78,10 @@ fun CashCollectionScreen(
         }
 
         FieldCard {
-            Eyebrow("How they paid", modifier = Modifier.padding(bottom = 12.dp))
-            ChoiceTiles(METHODS, method) { method = it }
+            Eyebrow(stringResource(R.string.how_they_paid), modifier = Modifier.padding(bottom = 12.dp))
+            ChoiceTiles(METHODS.map { (k, label) -> k to stringResource(label) }, method) { method = it }
         }
 
-        FreshTextField(value = notes, onValueChange = { notes = it }, label = "Notes (optional)", singleLine = false)
+        FreshTextField(value = notes, onValueChange = { notes = it }, label = stringResource(R.string.notes_optional), singleLine = false)
     }
 }

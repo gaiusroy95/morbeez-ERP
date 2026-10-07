@@ -55,7 +55,8 @@ interface FinanceChargeRow {
   period_start: string;
   period_end: string;
   principal: string;
-  rate_monthly_percent: string;
+  rate_monthly_percent: string | null;
+  rate_annual_percent: string | null;
   days: number;
   amount: string;
   created_at: Date;
@@ -81,7 +82,7 @@ export interface ChargeCandidate {
   customerId: string;
   dueDate: string;
   outstanding: string;
-  rateMonthly: string;
+  rateAnnual: string;
   graceDays: number;
   lastPeriodEnd: string | null;
 }
@@ -112,7 +113,8 @@ const PAYMENT_SELECT = `
 const CHARGE_SELECT = `
   SELECT fc.id, fc.invoice_id, i.invoice_number, fc.source_invoice_id, si.invoice_number AS source_invoice_number,
          i.customer_id, c.name AS customer_name, fc.period_start::text AS period_start, fc.period_end::text AS period_end,
-         fc.principal::text AS principal, fc.rate_monthly_percent::text AS rate_monthly_percent, fc.days,
+         fc.principal::text AS principal, fc.rate_monthly_percent::text AS rate_monthly_percent,
+         fc.rate_annual_percent::text AS rate_annual_percent, fc.days,
          fc.amount::text AS amount, fc.created_at
   FROM money.finance_charge fc
   JOIN money.invoice i ON i.id = fc.invoice_id
@@ -169,6 +171,7 @@ function toCharge(row: FinanceChargeRow): FinanceChargeRecord {
     periodEnd: row.period_end,
     principal: row.principal,
     rateMonthlyPercent: row.rate_monthly_percent,
+    rateAnnualPercent: row.rate_annual_percent,
     days: row.days,
     amount: row.amount,
     createdAt: row.created_at,
@@ -552,12 +555,12 @@ export class ReceivablesRepository {
       last_period_end: string | null;
     }>(
       `SELECT b.invoice_id, b.invoice_number, b.customer_id, b.due_date::text AS due_date,
-              b.outstanding::text AS outstanding, c.finance_charge_rate_monthly::text AS rate,
+              b.outstanding::text AS outstanding, c.finance_charge_rate_annual::text AS rate,
               c.finance_charge_grace_days AS grace,
               (SELECT MAX(fc.period_end)::text FROM money.finance_charge fc WHERE fc.source_invoice_id = b.invoice_id) AS last_period_end
        FROM money.invoice_balance b
        JOIN trading_partners.customer c ON c.id = b.customer_id
-       WHERE b.kind = 'sale' AND b.outstanding > 0 AND c.finance_charge_rate_monthly > 0
+       WHERE b.kind = 'sale' AND b.outstanding > 0 AND c.finance_charge_rate_annual > 0
          AND b.due_date + c.finance_charge_grace_days < $1::date
        ORDER BY b.customer_id, b.due_date`,
       [asOf],
@@ -568,7 +571,7 @@ export class ReceivablesRepository {
       customerId: r.customer_id,
       dueDate: r.due_date,
       outstanding: r.outstanding,
-      rateMonthly: r.rate,
+      rateAnnual: r.rate,
       graceDays: r.grace,
       lastPeriodEnd: r.last_period_end,
     }));
@@ -591,7 +594,7 @@ export class ReceivablesRepository {
   ): Promise<string> {
     const result = await client.query<{ id: string }>(
       `INSERT INTO money.finance_charge
-         (tenant_id, invoice_id, source_invoice_id, period_start, period_end, principal, rate_monthly_percent, days, amount, created_by)
+         (tenant_id, invoice_id, source_invoice_id, period_start, period_end, principal, rate_annual_percent, days, amount, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
       [
@@ -635,5 +638,17 @@ export class ReceivablesRepository {
       [customerId ?? null],
     );
     return { items: rows.rows.map(toCharge), total: Number(count.rows[0].count), page: Math.max(page, 1), pageSize: size };
+  }
+
+  /** What's under open dispute on each of these invoices — no finance charge accrues on it. */
+  async openDisputedByInvoiceWithClient(client: PoolClient, invoiceIds: string[]): Promise<Map<string, string>> {
+    if (invoiceIds.length === 0) return new Map();
+    const result = await client.query<{ invoice_id: string; disputed: string }>(
+      `SELECT invoice_id, SUM(amount)::numeric(12,2)::text AS disputed
+         FROM money.invoice_dispute WHERE status = 'open' AND invoice_id = ANY($1::uuid[])
+        GROUP BY invoice_id`,
+      [invoiceIds],
+    );
+    return new Map(result.rows.map((r) => [r.invoice_id, r.disputed]));
   }
 }

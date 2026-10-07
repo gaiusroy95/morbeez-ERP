@@ -62,4 +62,6 @@ export const KEYS = {
   lookupVehicles: ['lookup', 'vehicles'],
   spot: ['spot'],
   ai: ['ai'],
+  delegation: ['delegation'],
+  alerts: ['alerts'],
 } satisfies Record<string, QueryKey>;

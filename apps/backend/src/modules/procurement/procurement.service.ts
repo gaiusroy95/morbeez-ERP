@@ -25,6 +25,7 @@ import { CompletePickupDto } from './dto/complete-pickup.dto';
 import { ReceiveGoodsDto } from './dto/receive-goods.dto';
 import { GradeLotDto } from './dto/grade-lot.dto';
 import { SettleFarmerDto } from './dto/settle-farmer.dto';
+import { AlertsRepository } from '../alerts/alerts.repository';
 
 const PO_ENTITY = 'purchase_order';
 const PICKUP_ENTITY = 'pickup';
@@ -50,6 +51,7 @@ export class ProcurementService implements OnModuleInit {
     private readonly approvals: ApprovalsService,
     private readonly payables: PayablesService,
     private readonly audit: AuditService,
+    private readonly alerts: AlertsRepository,
   ) {}
 
   /** A purchase order closes once every lot on it has been paid for, however the payment was made. */
@@ -434,11 +436,28 @@ export class ProcurementService implements OnModuleInit {
         });
       }
 
+      await this.breakageAlertWithClient(client, tenantId, after.id);
       await this.maybeMarkPurchaseOrderGraded(client, tenantId, actorUserId, after.purchaseOrderId);
       // An advance may already have paid for everything on it.
       await this.closeIfPaidWithClient(client, tenantId, actorUserId, after.purchaseOrderId);
 
       return after;
+    });
+  }
+
+  /**
+   * Eggs that arrive broken are rejected at grading; more of them than the
+   * owner accepts is a quality exception for them (client Q&A, eggs).
+   */
+  private async breakageAlertWithClient(client: PoolClient, tenantId: string, lotId: string): Promise<void> {
+    const row = await this.lots.breakageWithClient(client, lotId);
+    if (!row || Number(row.pct) <= Number(row.tolerance)) return;
+    await this.alerts.raiseWithClient(client, tenantId, {
+      kind: 'breakage',
+      severity: 'critical',
+      title: `Breakage ${row.pct}% on ${row.product} from ${row.farmer} — above ${row.tolerance}%`,
+      detail: `${Number(row.rejected)} of ${Number(row.received)} eggs arrived broken.`,
+      dedupeKey: `lot-breakage:${lotId}`,
     });
   }
 

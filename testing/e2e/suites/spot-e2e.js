@@ -144,7 +144,7 @@ const money = (c) => (c / 100).toFixed(2);
   const opsBig = await ops.post(`/spot-sales/${s5.id}/decision`, { approved: true });
   const s5done = must(await owner.post(`/spot-sales/${s5.id}/decision`, { approved: true }), 'owner approves');
   // (40 cost − 5) × 20 beats (35 floor − 5) × 20
-  check('an exception past the ops limit (₹700 under cost > ₹500) goes to the owner', s5.exceptionValue === '700.00' && opsBig.status === 403 && s5done.status === 'completed' && s5done.total === '105.00', `${s5.exceptionValue} ${msg(opsBig)}`);
+  check('an exception past the ops limit (₹700 under cost > ₹500) goes to the owner', s5.exceptionValue === '700.00' && opsBig.status === 403 && s5done.status === 'completed' && s5done.total === '105.00', `${s5.exceptionValue} ${msg(opsBig)}; owner: ${s5done.status} ${s5done.total}`);
 
   // Someone else's trip.
   const vijay = must(await owner.post('/workforce', { name: 'Vijay Rao', roleType: 'driver' }), 'vijay');
@@ -175,7 +175,7 @@ const money = (c) => (c / 100).toFixed(2);
   const afterTrip = await driverLogin.post('/spot-sales', { clientRef: randomUUID(), tripId: trip.id, paymentMethod: 'cash', lines: [{ productId: tomato.id, quantity: 1, unitPrice: 30 }] });
   check('no spot sales once the trip is back', afterTrip.status === 409);
   const cwdBefore = cents((await bal()).cash_with_drivers);
-  const rec = must(await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 1677.5 }), 'reconcile');
+  const rec = must(await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 1677.5, exceptionNote: 'Checked by hand' }), 'reconcile');
   const cwdAfter = cents((await bal()).cash_with_drivers);
   check('reconciliation: advance 500 + spot cash 1,177.50 returned in full, no variance', rec.spotCash === '1177.50' && Number(rec.variance) === 0 && cwdBefore - cwdAfter === 167750, `${rec.spotCash} var ${rec.variance}`);
   const tb = must(await owner.get('/accounting/trial-balance'), 'tb');

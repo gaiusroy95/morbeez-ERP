@@ -75,6 +75,8 @@ export interface SpotSaleRecord {
   approvalRequestId: string | null;
   approvalStatus: 'pending' | 'approved' | 'rejected' | 'cancelled' | null;
   requestedByEmail: string | null;
+  /** Who asked for the price approval — never also the one who decides it. */
+  requestedBy: string | null;
   decisionNote: string | null;
   invoiceId: string | null;
   invoiceNumber: string | null;

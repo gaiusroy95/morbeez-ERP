@@ -25,6 +25,14 @@ export interface TripStopRecord {
    */
   party?: StopParty | null;
   items?: StopItem[];
+  /** For a delivery: what to collect there — the order's value from a cash customer, or nothing on credit. */
+  collect?: StopCollect | null;
+}
+
+export interface StopCollect {
+  terms: 'cash' | 'credit';
+  /** The order's value (cash customers pay it at the door). */
+  amount: string;
 }
 
 export interface StopParty {
@@ -38,4 +46,10 @@ export interface StopItem {
   productName: string;
   quantity: string;
   uom: string;
+  productId: string;
+  /** Delivery stops: the order line, for customer-end measures. */
+  orderLineId: string | null;
+  /** live_bird: the customer's scale may settle it; egg: broken ones come off. */
+  kind: 'standard' | 'live_bird' | 'egg';
+  packSize: number | null;
 }

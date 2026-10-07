@@ -13,6 +13,7 @@ export const ENTRY_LABEL: Record<string, string> = {
   trip_advance_issued: 'Trip advance',
   trip_expense_recorded: 'Trip expense',
   trip_reconciled: 'Trip cash reconciled',
+  trip_cash_deposited: 'Trip cash deposited in bank',
   inventory_written_off: 'Stock written off',
   manual_journal: 'Journal',
   journal_reversal: 'Journal reversal',

@@ -20,6 +20,7 @@ import com.morbeez.driver.ui.screens.cash.CashCollectionScreen
 import com.morbeez.driver.ui.screens.delivery.DeliveryScreen
 import com.morbeez.driver.ui.screens.expenses.ExpensesScreen
 import com.morbeez.driver.ui.screens.login.LoginScreen
+import com.morbeez.driver.ui.screens.login.SetPinScreen
 import com.morbeez.driver.ui.screens.route.RouteScreen
 import com.morbeez.driver.ui.screens.shortage.ShortageReportScreen
 import com.morbeez.driver.ui.screens.stopdetail.StopDetailScreen
@@ -27,6 +28,7 @@ import com.morbeez.driver.ui.screens.stopdetail.StopDetailScreen
 private object Routes {
     const val LAUNCHER = "launcher"
     const val LOGIN = "login"
+    const val SET_PIN = "set-pin"
     const val ROUTE = "route"
     const val STOP_DETAIL = "trips/{tripId}/stops/{stopId}"
     const val DELIVERY = "trips/{tripId}/stops/{stopId}/delivery"
@@ -82,9 +84,15 @@ fun MorbeezNavGraph(
 
         composable(Routes.LOGIN) {
             LoginScreen(
-                onLoggedIn = { navController.navigate(Routes.ROUTE) { popUpTo(Routes.LOGIN) { inclusive = true } } },
+                onLoggedIn = { offerPin ->
+                    navController.navigate(if (offerPin) Routes.SET_PIN else Routes.ROUTE) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                },
                 onBack = { navController.popBackStack() },
             )
+        }
+
+        composable(Routes.SET_PIN) {
+            SetPinScreen(onDone = { navController.navigate(Routes.ROUTE) { popUpTo(Routes.SET_PIN) { inclusive = true } } })
         }
 
         composable(Routes.ROUTE) {

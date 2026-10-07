@@ -15,11 +15,13 @@ import { useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { daysSince, formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
 import { sumMoney } from '@/lib/decimal';
+import { Disputes } from '@/components/finance/Disputes';
 
-type Section = 'receivables' | 'payables' | 'cash' | 'trips';
+type Section = 'receivables' | 'disputes' | 'payables' | 'cash' | 'trips';
 
 const SECTIONS: { value: Section; label: string }[] = [
   { value: 'receivables', label: 'Receivables' },
+  { value: 'disputes', label: 'Disputes' },
   { value: 'payables', label: 'Farmer payables' },
   { value: 'cash', label: 'Cash flow' },
   { value: 'trips', label: 'Trip cash' },
@@ -559,6 +561,7 @@ export default function FinancePage() {
       {header}
       <FilterTabs label="Finance section" options={SECTIONS} value={section} onChange={(v) => v !== 'all' && choose(v)} />
       {section === 'receivables' && <Receivables />}
+      {section === 'disputes' && <Disputes />}
       {section === 'payables' && <Payables />}
       {section === 'cash' && <CashFlow />}
       {section === 'trips' && <TripCash />}

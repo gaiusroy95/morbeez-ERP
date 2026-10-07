@@ -16,7 +16,7 @@ import {
   InvoiceRecord,
   PaymentMethod,
 } from './entities/finance-engine.entity';
-import { addDays, allocateInOrder, daysBetween, financeChargeAmount, laterDate } from './finance-math';
+import { addDays, allocateInOrder, daysBetween, financeChargeAnnual, laterDate } from './finance-math';
 import { RecordCustomerPaymentDto } from './dto/record-customer-payment.dto';
 
 const PAYMENT_ENTITY = 'customer_payment';
@@ -48,6 +48,8 @@ export interface CollectionPaymentInput {
   method: PaymentMethod;
   notes: string | null;
   collectedAt: Date;
+  /** Cash the driver holds until handover goes to the trip float, not the cash drawer. */
+  receivedInto?: LedgerAccount;
 }
 
 /** Cash goes to the cash drawer; every other channel lands in the bank. */
@@ -249,6 +251,7 @@ export class ReceivablesService {
       collectionId: input.collectionId,
       receivedAt: input.collectedAt,
       allocations,
+      receivedInto: input.receivedInto,
     });
     return (await this.receivables.findPaymentWithClient(client, paymentId)) as CustomerPaymentRecord;
   }
@@ -341,6 +344,8 @@ export class ReceivablesService {
         const open = new Map(
           (await this.receivables.openInvoicesForCustomerWithClient(client, customerId)).map((i) => [i.id, i]),
         );
+        // A dispute pauses the charge on the disputed amount only (client Q&A, finance).
+        const disputed = await this.receivables.openDisputedByInvoiceWithClient(client, invoices.map((i) => i.invoiceId));
 
         for (const candidate of invoices) {
           const current = open.get(candidate.invoiceId);
@@ -348,7 +353,10 @@ export class ReceivablesService {
           const periodStart = laterDate(candidate.lastPeriodEnd ?? '0000-01-01', addDays(candidate.dueDate, candidate.graceDays));
           const days = daysBetween(periodStart, asOf);
           if (days <= 0) continue;
-          const amount = financeChargeAmount(current.outstanding, customer.financeChargeRateMonthly, days);
+          const underDispute = disputed.get(current.id) ?? '0.00';
+          const principal = compareMoney(underDispute, current.outstanding) >= 0 ? '0.00' : subtractMoney(current.outstanding, underDispute);
+          if (compareMoney(principal, '0') <= 0) continue;
+          const amount = financeChargeAnnual(principal, customer.financeChargeRateAnnual, days);
           if (compareMoney(amount, MIN_FINANCE_CHARGE) < 0) {
             deferred += 1;
             continue;
@@ -361,8 +369,8 @@ export class ReceivablesService {
               periodStart,
               periodEnd: asOf,
               days,
-              principal: current.outstanding,
-              rate: customer.financeChargeRateMonthly,
+              principal,
+              rate: customer.financeChargeRateAnnual,
               amount,
             }),
           );
@@ -722,7 +730,7 @@ export class ReceivablesService {
     },
   ): Promise<string> {
     const invoiceNumber = await this.receivables.nextInvoiceNumberWithClient(client, tenantId, 'finance_charge');
-    const description = `Finance charge on ${c.source.invoiceNumber}: ${c.days} days at ${c.rate}% per 30 days on ${c.principal}`;
+    const description = `Finance charge on ${c.source.invoiceNumber}: ${c.principal} × ${c.rate}% a year × ${c.days} days ÷ 365`;
     const { invoiceId } = await this.receivables.insertInvoiceWithClient(client, {
       tenantId,
       invoiceNumber,

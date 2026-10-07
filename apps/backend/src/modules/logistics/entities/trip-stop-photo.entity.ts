@@ -1,4 +1,5 @@
-export type PhotoType = 'pickup' | 'delivery' | 'pod' | 'issue';
+/** weighment: the customer's scale, when their weight settles a live-bird sale. */
+export type PhotoType = 'pickup' | 'delivery' | 'pod' | 'issue' | 'weighment';
 
 export interface TripStopPhotoRecord {
   id: string;

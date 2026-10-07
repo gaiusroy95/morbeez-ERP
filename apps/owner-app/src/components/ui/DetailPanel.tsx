@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { useT } from '@/lib/i18n';
 
 /**
  * The right-hand (desktop) or below-the-list (phone) panel showing one
@@ -18,6 +19,7 @@ export function DetailPanel({
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
+  const t = useT();
 
   useEffect(() => {
     ref.current?.focus();
@@ -35,9 +37,9 @@ export function DetailPanel({
       }}
     >
       <div className="panel-header">
-        <h2 className="panel-title">{title}</h2>
+        <h2 className="panel-title">{t(title)}</h2>
         <button type="button" className="button" onClick={onClose}>
-          Close
+          {t('Close')}
         </button>
       </div>
       <div className="panel-body">{children}</div>
@@ -46,11 +48,12 @@ export function DetailPanel({
 }
 
 export function KeyValues({ items }: { items: [string, React.ReactNode][] }) {
+  const t = useT();
   return (
     <dl className="key-values">
       {items.map(([label, value]) => (
         <div key={label}>
-          <dt>{label}</dt>
+          <dt>{t(label)}</dt>
           <dd>{value}</dd>
         </div>
       ))}

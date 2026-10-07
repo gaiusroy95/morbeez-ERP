@@ -15,6 +15,10 @@ interface TripRow {
   advance_amount: string;
   started_at: Date | null;
   completed_at: Date | null;
+  submitted_by: string | null;
+  cash_declared: string | null;
+  submit_note: string | null;
+  review_note: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -32,6 +36,10 @@ function toRecord(row: TripRow): TripRecord {
     advanceAmount: row.advance_amount,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    submittedBy: row.submitted_by ?? null,
+    cashDeclared: row.cash_declared ?? null,
+    submitNote: row.submit_note ?? null,
+    reviewNote: row.review_note ?? null,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -147,16 +155,36 @@ export class TripsRepository {
     return toRecord(result.rows[0]);
   }
 
-  async completeWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<TripRecord> {
+  /** A planned trip handed to another driver (owner day-off, backup driver). */
+  async assignDriverWithClient(client: PoolClient, id: string, driverEmployeeId: string): Promise<TripRecord | null> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET driver_employee_id = $2, version = version + 1, updated_at = now()
+       WHERE id = $1 AND status = 'planned'
+       RETURNING *`,
+      [id, driverEmployeeId],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  /** The driver submits the trip for the owner's reconciliation, saying how much cash they're handing over. */
+  async completeWithClient(
+    client: PoolClient,
+    id: string,
+    expectedVersion: number,
+    submission: { submittedBy: string; cashDeclared: number | null; note: string | null } = { submittedBy: '', cashDeclared: null, note: null },
+  ): Promise<TripRecord> {
     const result = await client.query<TripRow>(
       `UPDATE fulfilment.trip SET
          status = 'completed',
          completed_at = now(),
+         submitted_by = NULLIF($3, '')::uuid,
+         cash_declared = $4,
+         submit_note = $5,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2 AND status = 'in_progress'
        RETURNING *`,
-      [id, expectedVersion],
+      [id, expectedVersion, submission.submittedBy, submission.cashDeclared, submission.note],
     );
     if (result.rowCount === 0) throw new OptimisticLockException('Trip', id);
     return toRecord(result.rows[0]);
@@ -173,10 +201,39 @@ export class TripsRepository {
     return toRecord(result.rows[0]);
   }
 
+  /** The owner puts a submitted trip on hold, with the reason. */
+  async holdWithClient(client: PoolClient, id: string, expectedVersion: number, reason: string): Promise<TripRecord> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET status = 'on_hold', review_note = $3, version = version + 1, updated_at = now()
+       WHERE id = $1 AND version = $2 AND status = 'completed'
+       RETURNING *`,
+      [id, expectedVersion, reason],
+    );
+    if (result.rowCount === 0) throw new OptimisticLockException('Trip', id);
+    return toRecord(result.rows[0]);
+  }
+
+  /**
+   * The owner sends a submitted (or held) trip back to the driver to fix:
+   * it's on the road again, its submission cleared, with the note saying why.
+   */
+  async returnToDriverWithClient(client: PoolClient, id: string, expectedVersion: number, note: string): Promise<TripRecord> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET
+         status = 'in_progress', completed_at = NULL, submitted_by = NULL, cash_declared = NULL, submit_note = NULL,
+         review_note = $3, version = version + 1, updated_at = now()
+       WHERE id = $1 AND version = $2 AND status IN ('completed', 'on_hold')
+       RETURNING *`,
+      [id, expectedVersion, note],
+    );
+    if (result.rowCount === 0) throw new OptimisticLockException('Trip', id);
+    return toRecord(result.rows[0]);
+  }
+
   async markReconciledWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<TripRecord> {
     const result = await client.query<TripRow>(
       `UPDATE fulfilment.trip SET status = 'reconciled', version = version + 1, updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'completed'
+       WHERE id = $1 AND version = $2 AND status IN ('completed', 'on_hold')
        RETURNING *`,
       [id, expectedVersion],
     );

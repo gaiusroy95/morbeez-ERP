@@ -10,6 +10,7 @@ import { PaginatedResult } from '../../common/persistence/pagination';
 import { WorkforceService } from './workforce.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { DriveMyselfDto } from './dto/drive-myself.dto';
 import { EmployeeRecord } from './entities/employee.entity';
 
 @ApiTags('workforce')
@@ -26,6 +27,13 @@ export class WorkforceController {
     @Query() query: PaginationQueryDto,
   ): Promise<PaginatedResult<EmployeeRecord>> {
     return this.workforceService.list(user.tenantId, query.page ?? 1, query.pageSize ?? 25);
+  }
+
+  /** The owner-driver: "I drive too" — links the signed-in login to a driver record. */
+  @Post('me/driver')
+  @RequirePermissions('workforce:write', 'logistics:dispatch')
+  driveMyself(@CurrentUser() user: AuthContext, @Body() dto: DriveMyselfDto): Promise<EmployeeRecord> {
+    return this.workforceService.driveMyself(user.tenantId, user.userId, dto.name);
   }
 
   @Get(':id')

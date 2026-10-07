@@ -10,6 +10,7 @@ import { TripReconciliationsRepository } from './repositories/trip-reconciliatio
 import { TripStopPhotosRepository } from './repositories/trip-stop-photos.repository';
 import { TripStopPodsRepository } from './repositories/trip-stop-pods.repository';
 import { CustomerCollectionsRepository } from './repositories/customer-collections.repository';
+import { TripCashDepositsRepository } from './repositories/trip-cash-deposits.repository';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { ProcurementService } from '../procurement/procurement.service';
@@ -18,6 +19,9 @@ import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerService } from '../finance/ledger.service';
 import { PayrollService } from '../workforce/payroll.service';
 import { FleetService } from '../vehicles/fleet.service';
+import { DelegationService } from './delegation.service';
+import { AlertsRepository } from '../alerts/alerts.repository';
+import { DeliveryMeasuresRepository } from './repositories/delivery-measures.repository';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { TripRecord } from './entities/trip.entity';
@@ -54,6 +58,8 @@ const baseDriver: EmployeeRecord = {
   roleType: 'driver',
   employmentTerms: {},
   status: 'active',
+  delegationLevel: 4,
+  standingDelegation: true,
   version: 1,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -70,10 +76,25 @@ const baseTrip: TripRecord = {
   advanceAmount: '500',
   startedAt: null,
   completedAt: null,
+  submittedBy: null,
+  cashDeclared: null,
+  submitNote: null,
+  reviewNote: null,
   version: 1,
   createdAt: new Date(),
   updatedAt: new Date(),
   createdBy: 'user-1',
+};
+
+// A trip whose stops all went to plan: one pickup, one delivery with proof, nothing owed.
+const cleanFacts = {
+  stops: [
+    { id: 's1', type: 'pickup' as const, status: 'completed', name: 'Ramesh Patil', notes: null, hasPod: false },
+    { id: 's2', type: 'delivery' as const, status: 'completed', name: 'Hotel Sagar', notes: null, hasPod: true },
+  ],
+  load: [{ product: 'Tomato', uom: 'kg', pickedUp: '100.000', delivered: '100.000', returned: '0.000' }],
+  unpaidCashCustomers: [],
+  expensesNeedingApproval: '0.00',
 };
 
 const basePickup: PickupRecord = {
@@ -124,6 +145,9 @@ function makeStop(overrides: Partial<TripStopRecord>): TripStopRecord {
 
 describe('LogisticsService', () => {
   let service: LogisticsService;
+  let delegation: { assertCan: jest.Mock; authorityOnTrip: jest.Mock };
+  let measures: { lineFactsWithClient: jest.Mock; insertWithClient: jest.Mock };
+  let alertsRepo: { raiseWithClient: jest.Mock };
   let trips: jest.Mocked<TripsRepository>;
   let stops: jest.Mocked<TripStopsRepository>;
   let expenses: jest.Mocked<TripExpensesRepository>;
@@ -139,6 +163,12 @@ describe('LogisticsService', () => {
   let ledger: jest.Mocked<LedgerService>;
 
   beforeEach(async () => {
+    measures = { lineFactsWithClient: jest.fn().mockResolvedValue([]), insertWithClient: jest.fn() };
+    alertsRepo = { raiseWithClient: jest.fn() };
+    delegation = {
+      assertCan: jest.fn(),
+      authorityOnTrip: jest.fn().mockResolvedValue({ level: 4, can: { expense: true } }),
+    };
     const module = await Test.createTestingModule({
       providers: [
         LogisticsService,
@@ -155,8 +185,11 @@ describe('LogisticsService', () => {
             completeWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
             markReconciledWithClient: jest.fn(),
+            holdWithClient: jest.fn(),
+            returnToDriverWithClient: jest.fn(),
           },
         },
+        { provide: TripCashDepositsRepository, useValue: { listByTripWithClient: jest.fn(), createWithClient: jest.fn(), findByClientRefWithClient: jest.fn() } },
         {
           provide: TripStopsRepository,
           useValue: {
@@ -176,7 +209,13 @@ describe('LogisticsService', () => {
         },
         {
           provide: TripReconciliationsRepository,
-          useValue: { findByTripWithClient: jest.fn(), createWithClient: jest.fn(), spotSalesWithClient: jest.fn().mockResolvedValue({ cash: '0.00', pending: 0 }) },
+          useValue: {
+            findByTripWithClient: jest.fn(),
+            createWithClient: jest.fn(),
+            spotSalesWithClient: jest.fn().mockResolvedValue({ cash: '0.00', pending: 0 }),
+            moneyWithClient: jest.fn().mockResolvedValue({ cashCollections: '0.00', directPayments: '0.00', deposited: '0.00' }),
+            reviewFactsWithClient: jest.fn().mockResolvedValue(cleanFacts),
+          },
         },
         {
           provide: TripStopPhotosRepository,
@@ -201,6 +240,9 @@ describe('LogisticsService', () => {
         { provide: ReceivablesService, useValue: { recordCollectionPaymentWithClient: jest.fn() } },
         { provide: PayrollService, useValue: { recordTripWorkWithClient: jest.fn() } },
         { provide: FleetService, useValue: { assertRoadworthyWithClient: jest.fn() } },
+        { provide: DelegationService, useValue: delegation },
+        { provide: DeliveryMeasuresRepository, useValue: measures },
+        { provide: AlertsRepository, useValue: alertsRepo },
         {
           provide: LedgerService,
           useValue: {
@@ -335,6 +377,7 @@ describe('LogisticsService', () => {
       recordedBy: 'dispatcher-1',
       recordedAt,
       clientRef: null,
+      needsApproval: false,
     });
 
     await service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'toll', amount: 85 });
@@ -418,12 +461,54 @@ describe('LogisticsService', () => {
       signatureData: 'data:image/png;base64,abcd',
     });
 
-    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1);
+    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map());
     expect(pods.createWithClient).toHaveBeenCalledWith(
       fakeClient,
       'dispatcher-1',
       expect.objectContaining({ tripStopId: 'stop-1', recipientName: 'A. Shopkeeper' }),
     );
+  });
+
+  it("live birds: the customer's weight settles the invoice; shrinkage beyond tolerance alerts the owner", async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+    orders.getOrder.mockResolvedValue(baseOrder);
+    stops.completeWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', status: 'completed' }));
+    measures.lineFactsWithClient.mockResolvedValue([
+      { orderLineId: 'line-1', productId: 'p-bird', productName: 'Broiler (live)', kind: 'live_bird', uom: 'kg', quantity: '500.000', tolerancePct: '2.00', weighmentPhoto: 'optional' },
+    ]);
+
+    await service.completeDeliveryStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', {
+      recipientName: 'A. Shopkeeper',
+      signatureData: 'data:image/png;base64,abcd',
+      lines: [{ orderLineId: 'line-1', customerWeight: 485 }],
+    });
+
+    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map([['line-1', '485.000']]));
+    expect(measures.insertWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'dispatcher-1',
+      expect.objectContaining({ orderLineId: 'line-1', measure: expect.objectContaining({ loss: '15.000', lossPct: '3.00', withinTolerance: false }) }),
+    );
+    expect(alertsRepo.raiseWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', expect.objectContaining({ kind: 'shrinkage', severity: 'critical' }));
+  });
+
+  it("a customer weight needs the scale photo when the owner requires one, and only applies to live birds", async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+    orders.getOrder.mockResolvedValue(baseOrder);
+    photos.countByStopAndTypeWithClient.mockResolvedValue(0);
+    measures.lineFactsWithClient.mockResolvedValue([
+      { orderLineId: 'line-1', productId: 'p-bird', productName: 'Broiler (live)', kind: 'live_bird', uom: 'kg', quantity: '500.000', tolerancePct: '2.00', weighmentPhoto: 'required' },
+      { orderLineId: 'line-2', productId: 'p-tom', productName: 'Tomato', kind: 'standard', uom: 'kg', quantity: '10.000', tolerancePct: null, weighmentPhoto: 'required' },
+    ]);
+    const deliver = (lines: { orderLineId: string; customerWeight?: number }[]) =>
+      service.completeDeliveryStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { recipientName: 'A', signatureData: 'x', lines });
+
+    await expect(deliver([{ orderLineId: 'line-1', customerWeight: 495 }])).rejects.toThrow(/Photograph the customer's scale/);
+    await expect(deliver([{ orderLineId: 'line-2', customerWeight: 9 }])).rejects.toThrow(/isn't sold by live weight/);
+    expect(orders.markDelivered).not.toHaveBeenCalled();
   });
 
   it('completeDeliveryStop succeeds when a POD photo already exists, without a signature', async () => {
@@ -513,6 +598,7 @@ describe('LogisticsService', () => {
       notes: null,
       collectedBy: 'dispatcher-1',
       collectedAt: new Date(),
+      intoDriverFloat: true,
       clientRef: null,
     });
 
@@ -534,6 +620,14 @@ describe('LogisticsService', () => {
       'dispatcher-1',
       expect.objectContaining({ collectionId: 'collection-1', customerId: 'customer-1', orderId: 'order-1', amount: '500', method: 'cash' }),
     );
+    // Cash stays with the driver until handover: the trip's float, not the cash drawer.
+    expect(collections.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', expect.objectContaining({ intoDriverFloat: true }));
+    expect(receivables.recordCollectionPaymentWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'dispatcher-1',
+      expect.objectContaining({ receivedInto: 'cash_with_drivers' }),
+    );
   });
 
   it('completeTrip refuses while stops are still pending', async () => {
@@ -553,32 +647,73 @@ describe('LogisticsService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('reconcileTrip computes variance from the advance, recorded expenses, and cash returned', async () => {
-    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '500' });
-    expenses.sumByTripWithClient.mockResolvedValue(300);
+  const storeReconciliation = () =>
     reconciliations.createWithClient.mockImplementation(async (_client, _by, fields) => ({
+      ...fields,
       id: 'recon-1',
-      tripId: fields.tripId,
       advanceAmount: String(fields.advanceAmount),
       totalExpenses: String(fields.totalExpenses),
       cashReturned: String(fields.cashReturned),
-      spotCash: fields.spotCash,
       variance: String(fields.variance),
-      notes: fields.notes,
       reconciledBy: 'user-1',
       reconciledAt: new Date(),
     }));
+
+  it('reconcileTrip: the driver hands over exactly what was expected — closes as a pass', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '500', cashDeclared: '1400.00' });
+    expenses.sumByTripWithClient.mockResolvedValue(300);
+    reconciliations.moneyWithClient.mockResolvedValue({ cashCollections: '1200.00', directPayments: '800.00', deposited: '0.00' });
+    storeReconciliation();
     trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
 
-    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 180 });
+    // 500 advance + 1,200 cash collected − 300 expenses = 1,400 expected
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 1400 });
 
-    expect(result.variance).toBe('20');
-    // Posted from the stored record, in the same transaction.
+    expect(result.variance).toBe('0');
+    expect(result.outcome).toBe('pass');
+    expect(result.checklist?.every((c) => c.status === 'pass')).toBe(true);
+    // The float the ledger settles includes the delivery cash.
     expect(ledger.postTripReconciliationWithClient).toHaveBeenCalledWith(
       expect.anything(),
       'tenant-1',
       'user-1',
-      expect.objectContaining({ id: 'recon-1', tripId: 'trip-1', advanceAmount: '500', totalExpenses: '300', cashReturned: '180', cashIn: '0.00' }),
+      expect.objectContaining({ advanceAmount: '500', cashIn: '1200.00', totalExpenses: '300', cashDeposited: '0.00', cashReturned: '1400' }),
+    );
+  });
+
+  it('reconcileTrip: a short handover is an exception — closing it needs the owner\'s reason', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '500' });
+    expenses.sumByTripWithClient.mockResolvedValue(300);
+    storeReconciliation();
+    trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
+
+    await expect(service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 180 })).rejects.toThrow(/handover.*needs a reason/);
+
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', {
+      version: 1,
+      cashReturned: 180,
+      exceptionNote: 'Driver paid ₹20 toll without a receipt',
+    });
+    expect(result.variance).toBe('20');
+    expect(result.outcome).toBe('approved_exception');
+    expect(result.exceptionNote).toMatch(/toll/);
+  });
+
+  it('reconcileTrip: cash deposited in the bank on the road is not expected at handover', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'on_hold', advanceAmount: '0' });
+    expenses.sumByTripWithClient.mockResolvedValue(0);
+    reconciliations.moneyWithClient.mockResolvedValue({ cashCollections: '5000.00', directPayments: '0.00', deposited: '4000.00' });
+    storeReconciliation();
+    trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
+
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 1000 });
+
+    expect(result.variance).toBe('0');
+    expect(ledger.postTripReconciliationWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ cashIn: '5000.00', cashDeposited: '4000.00', cashReturned: '1000' }),
     );
   });
 
@@ -588,12 +723,23 @@ describe('LogisticsService', () => {
     reconciliations.spotSalesWithClient.mockResolvedValueOnce({ cash: '0.00', pending: 1 });
     await expect(service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 200 })).rejects.toThrow(/await an approval/);
 
-    reconciliations.spotSalesWithClient.mockResolvedValueOnce({ cash: '1250.00', pending: 0 });
-    reconciliations.createWithClient.mockImplementation(async (_c, _by, fields) => ({ ...fields, id: 'r', advanceAmount: '500', totalExpenses: '300', cashReturned: '1450', variance: String(fields.variance), reconciledBy: 'u', reconciledAt: new Date() }) as never);
+    reconciliations.spotSalesWithClient.mockResolvedValue({ cash: '1250.00', pending: 0 });
+    storeReconciliation();
     trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
     const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 1450 });
     // 500 advance + 1,250 spot cash − 300 expenses − 1,450 returned
     expect(result.variance).toBe('0');
+  });
+
+  it('hold and return-to-driver only act on a trip waiting for the owner', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    await expect(service.holdTrip('tenant-1', 'user-1', 'trip-1', { version: 1, note: 'Check the cash' })).rejects.toBeInstanceOf(ConflictException);
+
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed' });
+    trips.returnToDriverWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', reviewNote: 'Add the toll receipt', version: 2 });
+    const back = await service.returnToDriver('tenant-1', 'user-1', 'trip-1', { version: 1, note: 'Add the toll receipt' });
+    expect(back.status).toBe('in_progress');
+    expect(trips.returnToDriverWithClient).toHaveBeenCalledWith(fakeClient, 'trip-1', 1, 'Add the toll receipt');
   });
 
   it('reconcileTrip refuses a trip that is not completed', async () => {

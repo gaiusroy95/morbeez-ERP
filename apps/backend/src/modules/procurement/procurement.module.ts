@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AlertsModule } from '../alerts/alerts.module';
 import { ProcurementController } from './procurement.controller';
 import { ProcurementService } from './procurement.service';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
@@ -20,7 +21,7 @@ import { FinanceModule } from '../finance/finance.module';
 // service APIs (existence + status checks), and Approvals for the
 // purchase_order sign-off gate at confirmation (Constitution I.3-I.4).
 @Module({
-  imports: [FarmersModule, ProductsModule, VehiclesModule, WorkforceModule, ApprovalsModule, FinanceModule],
+  imports: [FarmersModule, ProductsModule, VehiclesModule, WorkforceModule, ApprovalsModule, FinanceModule, AlertsModule],
   controllers: [ProcurementController],
   providers: [
     ProcurementService,

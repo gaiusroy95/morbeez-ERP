@@ -165,10 +165,10 @@ const cents = (s) => Math.round(Number(s) * 100);
     check('general customer update no longer accepts credit fields (400)', oldPatch.status === 400, String(oldPatch.status));
     const terms = await owner.post(`/customers/${c1.id}/credit-terms`, {
       version: c1now.version,
-      financeChargeRateMonthly: 2,
+      financeChargeRateAnnual: 18.25,
       financeChargeGraceDays: 0,
     });
-    check('owner sets finance-charge terms', terms.financeChargeRateMonthly === '2.00', terms.financeChargeRateMonthly);
+    check('owner sets finance-charge terms: a rate a year', terms.financeChargeRateAnnual === '18.25', terms.financeChargeRateAnnual);
 
     const holdMissingReason = await owner.raw('POST', `/customers/${c1.id}/credit-terms`, { version: terms.version, creditHold: true });
     check('a hold needs a reason (400)', holdMissingReason.status === 400, String(holdMissingReason.status));
@@ -186,9 +186,9 @@ const cents = (s) => Math.round(Number(s) * 100);
     // Backdate INV for o1 so it's 40 days past due (superuser; simulating time passing).
     await db.query(`UPDATE money.invoice SET due_date = $2::date - 40, issued_at = issued_at - interval '47 days' WHERE id = $1`, [inv1.id, today]);
     const run = await acc.post('/finance/finance-charges/run', {});
-    const expected = (Math.round((180000 * 2 * 40) / (100 * 30)) / 100).toFixed(2); // 180000 paise × 2% × 40/30, half-up to the paisa
+    const expected = (Math.round((180000 * 18.25 * 40) / (100 * 365)) / 100).toFixed(2); // 180000 paise × 18.25% × 40 ÷ 365, half-up to the paisa
     const charge = run.charges.find((c) => c.sourceInvoiceId === inv1.id);
-    check(`finance charge: 1800.00 × 2% × 40/30 = ${expected}`, charge?.amount === expected && charge?.days === 40, `${charge?.amount} for ${charge?.days} days`);
+    check(`finance charge: 1800.00 × 18.25% × 40 days ÷ 365 = ${expected}`, charge?.amount === expected && charge?.days === 40, `${charge?.amount} for ${charge?.days} days`);
     const rerun = await acc.post('/finance/finance-charges/run', {});
     check('re-running the same day charges nothing', rerun.charged === 0, String(rerun.charged));
     const fcInvoices = await acc.get(`/finance/invoices?customerId=${c1.id}&kind=finance_charge`);
@@ -228,7 +228,7 @@ const cents = (s) => Math.round(Number(s) * 100);
     // ---------- trip still reconciles; dashboard reflects the engine ----------
     trip = await owner.get(`/logistics/trips/${trip.id}`);
     trip = await owner.post(`/logistics/trips/${trip.id}/complete`, { version: trip.version });
-    await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 2000 });
+    await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 2000, exceptionNote: 'Checked by hand' });
     const kpis = await owner.get('/dashboard/kpis?days=7');
     check('dashboard receivables = engine receivables', cents(kpis.receivablesOutstanding.value) >= cents(credit.balance), kpis.receivablesOutstanding.value);
     const alerts = await owner.raw('GET', '/dashboard/alerts');

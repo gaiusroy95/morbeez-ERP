@@ -1,6 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { StopItem, StopParty, StopStatus, StopType, TripStopRecord } from '../entities/trip-stop.entity';
+import { StopCollect, StopItem, StopParty, StopStatus, StopType, TripStopRecord } from '../entities/trip-stop.entity';
 
 interface TripStopRow {
   id: string;
@@ -50,7 +50,7 @@ export class TripStopsRepository {
   async detailsForTripWithClient(
     client: PoolClient,
     tripId: string,
-  ): Promise<Map<string, { party: StopParty | null; items: StopItem[] }>> {
+  ): Promise<Map<string, { party: StopParty | null; items: StopItem[]; collect: StopCollect | null }>> {
     const parties = await client.query<{ stop_id: string; kind: 'customer' | 'farmer'; id: string; name: string; phone: string | null }>(
       `SELECT s.id AS stop_id, 'customer' AS kind, c.id, c.name, c.contact->>'phone' AS phone
        FROM fulfilment.trip_stop s JOIN commerce.customer_order o ON o.id = s.order_id JOIN trading_partners.customer c ON c.id = o.customer_id
@@ -62,13 +62,23 @@ export class TripStopsRepository {
        WHERE s.trip_id = $1`,
       [tripId],
     );
-    const items = await client.query<{ stop_id: string; product_name: string; quantity: string; uom: string }>(
-      `SELECT s.id AS stop_id, pr.name AS product_name, ol.quantity::text AS quantity, pr.base_uom AS uom
+    const items = await client.query<{
+      stop_id: string;
+      product_name: string;
+      quantity: string;
+      uom: string;
+      product_id: string;
+      order_line_id: string | null;
+      kind: StopItem['kind'];
+      pack_size: number | null;
+    }>(
+      `SELECT s.id AS stop_id, pr.name AS product_name, ol.quantity::text AS quantity, pr.base_uom AS uom,
+              pr.id AS product_id, ol.id AS order_line_id, pr.kind, pr.pack_size
        FROM fulfilment.trip_stop s JOIN commerce.customer_order_line ol ON ol.order_id = s.order_id
        JOIN trading_partners.product pr ON pr.id = ol.product_id
        WHERE s.trip_id = $1
        UNION ALL
-       SELECT s.id, pr.name, pl.expected_quantity::text, pr.base_uom
+       SELECT s.id, pr.name, pl.expected_quantity::text, pr.base_uom, pr.id, NULL::uuid, pr.kind, pr.pack_size
        FROM fulfilment.trip_stop s JOIN commerce.pickup p ON p.id = s.pickup_id
        JOIN commerce.purchase_order_line pl ON pl.purchase_order_id = p.purchase_order_id
        JOIN trading_partners.product pr ON pr.id = pl.product_id
@@ -76,10 +86,32 @@ export class TripStopsRepository {
        ORDER BY 2`,
       [tripId],
     );
-    const out = new Map<string, { party: StopParty | null; items: StopItem[] }>();
-    const entry = (id: string) => out.get(id) ?? out.set(id, { party: null, items: [] }).get(id)!;
+    // What each delivery should bring in: cash customers (no credit days) pay the order's value at the door.
+    const collect = await client.query<{ stop_id: string; terms_days: number; amount: string }>(
+      `SELECT s.id AS stop_id, c.payment_terms_days AS terms_days,
+              SUM(ol.quantity * ol.unit_price)::numeric(12,2)::text AS amount
+       FROM fulfilment.trip_stop s JOIN commerce.customer_order o ON o.id = s.order_id
+       JOIN trading_partners.customer c ON c.id = o.customer_id
+       JOIN commerce.customer_order_line ol ON ol.order_id = o.id
+       WHERE s.trip_id = $1
+       GROUP BY s.id, c.payment_terms_days`,
+      [tripId],
+    );
+    const out = new Map<string, { party: StopParty | null; items: StopItem[]; collect: StopCollect | null }>();
+    const entry = (id: string) => out.get(id) ?? out.set(id, { party: null, items: [], collect: null }).get(id)!;
     for (const r of parties.rows) entry(r.stop_id).party = { kind: r.kind, id: r.id, name: r.name, phone: r.phone };
-    for (const r of items.rows) entry(r.stop_id).items.push({ productName: r.product_name, quantity: r.quantity, uom: r.uom });
+    for (const r of items.rows) {
+      entry(r.stop_id).items.push({
+        productName: r.product_name,
+        quantity: r.quantity,
+        uom: r.uom,
+        productId: r.product_id,
+        orderLineId: r.order_line_id,
+        kind: r.kind ?? 'standard',
+        packSize: r.pack_size,
+      });
+    }
+    for (const r of collect.rows) entry(r.stop_id).collect = { terms: r.terms_days === 0 ? 'cash' : 'credit', amount: r.amount };
     return out;
   }
 
@@ -147,12 +179,13 @@ export class TripStopsRepository {
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
-  async skipWithClient(client: PoolClient, id: string): Promise<TripStopRecord | null> {
+  /** [reason], when given, becomes the stop's note: why it wasn't done. */
+  async skipWithClient(client: PoolClient, id: string, reason: string | null = null): Promise<TripStopRecord | null> {
     const result = await client.query<TripStopRow>(
-      `UPDATE fulfilment.trip_stop SET status = 'skipped', completed_at = now()
+      `UPDATE fulfilment.trip_stop SET status = 'skipped', completed_at = now(), notes = COALESCE($2, notes)
        WHERE id = $1 AND status = 'pending'
        RETURNING *`,
-      [id],
+      [id, reason],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }

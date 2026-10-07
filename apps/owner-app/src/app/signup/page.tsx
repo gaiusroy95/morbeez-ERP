@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { FormEvent, useState } from 'react';
 import { AuthHero } from '@/components/auth/AuthHero';
 import { normalizeIndianMobile } from '@/lib/phone';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitch } from '@/components/layout/LanguageSwitch';
 
 const MIN_PASSWORD = 12;
 
@@ -12,6 +14,7 @@ const MIN_PASSWORD = 12;
  * password. It starts on a free month straight away, already signed in.
  */
 export default function SignupPage() {
+  const t = useT();
   const [business, setBusiness] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -40,7 +43,7 @@ export default function SignupPage() {
       }
       window.location.assign('/dashboard');
     } catch {
-      setError("Can't reach Morbeez. Check your connection and try again.");
+      setError(t("Can't reach Morbeez. Check your connection and try again."));
     } finally {
       setSubmitting(false);
     }
@@ -50,13 +53,16 @@ export default function SignupPage() {
     <main className="login-page">
       <AuthHero />
       <div className="login-side">
+        <div className="login-lang">
+          <LanguageSwitch />
+        </div>
         <form className="login-card" onSubmit={onSubmit} noValidate>
           <div>
-            <span className="trial-chip">1 month free · no card needed</span>
+            <span className="trial-chip">{t('1 month free · no card needed')}</span>
             <h1 className="page-title" style={{ marginTop: 12 }}>
-              Start your free month
+              {t('Start your free month')}
             </h1>
-            <p className="page-subtitle">Set up your business in a minute. You sign in with your mobile number.</p>
+            <p className="page-subtitle">{t('Set up your business in a minute. You sign in with your mobile number.')}</p>
           </div>
 
           {error && (
@@ -66,7 +72,7 @@ export default function SignupPage() {
           )}
 
           <div className="field">
-            <label htmlFor="business">Business name</label>
+            <label htmlFor="business">{t('Business name')}</label>
             <input
               id="business"
               autoComplete="organization"
@@ -77,7 +83,7 @@ export default function SignupPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="phone">Your mobile number</label>
+            <label htmlFor="phone">{t('Your mobile number')}</label>
             <div className="phone-input">
               <span className="phone-prefix">+91</span>
               <input
@@ -93,7 +99,7 @@ export default function SignupPage() {
             </div>
           </div>
           <div className="field">
-            <label htmlFor="password">Choose a password</label>
+            <label htmlFor="password">{t('Choose a password')}</label>
             <input
               id="password"
               type="password"
@@ -102,14 +108,14 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            <span className="field-hint">At least {MIN_PASSWORD} characters</span>
+            <span className="field-hint">{t('At least {n} characters', { n: MIN_PASSWORD })}</span>
           </div>
 
           <button className="button button-primary" type="submit" disabled={submitting}>
-            {submitting ? 'Creating your account…' : 'Create account'}
+            {submitting ? t('Creating your account…') : t('Create account')}
           </button>
           <p className="login-switch">
-            Already use Morbeez? <Link href="/login">Sign in</Link>
+            {t('Already use Morbeez?')} <Link href="/login">{t('Sign in')}</Link>
           </p>
         </form>
       </div>

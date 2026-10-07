@@ -34,9 +34,11 @@ const baseCustomer: CustomerRecord = {
   tenantId: 'tenant-1',
   name: 'Test Customer',
   contact: {},
+  preferredLanguage: 'en',
   creditLimit: '1000',
   paymentTermsDays: 30,
   financeChargeRateMonthly: '0.00',
+  financeChargeRateAnnual: '0.00',
   financeChargeGraceDays: 0,
   creditHold: false,
   creditHoldReason: null,
@@ -54,6 +56,9 @@ const baseProduct: ProductRecord = {
   category: 'vegetable',
   baseUom: 'kg',
   basePrice: '50',
+  kind: 'standard',
+  packSize: null,
+  lossTolerancePct: null,
   status: 'active',
   version: 1,
   createdAt: new Date(),
@@ -87,6 +92,7 @@ describe('OrdersService', () => {
             confirmWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
             deliverWithClient: jest.fn(),
+            lastPricesWithClient: jest.fn().mockResolvedValue(new Map()),
           },
         },
         { provide: CustomersService, useValue: { getById: jest.fn() } },
@@ -134,22 +140,46 @@ describe('OrdersService', () => {
     expect(service).toBeDefined();
   });
 
-  it('createOrder prices a line from basePrice when unitPrice is omitted', async () => {
+  it("createOrder suggests the customer's own last price when unitPrice is omitted", async () => {
     customers.getById.mockResolvedValue(baseCustomer);
     products.getById.mockResolvedValue(baseProduct);
     orders.createWithClient.mockResolvedValue(baseOrder);
+    orders.lastPricesWithClient.mockResolvedValue(
+      new Map([['product-1', { customer: { price: '32.00', at: new Date() }, any: { price: '35.00', at: new Date() } }]]),
+    );
 
-    await service.createOrder('tenant-1', 'user-1', {
-      customerId: 'customer-1',
-      lines: [{ productId: 'product-1', quantity: 10 }],
-    });
+    await service.createOrder('tenant-1', 'user-1', { customerId: 'customer-1', lines: [{ productId: 'product-1', quantity: 10 }] });
 
     expect(orders.createWithClient).toHaveBeenCalledWith(
       fakeClient,
       'tenant-1',
       'user-1',
-      expect.objectContaining({ lines: [{ productId: 'product-1', quantity: 10, unitPrice: 50 }] }),
+      expect.objectContaining({ lines: [{ productId: 'product-1', quantity: 10, unitPrice: 32 }] }),
     );
+  });
+
+  it("createOrder falls back to the product's last price to anyone, then its reference price", async () => {
+    customers.getById.mockResolvedValue(baseCustomer);
+    products.getById.mockResolvedValue(baseProduct);
+    orders.createWithClient.mockResolvedValue(baseOrder);
+    orders.lastPricesWithClient.mockResolvedValueOnce(new Map([['product-1', { customer: null, any: { price: '35.00', at: new Date() } }]]));
+    await service.createOrder('tenant-1', 'user-1', { customerId: 'customer-1', lines: [{ productId: 'product-1', quantity: 1 }] });
+    expect(orders.createWithClient).toHaveBeenLastCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ lines: [expect.objectContaining({ unitPrice: 35 })] }));
+
+    orders.lastPricesWithClient.mockResolvedValueOnce(new Map());
+    await service.createOrder('tenant-1', 'user-1', { customerId: 'customer-1', lines: [{ productId: 'product-1', quantity: 1 }] });
+    expect(orders.createWithClient).toHaveBeenLastCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ lines: [expect.objectContaining({ unitPrice: 50 })] }));
+  });
+
+  it('createOrder refuses a never-sold product with no price given — it never invents one', async () => {
+    customers.getById.mockResolvedValue(baseCustomer);
+    products.getById.mockResolvedValue({ ...baseProduct, basePrice: null });
+    orders.lastPricesWithClient.mockResolvedValue(new Map());
+
+    await expect(
+      service.createOrder('tenant-1', 'user-1', { customerId: 'customer-1', lines: [{ productId: 'product-1', quantity: 10 }] }),
+    ).rejects.toThrow(/never been sold/);
+    expect(orders.createWithClient).not.toHaveBeenCalled();
   });
 
   it('createOrder refuses an archived customer', async () => {

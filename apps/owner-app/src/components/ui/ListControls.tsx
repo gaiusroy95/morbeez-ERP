@@ -1,5 +1,7 @@
 'use client';
 
+import { useT } from '@/lib/i18n';
+
 export interface FilterOption<T extends string> {
   value: T | 'all';
   label: string;
@@ -16,8 +18,9 @@ export function FilterTabs<T extends string>({
   value: T | 'all';
   onChange: (value: T | 'all') => void;
 }) {
+  const t = useT();
   return (
-    <div className="segmented segmented-scroll" role="group" aria-label={label}>
+    <div className="segmented segmented-scroll" role="group" aria-label={t(label)}>
       {options.map((option) => (
         <button
           key={option.value}
@@ -25,7 +28,7 @@ export function FilterTabs<T extends string>({
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
         >
-          {option.label}
+          {t(option.label)}
         </button>
       ))}
     </div>
@@ -43,6 +46,7 @@ export function Pager({
   total: number;
   onPage: (page: number) => void;
 }) {
+  const t = useT();
   if (total <= pageSize) return null;
   const pages = Math.ceil(total / pageSize);
   const first = (page - 1) * pageSize + 1;
@@ -50,13 +54,13 @@ export function Pager({
   return (
     <div className="pager">
       <span className="pager-range">
-        {first}–{last} of {total}
+        {t('{first}–{last} of {total}', { first, last, total })}
       </span>
       <button type="button" className="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-        Previous
+        {t('Previous')}
       </button>
       <button type="button" className="button" disabled={page >= pages} onClick={() => onPage(page + 1)}>
-        Next
+        {t('Next')}
       </button>
     </div>
   );
@@ -71,11 +75,12 @@ export function PageHeader({
   subtitle: string;
   actions?: React.ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="page-header">
       <div>
-        <h1 className="page-title">{title}</h1>
-        <p className="page-subtitle">{subtitle}</p>
+        <h1 className="page-title">{t(title)}</h1>
+        <p className="page-subtitle">{t(subtitle)}</p>
       </div>
       {actions}
     </div>
@@ -84,11 +89,12 @@ export function PageHeader({
 
 /** A row of headline figures above a list. */
 export function Figures({ items }: { items: { label: string; value: string; tone?: 'bad' | 'attention' }[] }) {
+  const t = useT();
   return (
     <dl className="figures">
       {items.map((item) => (
         <div key={item.label} className="figure">
-          <dt>{item.label}</dt>
+          <dt>{t(item.label)}</dt>
           <dd data-tone={item.tone}>{item.value}</dd>
         </div>
       ))}
@@ -128,10 +134,11 @@ export function SelectableRow({
 }
 
 export function EmptyRow({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
+  const t = useT();
   return (
     <tr>
       <td colSpan={colSpan} className="empty-cell">
-        {children}
+        {typeof children === 'string' ? t(children) : children}
       </td>
     </tr>
   );

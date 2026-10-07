@@ -14,6 +14,8 @@ const mockEmployee: EmployeeRecord = {
   roleType: 'driver',
   employmentTerms: {},
   status: 'active',
+  delegationLevel: 4,
+  standingDelegation: true,
   version: 1,
   createdAt: new Date(),
   updatedAt: new Date(),

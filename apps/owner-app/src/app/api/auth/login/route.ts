@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiBaseUrl, forwardedFor, setSessionCookies, TokenPair } from '@/lib/server/session';
+import { isLang, LANG_COOKIE } from '@/lib/i18n/langs';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +44,26 @@ export async function POST(request: NextRequest) {
   }
 
   const tokens = (await upstream.json()) as TokenPair;
-  const response = NextResponse.json({ ok: true });
+  // The person's language (client Q&A: chosen per user): a choice already
+  // made on this device goes to their account; with none, the one they
+  // chose before — on any device — is used here too.
+  const chosenHere = request.cookies.get(LANG_COOKIE)?.value;
+  let language: string | null = null;
+  try {
+    const prefs = await fetch(`${apiBaseUrl()}/users/me/preferences`, {
+      method: isLang(chosenHere) ? 'PATCH' : 'GET',
+      headers: { authorization: `Bearer ${tokens.accessToken}`, 'content-type': 'application/json' },
+      body: isLang(chosenHere) ? JSON.stringify({ language: chosenHere }) : undefined,
+      cache: 'no-store',
+    });
+    if (prefs.ok) language = ((await prefs.json()) as { language?: string }).language ?? null;
+  } catch {
+    // Signing in never fails over a display preference.
+  }
+  const response = NextResponse.json({ ok: true, language });
   setSessionCookies(response, tokens);
+  if (!isLang(chosenHere) && isLang(language)) {
+    response.cookies.set(LANG_COOKIE, language, { path: '/', maxAge: 31_536_000, sameSite: 'lax' });
+  }
   return response;
 }

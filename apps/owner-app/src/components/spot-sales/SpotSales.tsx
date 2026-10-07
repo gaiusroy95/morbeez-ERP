@@ -106,7 +106,7 @@ export function SalesTable({
   );
 }
 
-export function SalePanel({ id, currency, timeZone, userEmail, onClose }: { id: string; currency: string; timeZone: string; userEmail: string | null; onClose: () => void }) {
+export function SalePanel({ id, currency, timeZone, userId, onClose }: { id: string; currency: string; timeZone: string; userId: string | null; onClose: () => void }) {
   const { data, error, isPending, refetch } = useSpotSale(id);
   const [deciding, setDeciding] = useState<boolean | null>(null);
   const sync = useAction(() => apiSend<SpotSaleRecord>('POST', `spot-sales/${id}/sync`, {}), SPOT_WRITES);
@@ -117,7 +117,8 @@ export function SalePanel({ id, currency, timeZone, userEmail, onClose }: { id: 
       </DetailPanel>
     );
   }
-  const own = userEmail !== null && data.requestedByEmail === userEmail;
+  // By id: a login can be a phone or an email, the same person either way.
+  const own = userId !== null && data.requestedBy === userId;
   return (
     <DetailPanel title={data.saleNumber} onClose={onClose}>
       <p>

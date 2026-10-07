@@ -74,6 +74,7 @@ export interface SpotSaleRecord {
   approvalRequestId: string | null;
   approvalStatus: 'pending' | 'approved' | 'rejected' | 'cancelled' | null;
   requestedByEmail: string | null;
+  requestedBy: string | null;
   decisionNote: string | null;
   invoiceId: string | null;
   invoiceNumber: string | null;

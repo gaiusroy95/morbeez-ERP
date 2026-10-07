@@ -35,6 +35,14 @@ const CHAINS = {
   finance: ['owner-modules-e2e.js', 'finance-e2e.js'],
   // Signs businesses up and ends a trial; needs nothing but the seed.
   signup: ['signup-trial-e2e.js'],
+  // Driver money handover and owner trip closure; makes its own data.
+  handover: ['trip-handover-e2e.js'],
+  // Delegation, day-off mode, alerts and the driver PIN; makes its own data.
+  delegation: ['delegation-e2e.js'],
+  // Live chicken, eggs, pricing, finance charges and disputes; makes its own data.
+  produce: ['chicken-eggs-finance-e2e.js'],
+  // The user's language and each customer's; makes its own data.
+  languages: ['languages-e2e.js'],
 };
 
 const REPO = path.resolve(__dirname, '../..');

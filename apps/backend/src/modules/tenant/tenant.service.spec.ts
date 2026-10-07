@@ -17,6 +17,13 @@ const mockTenant: TenantRecord = {
   branding: {},
   trialEndsAt: null,
   subscribedUntil: null,
+  operatingDayEnd: '22:00',
+  ownerAwayUntil: null,
+  alertCashThreshold: '500.00',
+  alertCollectionThreshold: '1000.00',
+  defaultShrinkageTolerancePct: '2.00',
+  defaultBreakageTolerancePct: '1.00',
+  weighmentPhoto: 'optional',
   createdAt: new Date(),
   updatedAt: new Date(),
 };

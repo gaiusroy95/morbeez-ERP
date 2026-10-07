@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useDashboardOperations } from '@/lib/hooks/use-dashboard';
 import { formatCount, formatDate } from '@/lib/format';
 import { ErrorState, Panel, SkeletonLines } from '../ui/Panel';
+import { useT } from '@/lib/i18n';
 
 interface Row {
   label: string;
@@ -13,16 +14,17 @@ interface Row {
 }
 
 function OpsCard({ title, href, rows }: { title: string; href: string; rows: Row[] }) {
+  const t = useT();
   return (
     <div className="panel panel-body">
       <div className="ops-card-title">
-        <h3 style={{ fontSize: 14 }}>{title}</h3>
-        <Link href={href}>Open →</Link>
+        <h3 style={{ fontSize: 14 }}>{t(title)}</h3>
+        <Link href={href}>{t('Open')} →</Link>
       </div>
       <ul className="ops-list">
         {rows.map((row) => (
           <li key={row.label}>
-            <span>{row.label}</span>
+            <span>{t(row.label)}</span>
             <span className="ops-count" data-attention={row.attention && row.value > 0 ? 'true' : undefined}>
               {formatCount(row.value)}
             </span>
@@ -35,6 +37,7 @@ function OpsCard({ title, href, rows }: { title: string; href: string; rows: Row
 
 export function OperationsPanel() {
   const { data, error, isPending, refetch } = useDashboardOperations();
+  const t = useT();
 
   if (isPending) {
     return (
@@ -54,7 +57,7 @@ export function OperationsPanel() {
   return (
     <section aria-labelledby="ops-heading">
       <h2 id="ops-heading" className="section-label">
-        Today&apos;s operations · {formatDate(data.date)}
+        {t("Today's operations")} · {formatDate(data.date)}
       </h2>
       <div className="ops-grid">
         <OpsCard

@@ -1,5 +1,8 @@
 package com.morbeez.driver.ui.screens.launcher
 
+import com.morbeez.driver.ui.components.LanguagePill
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -77,22 +80,25 @@ fun LauncherScreen(onOpenOwner: () -> Unit, onOpenDriver: () -> Unit) {
             }
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("Morbeez", style = MaterialTheme.typography.titleLarge, color = Fresh.onCarbon)
-                Eyebrow("Vegetable trade, run live", color = Fresh.onCarbonFaint)
+                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, color = Fresh.onCarbon)
+                Eyebrow(stringResource(R.string.launcher_tagline), color = Fresh.onCarbonFaint)
             }
+            Spacer(Modifier.weight(1f))
+            LanguagePill(onDark = true)
         }
 
         Spacer(Modifier.height(56.dp))
+        val headline2 = stringResource(R.string.launcher_headline_2)
         Text(
             buildAnnotatedString {
-                append("One business.\n")
-                withStyle(SpanStyle(color = Fresh.accent)) { append("Two ways in.") }
+                append(stringResource(R.string.launcher_headline_1) + "\n")
+                withStyle(SpanStyle(color = Fresh.accent)) { append(headline2) }
             },
             style = MaterialTheme.typography.displayMedium,
             color = Fresh.onCarbon,
         )
         Text(
-            "Pick your workspace. Both share the same stock, trips and books, and stay in sync.",
+            stringResource(R.string.launcher_intro),
             style = MaterialTheme.typography.bodyLarge,
             color = Fresh.onCarbonMuted,
             modifier = Modifier.padding(top = 14.dp),
@@ -101,27 +107,27 @@ fun LauncherScreen(onOpenOwner: () -> Unit, onOpenDriver: () -> Unit) {
         Spacer(Modifier.height(36.dp))
         WorkspaceCard(
             glyph = Glyph.Tower,
-            title = "Owner",
-            kicker = "Control tower",
-            description = "Orders, buying, trips, cash, workforce, vehicles, the books and AI suggestions.",
+            title = stringResource(R.string.launcher_owner),
+            kicker = stringResource(R.string.launcher_owner_kicker),
+            description = stringResource(R.string.launcher_owner_desc),
             featured = true,
             onClick = onOpenOwner,
         )
         Spacer(Modifier.height(12.dp))
         WorkspaceCard(
             glyph = Glyph.Truck,
-            title = "Driver",
-            kicker = "Field execution",
-            description = "Today's route, proof of delivery and cash collected. Works offline.",
+            title = stringResource(R.string.launcher_driver),
+            kicker = stringResource(R.string.field_execution),
+            description = stringResource(R.string.launcher_driver_desc),
             featured = false,
             onClick = onOpenDriver,
         )
 
         Spacer(Modifier.height(28.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("Synced live")
-            Chip("Offline-ready")
-            Chip("Secure")
+            Chip(stringResource(R.string.chip_synced))
+            Chip(stringResource(R.string.chip_offline))
+            Chip(stringResource(R.string.chip_secure))
         }
     }
 }

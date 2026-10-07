@@ -10,6 +10,12 @@ import { TripReconciliationsRepository } from './repositories/trip-reconciliatio
 import { TripStopPhotosRepository } from './repositories/trip-stop-photos.repository';
 import { TripStopPodsRepository } from './repositories/trip-stop-pods.repository';
 import { CustomerCollectionsRepository } from './repositories/customer-collections.repository';
+import { TripCashDepositsRepository } from './repositories/trip-cash-deposits.repository';
+import { DelegationsRepository } from './repositories/delegations.repository';
+import { DeliveryMeasuresRepository } from './repositories/delivery-measures.repository';
+import { DelegationService } from './delegation.service';
+import { DelegationController } from './delegation.controller';
+import { AlertsModule } from '../alerts/alerts.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
 import { WorkforceModule } from '../workforce/workforce.module';
 import { ProcurementModule } from '../procurement/procurement.module';
@@ -26,8 +32,8 @@ import { FinanceModule } from '../finance/finance.module';
 // their public service APIs only (Constitution I.3-I.4). A collection is
 // also recorded as a Finance customer payment, in the same transaction.
 @Module({
-  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule],
-  controllers: [LogisticsController, PinsController],
+  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule],
+  controllers: [LogisticsController, PinsController, DelegationController],
   providers: [
     LogisticsService,
     PinsService,
@@ -38,7 +44,11 @@ import { FinanceModule } from '../finance/finance.module';
     TripStopPhotosRepository,
     TripStopPodsRepository,
     CustomerCollectionsRepository,
+    TripCashDepositsRepository,
+    DelegationsRepository,
+    DelegationService,
+    DeliveryMeasuresRepository,
   ],
-  exports: [LogisticsService],
+  exports: [LogisticsService, DelegationService],
 })
 export class LogisticsModule {}

@@ -11,13 +11,15 @@ import { SkeletonLines } from '@/components/ui/Panel';
 import { useDashboardKpis } from '@/lib/hooks/use-dashboard';
 import { hasPermission, Session, useSession } from '@/lib/hooks/use-tenant';
 import { useUiStore } from '@/lib/stores/ui-store';
+import { useT } from '@/lib/i18n';
 
 function Header() {
+  const t = useT();
   return (
     <div className="page-header" style={{ marginBottom: 0 }}>
       <div>
-        <h1 className="page-title">Dashboard</h1>
-        <p className="page-subtitle">How the business is doing, and what needs you today.</p>
+        <h1 className="page-title">{t('Dashboard')}</h1>
+        <p className="page-subtitle">{t('How the business is doing, and what needs you today.')}</p>
       </div>
       <PeriodPicker />
     </div>
@@ -28,21 +30,22 @@ function NoAccess({ session }: { session: Session }) {
   const firstAllowed = NAV.flatMap((group) => group.items).find(
     (item) => item.href !== '/dashboard' && (!item.permission || hasPermission(session, item.permission)),
   );
+  const t = useT();
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Dashboard</h1>
+          <h1 className="page-title">{t('Dashboard')}</h1>
         </div>
       </div>
       <div className="panel placeholder">
-        <strong>Your role doesn&apos;t include the dashboard.</strong>
+        <strong>{t("Your role doesn't include the dashboard.")}</strong>
         <p>
-          Ask the business owner to add dashboard access to your role if you need it.
+          {t('Ask the business owner to add dashboard access to your role if you need it.')}
           {firstAllowed && (
             <>
               {' '}
-              Meanwhile, <Link href={firstAllowed.href}>{firstAllowed.label}</Link> is open to you.
+              {t('Meanwhile, this is open to you:')} <Link href={firstAllowed.href}>{t(firstAllowed.label)}</Link>
             </>
           )}
         </p>

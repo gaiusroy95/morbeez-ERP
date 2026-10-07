@@ -13,6 +13,13 @@ interface TenantRow {
   branding: Record<string, unknown>;
   trial_ends_at: Date | null;
   subscribed_until: Date | null;
+  operating_day_end: string;
+  owner_away_until: Date | null;
+  alert_cash_threshold: string;
+  alert_collection_threshold: string;
+  default_shrinkage_tolerance_pct: string;
+  default_breakage_tolerance_pct: string;
+  weighment_photo: 'optional' | 'required' | 'not_required';
   created_at: Date;
   updated_at: Date;
 }
@@ -28,6 +35,13 @@ function toTenantRecord(row: TenantRow): TenantRecord {
     branding: row.branding,
     trialEndsAt: row.trial_ends_at ?? null,
     subscribedUntil: row.subscribed_until ?? null,
+    operatingDayEnd: (row.operating_day_end ?? '22:00').slice(0, 5),
+    ownerAwayUntil: row.owner_away_until ?? null,
+    alertCashThreshold: row.alert_cash_threshold ?? '500.00',
+    alertCollectionThreshold: row.alert_collection_threshold ?? '1000.00',
+    defaultShrinkageTolerancePct: row.default_shrinkage_tolerance_pct ?? '2.00',
+    defaultBreakageTolerancePct: row.default_breakage_tolerance_pct ?? '1.00',
+    weighmentPhoto: row.weighment_photo ?? 'optional',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -87,7 +101,13 @@ export class TenantRepository {
 
   async update(
     id: string,
-    fields: Partial<Pick<TenantRecord, 'name' | 'currency' | 'timezone' | 'taxRegistration'>>,
+    fields: Partial<Pick<TenantRecord, 'name' | 'currency' | 'timezone' | 'taxRegistration' | 'operatingDayEnd'>> & {
+      alertCashThreshold?: number;
+      alertCollectionThreshold?: number;
+      defaultShrinkageTolerancePct?: number;
+      defaultBreakageTolerancePct?: number;
+      weighmentPhoto?: string;
+    },
   ): Promise<TenantRecord | null> {
     const result = await this.db.query<TenantRow>(
       `UPDATE tenant.tenant SET
@@ -95,10 +115,28 @@ export class TenantRepository {
          currency = COALESCE($3, currency),
          timezone = COALESCE($4, timezone),
          tax_registration = COALESCE($5, tax_registration),
+         operating_day_end = COALESCE($6::time, operating_day_end),
+         alert_cash_threshold = COALESCE($7, alert_cash_threshold),
+         alert_collection_threshold = COALESCE($8, alert_collection_threshold),
+         default_shrinkage_tolerance_pct = COALESCE($9, default_shrinkage_tolerance_pct),
+         default_breakage_tolerance_pct = COALESCE($10, default_breakage_tolerance_pct),
+         weighment_photo = COALESCE($11, weighment_photo),
          updated_at = now()
        WHERE id = $1
        RETURNING *`,
-      [id, fields.name, fields.currency, fields.timezone, fields.taxRegistration],
+      [
+        id,
+        fields.name,
+        fields.currency,
+        fields.timezone,
+        fields.taxRegistration,
+        fields.operatingDayEnd,
+        fields.alertCashThreshold,
+        fields.alertCollectionThreshold,
+        fields.defaultShrinkageTolerancePct,
+        fields.defaultBreakageTolerancePct,
+        fields.weighmentPhoto,
+      ],
     );
     return result.rows[0] ? toTenantRecord(result.rows[0]) : null;
   }

@@ -10,6 +10,20 @@ export interface TenantRecord {
   trialEndsAt: Date | null;
   /** Paid through this moment; null when never subscribed. */
   subscribedUntil: Date | null;
+  /** When the business's day ends ("HH:MM", its own timezone): day-off delegations end here. */
+  operatingDayEnd: string;
+  /** Set while the owner has handed the day over (day-off mode). */
+  ownerAwayUntil: Date | null;
+  /** A cash handover this far off expected alerts the owner at once. */
+  alertCashThreshold: string;
+  /** Cash customers this far short alerts the owner at once. */
+  alertCollectionThreshold: string;
+  /** Transit shrinkage on live birds the owner accepts, % — unless a product sets its own. */
+  defaultShrinkageTolerancePct: string;
+  /** Egg breakage the owner accepts, % — unless a product sets its own. */
+  defaultBreakageTolerancePct: string;
+  /** A photo of the customer's scale with a customer-end weight. */
+  weighmentPhoto: 'optional' | 'required' | 'not_required';
   createdAt: Date;
   updatedAt: Date;
 }

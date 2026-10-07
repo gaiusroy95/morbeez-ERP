@@ -1,5 +1,6 @@
 import type { CustomerReceivable } from '@morbeez/shared-types';
 import { formatMoney } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 const BUCKETS: { key: keyof CustomerReceivable; label: string; tone: string }[] = [
   { key: 'notYetDue', label: 'Not yet due', tone: 'ok' },
@@ -20,10 +21,11 @@ export function AgingBar({
   receivable: Pick<CustomerReceivable, 'notYetDue' | 'overdue1To30' | 'overdue31To60' | 'overdueOver60'>;
   currency: string;
 }) {
-  const values = BUCKETS.map((bucket) => ({ ...bucket, value: String(receivable[bucket.key as keyof typeof receivable]) }));
+  const t = useT();
+  const values =BUCKETS.map((bucket) => ({ ...bucket, value: String(receivable[bucket.key as keyof typeof receivable]) }));
   const total = values.reduce((sum, bucket) => sum + Number(bucket.value), 0);
 
-  if (total <= 0) return <p className="muted">Nothing outstanding.</p>;
+  if (total <= 0) return <p className="muted">{t('Nothing outstanding.')}</p>;
 
   return (
     <div className="aging">
@@ -38,7 +40,7 @@ export function AgingBar({
         {values.map((bucket) => (
           <li key={bucket.key}>
             <span className="swatch" data-tone={bucket.tone} aria-hidden="true" />
-            <span>{bucket.label}</span>
+            <span>{t(bucket.label)}</span>
             <span className="num">{formatMoney(bucket.value, currency)}</span>
           </li>
         ))}

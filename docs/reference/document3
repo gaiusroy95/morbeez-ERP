@@ -1,0 +1,166 @@
+Developer Questions & Answers — Updated
+
+1. Customer-facing language
+
+Answer: Customer-facing communication should use the retailer/customer's preferred language, stored on the customer record.
+
+This applies to:
+
+Invoices
+
+Statements
+
+WhatsApp messages
+
+Payment reminders
+
+Order confirmations
+
+Delivery confirmations
+
+Collection messages
+
+
+The Owner/business language should not override the customer's selected language.
+
+Example:
+
+Customer A → Malayalam
+Customer B → Kannada
+Customer C → Tamil
+Customer D → English
+
+The customer language should be configurable and editable by the Owner.
+
+
+---
+
+2. Can tax invoices remain in English?
+
+Answer: Yes.
+
+For the pilot, English can be used for formal invoices/tax documents, while WhatsApp/customer communication can use the customer's preferred language.
+
+Recommended:
+
+Communication	Language
+
+Tax/official invoice	English acceptable
+Statement	Customer preferred language
+WhatsApp	Customer preferred language
+Payment reminder	Customer preferred language
+Order confirmation	Customer preferred language
+Delivery message	Customer preferred language
+
+
+The language engine should remain configurable so regional-language invoices can be added later if required.
+
+
+---
+
+3. Cage tare weight
+
+Answer: The driver should not be required to remember or manually calculate tare weight.
+
+The weighing operation is treated as a manual weighing process.
+
+The system does not need to force a separate cage-tare workflow for every transaction.
+
+The business can optionally register known cage tare weights, but the core pilot should remain simple.
+
+
+---
+
+4. How should the weight be recorded?
+
+Answer: The actual weighing is done manually at the time of operation.
+
+The ERP records the resulting commercial weight.
+
+The driver should not have to remember tare weights or perform mental calculations.
+
+If required:
+
+Gross Weight − Tare Weight = Net KG
+
+This calculation can be performed manually at the weighing point and the resulting KG entered into the ERP.
+
+
+---
+
+5. Where is live-bird weight normally taken?
+
+Answer: Primarily at the farmer end.
+
+The farmer-end weighment is the normal commercial weight.
+
+Sometimes the customer/retailer end is also weighed.
+
+Therefore the system should support:
+
+Farmer Weight → Primary Weight
+
+and optionally:
+
+Customer Weight → Verification/Settlement Weight
+
+The system must not force customer-end weighing on every transaction.
+
+
+---
+
+6. What happens when customer-end weighing is available?
+
+Answer: Record it as an additional weighment.
+
+Example:
+
+Farmer end: 500 KG
+Customer end: 490 KG
+
+The ERP can calculate:
+
+Weight Difference = 10 KG
+
+Shrinkage = 2%
+
+This allows the Owner to monitor transit/weight loss when both weighments are available.
+
+
+---
+
+7. Should the driver always photograph the retailer's scale?
+
+Answer: No, not mandatory.
+
+Because customer-end weighing happens only sometimes, the system should make customer-end weighment optional.
+
+If a customer-end weight is entered, the driver can optionally attach:
+
+Scale photograph
+
+Weighment slip/photo
+
+Other proof
+
+
+This can be configured as:
+
+Optional / Required / Not required
+
+depending on the Owner's business rules.
+
+
+---
+
+8. Final live-bird weighment workflow
+
+Normal case:
+
+Farmer → Weigh → Record KG → Transport → Customer
+
+When customer weighing is performed:
+
+Farmer Weight → Transport → Customer Weight → Compare → Shrinkage/Weight Difference
+
+The ERP should remain simple and should not make the driver perform unnecessary tare calculations or remember cage weights.

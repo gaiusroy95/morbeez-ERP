@@ -1,3 +1,4 @@
+import { AlertsRepository } from '../alerts/alerts.repository';
 import { Test } from '@nestjs/testing';
 import { PoolClient } from 'pg';
 import { BadRequestException, ConflictException } from '@nestjs/common';
@@ -103,6 +104,7 @@ describe('ProcurementService', () => {
         {
           provide: LotsRepository,
           useValue: {
+            breakageWithClient: jest.fn().mockResolvedValue(null),
             listByPurchaseOrder: jest.fn(),
             findById: jest.fn(),
             findByIdWithClient: jest.fn(),
@@ -137,6 +139,7 @@ describe('ProcurementService', () => {
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: AlertsRepository, useValue: { raiseWithClient: jest.fn() } },
       ],
     }).compile();
 

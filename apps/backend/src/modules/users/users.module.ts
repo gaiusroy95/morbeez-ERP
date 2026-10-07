@@ -11,6 +11,8 @@ import { AuthSessionsRepository } from './repositories/auth-sessions.repository'
 import { PasswordService } from './security/password.service';
 import { TokenService } from './security/token.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { PinAuthService } from './pin-auth.service';
+import { AlertsModule } from '../alerts/alerts.module';
 
 // Bounded context: Users — identity, authentication, and access; not
 // employment (Domain Model, Tier 00). Owns identity.app_user, role,
@@ -29,6 +31,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     // Secret/expiry are set per-call in TokenService, not here — this
     // registration just makes JwtService injectable.
     JwtModule.register({}),
+    // Raises the owner's security alert when a PIN is being guessed.
+    AlertsModule,
   ],
   controllers: [UsersController, AuthController],
   providers: [
@@ -40,6 +44,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     PasswordService,
     TokenService,
     JwtStrategy,
+    PinAuthService,
   ],
   exports: [UsersService, AuthService],
 })

@@ -34,18 +34,18 @@ export function allocateInOrder(amount: string, items: OpenItem[]): { allocation
 }
 
 /**
- * Simple interest for `days` at `ratePercentPer30Days` on `principal`:
- * principal × rate/100 × days/30, rounded half-up to the paisa. Computed in
- * integer paise × basis points, so no step goes through a float.
+ * The pilot formula (client Q&A, finance): outstanding principal × annual
+ * rate × overdue days ÷ 365, rounded half-up to the paisa — in integer paise
+ * × basis points, so no step goes through a float. Partial payments lower
+ * the principal at once (the caller passes what's outstanding now).
  */
-export function financeChargeAmount(principal: string, ratePercentPer30Days: string, days: number): string {
+export function financeChargeAnnual(principal: string, ratePercentAnnual: string, days: number): string {
   if (!Number.isInteger(days) || days <= 0) return '0.00';
   const principalCents = toCents(principal);
-  const rateBasisPoints = toCents(ratePercentPer30Days); // "1.50" % → 150 basis points
+  const rateBasisPoints = toCents(ratePercentAnnual); // "18.00" % → 1800 basis points
   if (principalCents <= 0n || rateBasisPoints <= 0n) return '0.00';
-  // cents × bp × days / (10_000 bp-per-unit × 30 days), rounded half-up.
   const numerator = principalCents * rateBasisPoints * BigInt(days);
-  const denominator = 10_000n * 30n;
+  const denominator = 10_000n * 365n;
   return fromCents((numerator * 2n + denominator) / (denominator * 2n));
 }
 

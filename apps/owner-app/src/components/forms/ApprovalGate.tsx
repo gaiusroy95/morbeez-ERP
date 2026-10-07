@@ -10,6 +10,7 @@ import { useSession } from "@/lib/hooks/use-tenant";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { ErrorState, SkeletonLines } from "@/components/ui/Panel";
 import { ActionBar, Field, FormDialog } from "@/components/ui/Form";
+import { useT } from "@/lib/i18n";
 
 /**
  * An order or purchase order over its approval threshold waits here.
@@ -36,6 +37,7 @@ export function ApprovalGate({
   finalizePath: string;
   invalidates: QueryKey[];
 }) {
+  const t = useT();
   const { data, error, isPending, refetch } = useApprovalRequest(requestId);
   const { data: session } = useSession();
   const [deciding, setDeciding] = useState<"approve" | "reject" | null>(null);
@@ -82,12 +84,13 @@ export function ApprovalGate({
     >
       {data.status === "pending" && (
         <>
-          <strong>Needs approval.</strong> This {subject} ({amount}) is over the
-          approval threshold. Raised {formatDateTime(data.createdAt, timeZone)}.
+          <strong>{t("Needs approval.")}</strong> {t("This")} {subject} (
+          {amount}) is over the approval threshold. Raised{" "}
+          {formatDateTime(data.createdAt, timeZone)}.
           {/* Nobody decides their own request — the backend refuses it too. */}
           {session?.userId === data.requestedBy ? (
             <p style={{ margin: "8px 0 0" }}>
-              You raised it, so someone else whose approval limit covers{" "}
+              {t("You raised it, so someone else whose approval limit covers")}{" "}
               {amount} has to decide it. Once they have, finalize it here.
             </p>
           ) : (
@@ -97,14 +100,14 @@ export function ApprovalGate({
                 className="button button-primary"
                 onClick={() => setDeciding("approve")}
               >
-                Approve
+                {t('Approve')}
               </button>
               <button
                 type="button"
                 className="button button-danger"
                 onClick={() => setDeciding("reject")}
               >
-                Reject
+                {t('Reject')}
               </button>
             </ActionBar>
           )}
@@ -159,7 +162,9 @@ export function ApprovalGate({
               : `Reject this ${subject}?`
           }
           description={
-            <p>Amount: {amount}. Your decision is recorded with your name.</p>
+            <p>
+              {t("Amount:")} {amount}. Your decision is recorded with your name.
+            </p>
           }
           submitLabel={deciding === "approve" ? "Approve" : "Reject"}
           tone={deciding === "reject" ? "danger" : undefined}
@@ -173,7 +178,7 @@ export function ApprovalGate({
             decide.mutate({ approve: deciding === "approve", request: data })
           }
         >
-          <Field label="Note (optional)" wide>
+          <Field label={t("Note (optional)")} wide>
             {(props) => (
               <textarea
                 {...props}

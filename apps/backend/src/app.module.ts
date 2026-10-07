@@ -30,6 +30,7 @@ import { CratesModule } from './modules/crates/crates.module';
 import { SpotSalesModule } from './modules/spot-sales/spot-sales.module';
 import { AiModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 
 // The modular monolith root. Each import below is a bounded context
 // (Domain Model) with its own module boundary enforced by Nest's DI
@@ -68,6 +69,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     SpotSalesModule,
     AiModule,
     DashboardModule,
+    AlertsModule,
   ],
   providers: [
     // Validation: every request DTO is checked before it reaches a

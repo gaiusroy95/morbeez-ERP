@@ -5,6 +5,8 @@ import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { WorkforceService } from '../workforce/workforce.service';
+import { DelegationService } from '../logistics/delegation.service';
+import { TripStatus } from '../logistics/entities/trip.entity';
 import { LedgerService } from '../finance/ledger.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { assertRealDate } from '../../common/period';
@@ -53,6 +55,7 @@ export class SpotSalesService {
     private readonly ledger: LedgerService,
     private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
+    private readonly delegation: DelegationService,
   ) {}
 
   // ---- Settings and bands ----
@@ -183,6 +186,8 @@ export class SpotSalesService {
     if (!trip) throw new NotFoundException('Trip not found');
     await this.assertTrip(actor, trip);
     if (!OPEN_TRIP.includes(trip.status)) throw new ConflictException(`Spot sales are made on a trip on the road — this one is ${trip.status.replace('_', ' ')}`);
+    // Selling and taking the money is delegation level 2 (delivery + collection).
+    await this.delegation.assertCan(tenantId, actor.permissions.includes('logistics:dispatch'), { id: trip.id, status: trip.status as TripStatus, driverEmployeeId: trip.driver_employee_id }, 'spot_sale');
 
     const saleId = await this.db.withTenant(tenantId, async (client) => {
       await this.repo.lockVehicle(client, trip.vehicle_id);

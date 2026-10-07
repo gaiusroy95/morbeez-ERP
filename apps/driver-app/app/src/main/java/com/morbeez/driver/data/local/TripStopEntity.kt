@@ -26,4 +26,9 @@ data class TripStopEntity(
     // backend; false means a PendingOperation for it is still queued or
     // failed (Driver App Architecture, DRV.4).
     val pendingSync: Boolean = false,
+    /** For a delivery: "cash" (collect [collectAmount] at the door) or "credit". */
+    val collectTerms: String? = null,
+    val collectAmount: String? = null,
+    /** The stop's lines as JSON (List<StopItemResponse>): what's weighed or counted at this stop. */
+    val itemsJson: String? = null,
 )

@@ -23,9 +23,9 @@ class ShortageReportViewModel @Inject constructor(
         viewModelScope.launch { tripRepository.queuePhoto(tripId, stopId, "issue", localPath, mimeType) }
     }
 
-    fun reportAndSkip(tripId: String, stopId: String, onDone: () -> Unit) {
+    fun reportAndSkip(tripId: String, stopId: String, reason: String, onDone: () -> Unit) {
         viewModelScope.launch {
-            tripRepository.queueSkipStop(tripId, stopId)
+            tripRepository.queueSkipStop(tripId, stopId, reason)
             onDone()
         }
     }

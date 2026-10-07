@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
+import { cookies } from 'next/headers';
 import { Providers } from './providers';
+import { isLang, LANG_COOKIE } from '@/lib/i18n/langs';
 
 // Inter and Bricolage Grotesque (SIL OFL 1.1), variable weight, latin
 // subset, kept in the repo: builds and dev servers need no network, and
@@ -29,10 +31,14 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // The person's language, from the cookie the language switch sets, so the
+  // first paint is already in it.
+  const chosen = cookies().get(LANG_COOKIE)?.value;
+  const lang = isLang(chosen) ? chosen : 'en';
   return (
-    <html lang="en-IN" className={`${inter.variable} ${display.variable}`}>
+    <html lang={`${lang}-IN`} className={`${inter.variable} ${display.variable}`}>
       <body>
-        <Providers>{children}</Providers>
+        <Providers lang={lang}>{children}</Providers>
       </body>
     </html>
   );

@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
@@ -90,18 +92,18 @@ fun SignaturePad(
         }
 
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SecondaryAction("Clear", onClick = { strokes.clear() }, modifier = Modifier.weight(1f))
+            SecondaryAction(stringResource(R.string.clear), onClick = { strokes.clear() }, modifier = Modifier.weight(0.7f))
             SecondaryAction(
-                "Use signature",
+                stringResource(R.string.use_signature),
                 onClick = { onSigned(renderToBase64Png(strokes, widthPx = 800, heightPx = 360)) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1.3f),
                 glyph = Glyph.Pen,
                 enabled = strokes.isNotEmpty(),
             )
         }
         if (strokes.isEmpty()) {
             Text(
-                "Ask the recipient to sign with a finger.",
+                stringResource(R.string.sign_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = Fresh.inkFaint,
                 modifier = Modifier.padding(top = 8.dp),

@@ -15,6 +15,18 @@ interface ApiService {
     @POST("auth/login")
     suspend fun login(@Body body: LoginRequest): TokenPairResponse
 
+    @POST("auth/pin-login")
+    suspend fun pinLogin(@Body body: PinLoginRequest): TokenPairResponse
+
+    @POST("auth/pin")
+    suspend fun setPin(@Body body: SetPinRequest): SetPinResponse
+
+    @GET("users/me/preferences")
+    suspend fun getPreferences(): PreferencesBody
+
+    @PATCH("users/me/preferences")
+    suspend fun setPreferences(@Body body: PreferencesBody): PreferencesBody
+
     @POST("auth/refresh")
     suspend fun refresh(@Body body: RefreshRequest): TokenPairResponse
 
@@ -36,13 +48,28 @@ interface ApiService {
     @POST("logistics/trips/{tripId}/start")
     suspend fun startTrip(@Path("tripId") tripId: String, @Body body: VersionRequest): TripResponse
 
+    /** The driver submits the trip: completed, awaiting the owner's reconciliation. */
     @POST("logistics/trips/{tripId}/complete")
-    suspend fun completeTrip(@Path("tripId") tripId: String, @Body body: VersionRequest): TripResponse
+    suspend fun completeTrip(@Path("tripId") tripId: String, @Body body: SubmitTripRequest): TripResponse
+
+    @POST("logistics/trips/{tripId}/deposits")
+    suspend fun recordDeposit(
+        @Path("tripId") tripId: String,
+        @Body body: RecordDepositRequest,
+        @Header("Idempotency-Key") idempotencyKey: String,
+    ): TripCashDepositResponse
+
+    @GET("logistics/trips/{tripId}")
+    suspend fun getTrip(@Path("tripId") tripId: String): TripResponse
+
+    @GET("logistics/trips/{tripId}/handover")
+    suspend fun getHandover(@Path("tripId") tripId: String): HandoverResponse
 
     @POST("logistics/trips/{tripId}/stops/{stopId}/complete-pickup")
     suspend fun completePickupStop(
         @Path("tripId") tripId: String,
         @Path("stopId") stopId: String,
+        @Body body: CompletePickupRequest,
     ): TripStopResponse
 
     @POST("logistics/trips/{tripId}/stops/{stopId}/complete-delivery")
@@ -53,7 +80,21 @@ interface ApiService {
     ): TripStopResponse
 
     @POST("logistics/trips/{tripId}/stops/{stopId}/skip")
-    suspend fun skipStop(@Path("tripId") tripId: String, @Path("stopId") stopId: String): TripStopResponse
+    suspend fun skipStop(
+        @Path("tripId") tripId: String,
+        @Path("stopId") stopId: String,
+        @Body body: SkipStopRequest,
+    ): TripStopResponse
+
+    @GET("logistics/trips/{tripId}/authority")
+    suspend fun getAuthority(@Path("tripId") tripId: String): AuthorityResponse
+
+    @POST("logistics/trips/{tripId}/problem")
+    suspend fun reportProblem(
+        @Path("tripId") tripId: String,
+        @Body body: ReportProblemRequest,
+        @Header("Idempotency-Key") idempotencyKey: String,
+    ): ReportProblemResponse
 
     // ---- Photos ----
 

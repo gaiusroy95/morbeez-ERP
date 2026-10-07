@@ -7,7 +7,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
-import { OrdersService } from './orders.service';
+import { OrdersService, PriceSuggestion } from './orders.service';
+import { PriceSuggestionsQueryDto } from './dto/price-suggestions-query.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VersionDto } from './dto/version.dto';
 import { OrderRecord } from './entities/customer-order.entity';
@@ -26,6 +27,13 @@ export class OrdersController {
     @Query() query: ListOrdersQueryDto,
   ): Promise<PaginatedResult<OrderRecord>> {
     return this.ordersService.listOrders(user.tenantId, query.status, query.page ?? 1, query.pageSize ?? 25);
+  }
+
+  /** The suggested starting price for each product on a new order for this customer. */
+  @Get('price-suggestions')
+  @RequirePermissions('orders:read')
+  priceSuggestions(@CurrentUser() user: AuthContext, @Query() query: PriceSuggestionsQueryDto): Promise<PriceSuggestion[]> {
+    return this.ordersService.priceSuggestions(user.tenantId, query.customerId, query.productIds);
   }
 
   @Get(':id')

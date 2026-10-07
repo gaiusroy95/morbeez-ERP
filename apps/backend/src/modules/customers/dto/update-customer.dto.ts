@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
+import { LANGUAGES } from '../../../common/languages';
 
 // Deliberately no credit fields — limit, payment days, finance charges,
 // and credit hold change only through POST .../credit-terms, under its own
@@ -26,4 +27,9 @@ export class UpdateCustomerDto {
   @ValidateNested()
   @Type(() => CustomerContactDto)
   contact?: CustomerContactDto;
+
+  @ApiPropertyOptional({ enum: LANGUAGES, description: "The customer's language for statements, reminders and WhatsApp; tax invoices stay English" })
+  @IsOptional()
+  @IsIn(LANGUAGES)
+  preferredLanguage?: string;
 }

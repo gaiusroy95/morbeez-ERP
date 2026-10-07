@@ -18,9 +18,11 @@ const customer: CustomerRecord = {
   tenantId: 'tenant-1',
   name: 'Hotel Sagar',
   contact: {},
+  preferredLanguage: 'en',
   creditLimit: '50000.00',
   paymentTermsDays: 7,
   financeChargeRateMonthly: '2.00',
+  financeChargeRateAnnual: '18.25',
   financeChargeGraceDays: 5,
   creditHold: false,
   creditHoldReason: null,
@@ -84,6 +86,7 @@ describe('ReceivablesService', () => {
             findPaymentWithClient: jest.fn().mockResolvedValue({ id: 'pay-1', customerId: 'cust-1', customerName: 'Hotel Sagar', reversedAt: null }),
             customerBalanceWithClient: jest.fn(),
             financeChargeCandidatesWithClient: jest.fn().mockResolvedValue([]),
+            openDisputedByInvoiceWithClient: jest.fn().mockResolvedValue(new Map()),
             insertFinanceChargeWithClient: jest.fn().mockResolvedValue('fc-1'),
             findChargesWithClient: jest.fn().mockResolvedValue([]),
           },
@@ -371,7 +374,7 @@ describe('ReceivablesService', () => {
       customerId: 'cust-1',
       dueDate: '2026-09-01',
       outstanding: '10000.00',
-      rateMonthly: '2.00',
+      rateAnnual: '18.25',
       graceDays: 5,
       lastPeriodEnd: null,
     };
@@ -384,20 +387,20 @@ describe('ReceivablesService', () => {
 
       await service.runFinanceCharges('tenant-1', 'user-1', '2026-09-21');
 
-      // grace ends 2026-09-06; 15 days to 2026-09-21; 10000 × 2% × 15/30 = 100.00
+      // grace ends 2026-09-06; 15 days to 2026-09-21; 10000 × 18.25% × 15 ÷ 365 = 75.00
       expect(repo.insertFinanceChargeWithClient).toHaveBeenCalledWith(
         fakeClient,
-        expect.objectContaining({ periodStart: '2026-09-06', periodEnd: '2026-09-21', days: 15, amount: '100.00', principal: '10000.00' }),
+        expect.objectContaining({ periodStart: '2026-09-06', periodEnd: '2026-09-21', days: 15, amount: '75.00', principal: '10000.00', rate: '18.25' }),
       );
       expect(repo.insertInvoiceWithClient).toHaveBeenCalledWith(
         fakeClient,
-        expect.objectContaining({ kind: 'finance_charge', sourceInvoiceId: 'inv-a', orderId: null, amount: '100.00' }),
+        expect.objectContaining({ kind: 'finance_charge', sourceInvoiceId: 'inv-a', orderId: null, amount: '75.00' }),
       );
       expect(postings()[0]).toMatchObject({
         entryType: 'finance_charge_accrued',
         lines: [
-          { account: 'accounts_receivable', party: { type: 'customer', id: 'cust-1' }, debit: '100.00' },
-          { account: 'finance_charge_income', credit: '100.00' },
+          { account: 'accounts_receivable', party: { type: 'customer', id: 'cust-1' }, debit: '75.00' },
+          { account: 'finance_charge_income', credit: '75.00' },
         ],
       });
     });
@@ -410,7 +413,7 @@ describe('ReceivablesService', () => {
 
       expect(repo.insertFinanceChargeWithClient).toHaveBeenCalledWith(
         fakeClient,
-        expect.objectContaining({ periodStart: '2026-09-21', days: 3, amount: '20.00' }),
+        expect.objectContaining({ periodStart: '2026-09-21', days: 3, amount: '15.00' }),
       );
     });
 
@@ -420,8 +423,29 @@ describe('ReceivablesService', () => {
 
       const result = await service.runFinanceCharges('tenant-1', 'user-1', '2026-09-08');
 
-      // 40 × 2% × 2/30 = 0.05 < 1.00
+      // 40 × 18.25% × 2 ÷ 365 = 0.04 < 1.00
       expect(result.deferredBelowMinimum).toBe(1);
+      expect(repo.insertFinanceChargeWithClient).not.toHaveBeenCalled();
+    });
+
+    it('a dispute pauses the charge on the disputed amount only', async () => {
+      repo.financeChargeCandidatesWithClient.mockResolvedValue([candidate]);
+      repo.openInvoicesForCustomerWithClient.mockResolvedValue([openA]);
+      repo.openDisputedByInvoiceWithClient.mockResolvedValue(new Map([['inv-a', '4000.00']]));
+
+      await service.runFinanceCharges('tenant-1', 'user-1', '2026-09-21');
+
+      // (10000 − 4000) × 18.25% × 15 ÷ 365 = 45.00
+      expect(repo.insertFinanceChargeWithClient).toHaveBeenCalledWith(fakeClient, expect.objectContaining({ principal: '6000.00', amount: '45.00' }));
+    });
+
+    it('charges nothing while the whole balance is disputed', async () => {
+      repo.financeChargeCandidatesWithClient.mockResolvedValue([candidate]);
+      repo.openInvoicesForCustomerWithClient.mockResolvedValue([openA]);
+      repo.openDisputedByInvoiceWithClient.mockResolvedValue(new Map([['inv-a', '10000.00']]));
+
+      const result = await service.runFinanceCharges('tenant-1', 'user-1', '2026-09-21');
+      expect(result.charged).toBe(0);
       expect(repo.insertFinanceChargeWithClient).not.toHaveBeenCalled();
     });
 

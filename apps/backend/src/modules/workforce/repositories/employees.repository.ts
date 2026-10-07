@@ -13,6 +13,8 @@ interface EmployeeRow {
   role_type: EmployeeRoleType;
   employment_terms: EmploymentTerms;
   status: 'active' | 'archived';
+  delegation_level: number | null;
+  standing_delegation: boolean;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -28,6 +30,8 @@ function toRecord(row: EmployeeRow): EmployeeRecord {
     roleType: row.role_type,
     employmentTerms: row.employment_terms ?? {},
     status: row.status,
+    delegationLevel: row.delegation_level,
+    standingDelegation: row.standing_delegation,
     version: row.version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -109,6 +113,8 @@ export class EmployeesRepository {
       roleType: string;
       userId?: string;
       employmentTerms: EmploymentTerms;
+      delegationLevel?: number | null;
+      standingDelegation?: boolean;
     },
   ): Promise<EmployeeRecord> {
     if (fields.userId) {
@@ -116,8 +122,8 @@ export class EmployeesRepository {
     }
     const result = await client.query<EmployeeRow>(
       `INSERT INTO trading_partners.employee
-         (tenant_id, user_id, name, role_type, employment_terms, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+         (tenant_id, user_id, name, role_type, employment_terms, created_by, delegation_level, standing_delegation)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         tenantId,
@@ -126,6 +132,8 @@ export class EmployeesRepository {
         fields.roleType,
         JSON.stringify(fields.employmentTerms),
         createdBy,
+        fields.delegationLevel ?? null,
+        fields.standingDelegation ?? false,
       ],
     );
     return toRecord(result.rows[0]);
@@ -158,6 +166,22 @@ export class EmployeesRepository {
       throw new OptimisticLockException('Employee', id);
     }
     return toRecord(result.rows[0]);
+  }
+
+  /** The owner's delegation settings for one person (Owner Independence, eligibility). */
+  async setDelegationWithClient(
+    client: PoolClient,
+    id: string,
+    fields: { delegationLevel: number | null; standingDelegation: boolean },
+  ): Promise<EmployeeRecord | null> {
+    const result = await client.query<EmployeeRow>(
+      `UPDATE trading_partners.employee
+          SET delegation_level = $2, standing_delegation = $3, version = version + 1, updated_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [id, fields.delegationLevel, fields.standingDelegation],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
   async setStatusWithClient(

@@ -14,3 +14,4 @@ export * from './fleet';
 export * from './crates';
 export * from './spot-sales';
 export * from './ai';
+export * from './delegation';

@@ -12,6 +12,7 @@ interface CustomerCollectionRow {
   notes: string | null;
   collected_by: string;
   collected_at: Date;
+  into_driver_float: boolean;
   client_ref: string | null;
 }
 
@@ -26,6 +27,7 @@ function toRecord(row: CustomerCollectionRow): CustomerCollectionRecord {
     notes: row.notes,
     collectedBy: row.collected_by,
     collectedAt: row.collected_at,
+    intoDriverFloat: row.into_driver_float,
     clientRef: row.client_ref,
   };
 }
@@ -51,13 +53,14 @@ export class CustomerCollectionsRepository {
       method: CollectionMethod;
       notes: string | null;
       clientRef: string | null;
+      intoDriverFloat: boolean;
     },
   ): Promise<CustomerCollectionRecord> {
     const result = await client.query<CustomerCollectionRow>(
-      `INSERT INTO money.customer_collection (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by, client_ref)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO money.customer_collection (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by, client_ref, into_driver_float)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [tenantId, fields.tripStopId, fields.orderId, fields.amount, fields.method, fields.notes, collectedBy, fields.clientRef],
+      [tenantId, fields.tripStopId, fields.orderId, fields.amount, fields.method, fields.notes, collectedBy, fields.clientRef, fields.intoDriverFloat],
     );
     return toRecord(result.rows[0]);
   }

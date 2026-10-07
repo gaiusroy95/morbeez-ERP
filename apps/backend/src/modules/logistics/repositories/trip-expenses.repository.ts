@@ -11,6 +11,7 @@ interface TripExpenseRow {
   recorded_by: string;
   recorded_at: Date;
   client_ref: string | null;
+  needs_approval: boolean;
 }
 
 function toRecord(row: TripExpenseRow): TripExpenseRecord {
@@ -23,6 +24,7 @@ function toRecord(row: TripExpenseRow): TripExpenseRecord {
     recordedBy: row.recorded_by,
     recordedAt: row.recorded_at,
     clientRef: row.client_ref,
+    needsApproval: row.needs_approval,
   };
 }
 
@@ -39,13 +41,13 @@ export class TripExpensesRepository {
   async createWithClient(
     client: PoolClient,
     recordedBy: string,
-    fields: { tripId: string; category: ExpenseCategory; amount: number; notes: string | null; clientRef: string | null },
+    fields: { tripId: string; category: ExpenseCategory; amount: number; notes: string | null; clientRef: string | null; needsApproval?: boolean },
   ): Promise<TripExpenseRecord> {
     const result = await client.query<TripExpenseRow>(
-      `INSERT INTO fulfilment.trip_expense (trip_id, category, amount, notes, recorded_by, client_ref)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO fulfilment.trip_expense (trip_id, category, amount, notes, recorded_by, client_ref, needs_approval)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [fields.tripId, fields.category, fields.amount, fields.notes, recordedBy, fields.clientRef],
+      [fields.tripId, fields.category, fields.amount, fields.notes, recordedBy, fields.clientRef, fields.needsApproval ?? false],
     );
     return toRecord(result.rows[0]);
   }

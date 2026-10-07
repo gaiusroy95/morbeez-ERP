@@ -18,6 +18,8 @@ import type {
   TripCashReport,
   TripExpenseRecord,
   TripReconciliationRecord,
+  TripCashDepositRecord,
+  TripReview,
   TripRecord,
   TripStatus,
   TripStopRecord,
@@ -119,9 +121,19 @@ export function useTripDetail(id: string | null) {
       const expenses = await apiGet<TripExpenseRecord[]>(`logistics/trips/${id}/expenses`);
       // null until the trip has been reconciled.
       const reconciliation = await apiGet<TripReconciliationRecord | null>(`logistics/trips/${id}/reconciliation`);
-      return { trip, stops, expenses, reconciliation };
+      const deposits = await apiGet<TripCashDepositRecord[]>(`logistics/trips/${id}/deposits`);
+      return { trip, stops, expenses, reconciliation, deposits };
     },
     enabled: id !== null,
+  });
+}
+
+/** The owner's pre-closure check of a submitted trip: handover, checklist, load. */
+export function useTripReview(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['logistics', 'trip', id, 'review'],
+    queryFn: () => apiGet<TripReview>(`logistics/trips/${id}/review`),
+    enabled: id !== null && enabled,
   });
 }
 

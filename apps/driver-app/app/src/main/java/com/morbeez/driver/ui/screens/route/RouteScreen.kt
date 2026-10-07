@@ -1,5 +1,8 @@
 package com.morbeez.driver.ui.screens.route
 
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,11 +27,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +50,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.ui.components.CarbonHeader
+import com.morbeez.driver.ui.components.ChoiceTiles
+import com.morbeez.driver.ui.components.LanguagePill
+import com.morbeez.driver.ui.components.FreshTextField
 import com.morbeez.driver.ui.components.Eyebrow
 import com.morbeez.driver.ui.components.Glyph
 import com.morbeez.driver.ui.components.GlyphIcon
@@ -71,15 +82,18 @@ fun RouteScreen(
     val stops = state.stops
     val done = stops.count { it.status != "pending" }
     val next = stops.firstOrNull { it.status == "pending" }
+    var reporting by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(Fresh.bg)) {
         CarbonHeader(
-            title = "Today's route",
-            eyebrow = trip?.plannedDate ?: "Field execution",
+            title = stringResource(R.string.route_title),
+            eyebrow = trip?.plannedDate ?: stringResource(R.string.field_execution),
             trailing = {
+                LanguagePill(onDark = true)
+                Spacer(Modifier.width(8.dp))
                 RoundIconButton(
                     glyph = Glyph.Sync,
-                    description = if (state.isSyncing) "Syncing" else "Sync now",
+                    description = stringResource(if (state.isSyncing) R.string.syncing else R.string.sync_now),
                     onClick = viewModel::requestSync,
                     enabled = !state.isSyncing,
                 )
@@ -93,14 +107,25 @@ fun RouteScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Pill(tripStatusLabel(trip.status), Tone.Lime)
-                    if (state.isSyncing) Pill("Syncing…", Tone.Neutral, onDark = true)
+                    Pill(stringResource(tripStatusLabel(trip.status)), Tone.Lime)
+                    authorityLabel(trip.authorityLevel)?.let { (text, waiting) ->
+                        Pill(stringResource(text), if (waiting) Tone.Attention else Tone.Neutral, onDark = !waiting)
+                    }
+                    if (state.isSyncing) Pill(stringResource(R.string.syncing), Tone.Neutral, onDark = true)
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 18.dp)) {
-                    Stat("Stops done", "$done of ${stops.size}", onDark = true, modifier = Modifier.weight(1f))
-                    Stat("Advance", "₹${trip.advanceAmount}", onDark = true, modifier = Modifier.weight(1f))
+                    Stat(stringResource(R.string.stops_done), stringResource(R.string.n_of_m, done, stops.size), onDark = true, modifier = Modifier.weight(1f))
+                    Stat(stringResource(R.string.advance), stringResource(R.string.rupees, trip.advanceAmount), onDark = true, modifier = Modifier.weight(1f))
                 }
                 ProgressTrack(if (stops.isEmpty()) 0f else done.toFloat() / stops.size)
+                if (trip.status == "in_progress" && !trip.reviewNote.isNullOrBlank()) {
+                    Text(
+                        stringResource(R.string.returned_by_owner, trip.reviewNote.orEmpty()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Fresh.accent,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
             }
         }
 
@@ -114,7 +139,7 @@ fun RouteScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 12.dp),
         ) {
             item {
-                Eyebrow("Route · ${stops.size} stops", modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+                Eyebrow(pluralStringResource(R.plurals.route_stops, stops.size, stops.size), modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             }
             itemsIndexed(stops, key = { _, s -> s.id }) { index, stop ->
                 StopRow(
@@ -131,10 +156,14 @@ fun RouteScreen(
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
                 if (next != null) {
                     PrimaryAction(
-                        text = "Next: ${next.counterpartyName}",
+                        text = stringResource(R.string.next_stop, next.counterpartyName),
                         onClick = { onOpenStop(trip.id, next.id) },
                         glyph = Glyph.Arrow,
                     )
+                    Spacer(Modifier.height(10.dp))
+                } else if (trip.status == "in_progress") {
+                    // Every stop done: hand over the cash and submit.
+                    PrimaryAction(text = stringResource(R.string.handover_submit), onClick = { onOpenExpenses(trip.id) }, glyph = Glyph.Rupee)
                     Spacer(Modifier.height(10.dp))
                 }
                 Row(
@@ -148,11 +177,84 @@ fun RouteScreen(
                 ) {
                     GlyphIcon(Glyph.Fuel, Fresh.ink, size = 18.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text("Trip expenses & summary", style = MaterialTheme.typography.labelLarge, color = Fresh.ink)
+                    Text(stringResource(R.string.trip_summary_link), style = MaterialTheme.typography.labelLarge, color = Fresh.ink)
+                }
+                if (trip.status == "in_progress" || trip.status == "planned") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(role = Role.Button) { reporting = true }
+                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        GlyphIcon(Glyph.Warning, Fresh.critical, size = 18.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.report_problem), style = MaterialTheme.typography.labelLarge, color = Fresh.critical)
+                    }
                 }
             }
         }
     }
+
+    if (reporting) {
+        ReportProblemDialog(
+            onSend = { kind, note ->
+                viewModel.reportProblem(kind, note)
+                reporting = false
+            },
+            onDismiss = { reporting = false },
+        )
+    }
+}
+
+/** What the owner has authorized on this trip, as a pill; null when not known yet. */
+private fun authorityLabel(level: Int?): Pair<Int, Boolean>? = when (level) {
+    null -> null
+    0 -> R.string.authority_waiting to true
+    1 -> R.string.authority_1 to false
+    2 -> R.string.authority_2 to false
+    3 -> R.string.authority_3 to false
+    else -> R.string.authority_4 to false
+}
+
+private val PROBLEM_KINDS = listOf(
+    "driver_unable_to_continue" to R.string.problem_cant_continue,
+    "trip_blocked" to R.string.problem_blocked,
+    "operational_problem" to R.string.problem_other,
+    "security" to R.string.problem_security,
+)
+
+/** The driver tells the owner something that can't wait (client Q&A, E: Q19). */
+@Composable
+private fun ReportProblemDialog(onSend: (kind: String, note: String) -> Unit, onDismiss: () -> Unit) {
+    var kind by remember { mutableStateOf(PROBLEM_KINDS.first().first) }
+    var note by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Fresh.surface,
+        title = { Text(stringResource(R.string.problem_title), style = MaterialTheme.typography.titleLarge, color = Fresh.ink) },
+        text = {
+            Column {
+                ChoiceTiles(PROBLEM_KINDS.map { (k, label) -> k to stringResource(label) }, kind) { kind = it }
+                Spacer(Modifier.height(14.dp))
+                FreshTextField(value = note, onValueChange = { note = it }, label = stringResource(R.string.what_happened), singleLine = false)
+                Text(
+                    stringResource(R.string.problem_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Fresh.inkFaint,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSend(kind, note) }, enabled = note.trim().length >= 3) {
+                Text(stringResource(R.string.send), color = if (note.trim().length >= 3) Fresh.critical else Fresh.inkFaint)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = Fresh.inkMuted) } },
+    )
 }
 
 @Composable
@@ -237,15 +339,15 @@ private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isL
                     )
                     Spacer(Modifier.width(8.dp))
                     Eyebrow(
-                        if (stop.stopType == "pickup") "Pickup" else "Delivery",
+                        stringResource(if (stop.stopType == "pickup") R.string.kind_pickup else R.string.kind_delivery),
                         color = if (isNext) Fresh.onCarbonMuted else Fresh.inkMuted,
                         modifier = Modifier.weight(1f),
                     )
                     when {
-                        stop.pendingSync -> Pill("Saving…", Tone.Attention)
-                        isNext -> Pill("Next", Tone.Lime)
-                        stop.status == "completed" -> Pill("Done", Tone.Good)
-                        stop.status == "skipped" -> Pill("Skipped", Tone.Attention)
+                        stop.pendingSync -> Pill(stringResource(R.string.saving), Tone.Attention)
+                        isNext -> Pill(stringResource(R.string.pill_next), Tone.Lime)
+                        stop.status == "completed" -> Pill(stringResource(R.string.pill_done), Tone.Good)
+                        stop.status == "skipped" -> Pill(stringResource(R.string.pill_skipped), Tone.Attention)
                     }
                 }
                 Text(
@@ -262,6 +364,15 @@ private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isL
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                // What to collect here (requirement: the driver knows "what amount to collect").
+                if (stop.stopType == "delivery" && stop.collectTerms != null && !finished) {
+                    Text(
+                        if (stop.collectTerms == "cash") stringResource(R.string.collect_amount, stop.collectAmount.orEmpty()) else stringResource(R.string.on_credit),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isNext) Fresh.accent else Fresh.primary,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
         }
     }
@@ -278,13 +389,13 @@ private fun EmptyRoute(syncing: Boolean) {
             GlyphIcon(Glyph.Truck, Fresh.inkMuted, size = 34.dp)
         }
         Text(
-            "No trip yet",
+            stringResource(R.string.no_trip),
             style = MaterialTheme.typography.headlineSmall,
             color = Fresh.ink,
             modifier = Modifier.padding(top = 18.dp),
         )
         Text(
-            if (syncing) "Checking for your route…" else "When dispatch plans your route it appears here. Tap sync to check now.",
+            stringResource(if (syncing) R.string.checking_route else R.string.no_trip_hint),
             style = MaterialTheme.typography.bodyMedium,
             color = Fresh.inkMuted,
             modifier = Modifier.padding(top = 6.dp),
@@ -292,11 +403,12 @@ private fun EmptyRoute(syncing: Boolean) {
     }
 }
 
-private fun tripStatusLabel(status: String) = when (status) {
-    "planned" -> "Planned"
-    "in_progress" -> "On the road"
-    "completed" -> "Completed"
-    "reconciled" -> "Reconciled"
-    "cancelled" -> "Cancelled"
-    else -> status
+private fun tripStatusLabel(status: String): Int = when (status) {
+    "planned" -> R.string.status_planned
+    "in_progress" -> R.string.status_in_progress
+    "completed" -> R.string.status_completed
+    "on_hold" -> R.string.status_on_hold
+    "reconciled" -> R.string.status_reconciled
+    "cancelled" -> R.string.status_cancelled
+    else -> R.string.status_planned
 }

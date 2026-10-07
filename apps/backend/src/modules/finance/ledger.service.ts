@@ -85,6 +85,29 @@ export class LedgerService {
     });
   }
 
+  /** Cash the driver paid into the bank on the road: it leaves the float for the bank. */
+  async postTripCashDepositWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    deposit: { id: string; tripId: string; amount: string; bankAccount: string; reference: string; occurredAt: Date },
+  ): Promise<void> {
+    const amount = normalizeMoney(deposit.amount);
+    await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'trip_cash_deposited',
+      sourceType: 'trip_cash_deposit',
+      sourceId: deposit.id,
+      occurredAt: deposit.occurredAt,
+      memo: `Driver deposited trip cash into ${deposit.bankAccount} (ref ${deposit.reference})`,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'bank', debit: amount },
+        { account: 'cash_with_drivers', credit: amount },
+      ],
+    });
+  }
+
   /**
    * Settles the float: cash handed back returns to cash on hand, and
    * whatever the float still held beyond that is a shortage (or, if the
@@ -100,14 +123,19 @@ export class LedgerService {
       id: string;
       tripId: string;
       advanceAmount: string;
-      // Cash that came into the float on the road — spot sales paid in cash.
+      // Cash that came into the float on the road — spot sales and delivery collections paid in cash.
       cashIn?: string;
       totalExpenses: string;
+      // Cash that already left the float for the bank (its own entries, as deposited).
+      cashDeposited?: string;
       cashReturned: string;
       occurredAt: Date;
     },
   ): Promise<void> {
-    const float = subtractMoney(sumMoney([reconciliation.advanceAmount, reconciliation.cashIn ?? '0']), reconciliation.totalExpenses);
+    const float = subtractMoney(
+      sumMoney([reconciliation.advanceAmount, reconciliation.cashIn ?? '0']),
+      sumMoney([reconciliation.totalExpenses, reconciliation.cashDeposited ?? '0']),
+    );
     const returned = normalizeMoney(reconciliation.cashReturned);
     const variance = subtractMoney(float, returned); // > 0: short; < 0: over
     const lines: LedgerLineInput[] = [{ account: 'cash_on_hand', debit: returned }];

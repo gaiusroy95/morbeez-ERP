@@ -25,4 +25,10 @@ interface TripStopDao {
 
     @Query("DELETE FROM trip_stops WHERE tripId = :tripId")
     suspend fun clearForTrip(tripId: String)
+
+    @Query("DELETE FROM trip_stops WHERE tripId != :keepTripId")
+    suspend fun deleteAllExceptTrip(keepTripId: String)
+
+    @Query("DELETE FROM trip_stops")
+    suspend fun clear()
 }

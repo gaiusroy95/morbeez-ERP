@@ -14,4 +14,6 @@ export interface TripExpenseRecord {
   recordedAt: Date;
   /** The Idempotency-Key it was recorded under, when the client sent one. */
   clientRef: string | null;
+  /** Recorded by a driver whose authority doesn't cover expenses (below level 4): the owner approves it at closure. */
+  needsApproval: boolean;
 }

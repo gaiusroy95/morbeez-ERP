@@ -23,7 +23,7 @@ import { idempotencyKey } from '../../common/idempotency';
 import { AuthContext } from '../../common/types/auth-context';
 import { ListTripsQueryDto } from './dto/list-trips-query.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
-import { LogisticsService, UploadedPhoto } from './logistics.service';
+import { LogisticsService, TripReview, UploadedPhoto } from './logistics.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
@@ -40,6 +40,16 @@ import { TripExpenseRecord } from './entities/trip-expense.entity';
 import { TripReconciliationRecord } from './entities/trip-reconciliation.entity';
 import { TripStopPhotoRecord } from './entities/trip-stop-photo.entity';
 import { CustomerCollectionRecord } from './entities/customer-collection.entity';
+import { TripCashDepositRecord } from './entities/trip-cash-deposit.entity';
+import { SubmitTripDto } from './dto/submit-trip.dto';
+import { RecordDepositDto } from './dto/record-deposit.dto';
+import { TripDecisionDto } from './dto/trip-decision.dto';
+import { ReviewTripQueryDto } from './dto/review-trip-query.dto';
+import { HandoverSummary } from './trip-closure';
+import { SkipStopDto } from './dto/skip-stop.dto';
+import { CompletePickupStopDto } from './dto/complete-pickup-stop.dto';
+import { ReportProblemDto } from './dto/report-problem.dto';
+import { Authority } from './delegation';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
@@ -97,12 +107,13 @@ export class LogisticsController {
     return this.logisticsService.startTrip(user.tenantId, user.userId, isDispatcher(user), id, dto);
   }
 
+  /** The driver submits the trip: completed, awaiting the owner's reconciliation. */
   @Post(':id/complete')
   @RequirePermissions('logistics:write')
   completeTrip(
     @CurrentUser() user: AuthContext,
     @Param('id') id: string,
-    @Body() dto: VersionDto,
+    @Body() dto: SubmitTripDto,
   ): Promise<TripRecord> {
     return this.logisticsService.completeTrip(user.tenantId, user.userId, isDispatcher(user), id, dto);
   }
@@ -161,8 +172,9 @@ export class LogisticsController {
     @CurrentUser() user: AuthContext,
     @Param('id') tripId: string,
     @Param('stopId') stopId: string,
+    @Body() dto: CompletePickupStopDto,
   ): Promise<TripStopRecord> {
-    return this.logisticsService.completePickupStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId);
+    return this.logisticsService.completePickupStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto?.weights ?? []);
   }
 
   @Post(':id/stops/:stopId/complete-delivery')
@@ -189,8 +201,9 @@ export class LogisticsController {
     @CurrentUser() user: AuthContext,
     @Param('id') tripId: string,
     @Param('stopId') stopId: string,
+    @Body() dto: SkipStopDto,
   ): Promise<TripStopRecord> {
-    return this.logisticsService.skipStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId);
+    return this.logisticsService.skipStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto?.reason ?? null);
   }
 
   // ---- Photos ----
@@ -281,7 +294,74 @@ export class LogisticsController {
     );
   }
 
-  // ---- Reconciliation ----
+  // ---- Handover ----
+
+  @Get(':id/deposits')
+  @RequirePermissions('logistics:read')
+  listDeposits(@CurrentUser() user: AuthContext, @Param('id') tripId: string): Promise<TripCashDepositRecord[]> {
+    return this.logisticsService.listDeposits(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  @Post(':id/deposits')
+  @RequirePermissions('logistics:write')
+  recordDeposit(
+    @CurrentUser() user: AuthContext,
+    @Param('id') tripId: string,
+    @Body() dto: RecordDepositDto,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<TripCashDepositRecord> {
+    return this.logisticsService.recordDeposit(user.tenantId, user.userId, isDispatcher(user), tripId, dto, idempotencyKey(key));
+  }
+
+  /** What the driver should hand over: the driver's own trip, or any trip for the owner. */
+  @Get(':id/handover')
+  @RequirePermissions('logistics:read')
+  getHandover(@CurrentUser() user: AuthContext, @Param('id') tripId: string): Promise<HandoverSummary> {
+    return this.logisticsService.getHandover(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** What this trip's driver may do on it right now (delegation level and where it comes from). */
+  @Get(':id/authority')
+  @RequirePermissions('logistics:read')
+  getAuthority(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<Authority> {
+    return this.logisticsService.getAuthority(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** The driver tells the owner something that can't wait — an immediate alert. */
+  @Post(':id/problem')
+  @RequirePermissions('logistics:write')
+  reportProblem(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) tripId: string,
+    @Body() dto: ReportProblemDto,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<{ reported: true }> {
+    return this.logisticsService.reportProblem(user.tenantId, user.userId, isDispatcher(user), tripId, dto, idempotencyKey(key));
+  }
+
+  // ---- Reconciliation (the owner) ----
+
+  @Get(':id/review')
+  @RequirePermissions('logistics:reconcile')
+  reviewTrip(
+    @CurrentUser() user: AuthContext,
+    @Param('id') tripId: string,
+    @Query() query: ReviewTripQueryDto,
+  ): Promise<TripReview> {
+    return this.logisticsService.reviewTrip(user.tenantId, tripId, query.cashReceived ?? null);
+  }
+
+  @Post(':id/hold')
+  @RequirePermissions('logistics:reconcile')
+  holdTrip(@CurrentUser() user: AuthContext, @Param('id') tripId: string, @Body() dto: TripDecisionDto): Promise<TripRecord> {
+    return this.logisticsService.holdTrip(user.tenantId, user.userId, tripId, dto);
+  }
+
+  @Post(':id/return')
+  @RequirePermissions('logistics:reconcile')
+  returnToDriver(@CurrentUser() user: AuthContext, @Param('id') tripId: string, @Body() dto: TripDecisionDto): Promise<TripRecord> {
+    return this.logisticsService.returnToDriver(user.tenantId, user.userId, tripId, dto);
+  }
 
   @Get(':id/reconciliation')
   @RequirePermissions('logistics:read')

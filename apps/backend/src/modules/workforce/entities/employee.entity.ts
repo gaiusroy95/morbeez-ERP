@@ -17,6 +17,10 @@ export interface EmployeeRecord {
   roleType: EmployeeRoleType;
   employmentTerms: EmploymentTerms;
   status: EmployeeStatus;
+  /** The highest delegation level the owner has made this person eligible for (1–4); null: not eligible. */
+  delegationLevel: number | null;
+  /** Eligibility is a standing permission: authorized at that level on every trip they drive, no per-trip approval. */
+  standingDelegation: boolean;
   version: number;
   createdAt: Date;
   updatedAt: Date;

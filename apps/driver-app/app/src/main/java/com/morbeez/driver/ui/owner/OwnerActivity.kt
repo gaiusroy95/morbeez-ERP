@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.owner
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -43,6 +45,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.morbeez.driver.BuildConfig
+import com.morbeez.driver.data.i18n.AppLanguage
 import com.morbeez.driver.ui.components.Glyph
 import com.morbeez.driver.ui.components.GlyphIcon
 import com.morbeez.driver.ui.components.PrimaryAction
@@ -65,10 +68,20 @@ class OwnerActivity : ComponentActivity() {
 
     private var webView: WebView? = null
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         val home = Uri.parse(BuildConfig.OWNER_WEB_URL)
+        // The owner web app reads its language from this cookie: owner mode
+        // opens in the language this phone already speaks.
+        CookieManager.getInstance().setCookie(
+            "${home.scheme}://${home.authority}",
+            "mz_lang=${AppLanguage.current(this)}; Path=/; Max-Age=31536000; SameSite=Lax",
+        )
         setContent {
             MorbeezTheme(darkBars = false) {
                 OwnerScreen(home = home, onCreated = { webView = it }, onExit = { finish() })
@@ -151,18 +164,18 @@ private fun Unreachable(onRetry: () -> Unit) {
             GlyphIcon(Glyph.Tower, Fresh.accent, size = 32.dp)
         }
         Text(
-            "Can't reach Morbeez",
+            stringResource(R.string.cant_reach),
             style = MaterialTheme.typography.headlineSmall,
             color = Fresh.ink,
             modifier = Modifier.padding(top = 20.dp),
         )
         Text(
-            "Check the phone's internet connection, then try again.",
+            stringResource(R.string.check_internet),
             style = MaterialTheme.typography.bodyMedium,
             color = Fresh.inkMuted,
             modifier = Modifier.padding(top = 6.dp),
         )
-        PrimaryAction("Try again", onClick = onRetry, glyph = Glyph.Sync, modifier = Modifier.padding(top = 28.dp))
+        PrimaryAction(stringResource(R.string.retry), onClick = onRetry, glyph = Glyph.Sync, modifier = Modifier.padding(top = 28.dp))
     }
 }
 
@@ -225,7 +238,7 @@ private fun ownerWebView(
     // The owner app creates one download itself (the GST e-invoice JSON, from
     // a blob), which only a browser can save.
     setDownloadListener { _, _, _, _, _ ->
-        Toast.makeText(context, "Download this file from Morbeez in a computer's browser.", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.download_in_browser), Toast.LENGTH_LONG).show()
     }
 }
 
@@ -236,6 +249,6 @@ private fun openOutside(context: Context, url: Uri) {
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, "No app on this phone can open that link.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.no_app_for_link), Toast.LENGTH_SHORT).show()
     }
 }

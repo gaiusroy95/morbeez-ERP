@@ -29,3 +29,11 @@ export interface CreateOrderBody {
   customerId: string;
   lines: { productId: string; quantity: number; unitPrice?: number }[];
 }
+
+/** A new order line's starting price: the last actual price (client Q&A, pricing). */
+export interface PriceSuggestion {
+  productId: string;
+  price: string | null;
+  source: 'customer_last' | 'product_last' | 'reference' | null;
+  at: string | null;
+}

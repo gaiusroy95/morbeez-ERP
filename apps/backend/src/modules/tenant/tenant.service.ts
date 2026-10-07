@@ -98,6 +98,12 @@ export class TenantService {
       currency?: string;
       timezone?: string;
       taxRegistration?: string;
+      operatingDayEnd?: string;
+      alertCashThreshold?: number;
+      alertCollectionThreshold?: number;
+      defaultShrinkageTolerancePct?: number;
+      defaultBreakageTolerancePct?: number;
+      weighmentPhoto?: string;
     },
   ): Promise<TenantRecord> {
     const tenant = await this.tenants.update(tenantId, fields);

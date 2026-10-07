@@ -81,6 +81,11 @@ export class AuthService {
     if (!user || user.status !== 'active' || !passwordMatches) throw await invalid();
     await this.limiter.reset(failKeys[0]);
 
+    return this.issueFor(user, deviceInfo, deviceId);
+  }
+
+  /** A fresh session for someone who has just proved who they are (password or, on their own phone, PIN). */
+  async issueFor(user: UserRecord, deviceInfo?: string, deviceId?: string): Promise<TokenPair> {
     const { roles, permissions } = await this.users.findRolesAndPermissions(
       user.tenantId,
       user.id,

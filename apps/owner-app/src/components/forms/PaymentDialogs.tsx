@@ -16,6 +16,7 @@ import { formatDate, formatDay, formatMoney, formatQuantity } from '@/lib/format
 import { firstError, localDateTimeToIso, optionalText, parseMoney, parseOptionalMoney, type Parsed } from '@/lib/parse';
 import { Field, FormDialog } from '@/components/ui/Form';
 import { SkeletonLines } from '@/components/ui/Panel';
+import { useT } from '@/lib/i18n';
 
 export const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Cash',
@@ -29,8 +30,9 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
 const PAYMENT_EFFECTS = [KEYS.finance, KEYS.customers, KEYS.procurement, KEYS.dashboard];
 
 function MethodField({ value, onChange }: { value: PaymentMethod; onChange: (m: PaymentMethod) => void }) {
+  const t = useT();
   return (
-    <Field label="Method">
+    <Field label={t('Method')}>
       {(props) => (
         <select {...props} value={value} onChange={(e) => onChange(e.target.value as PaymentMethod)}>
           {(Object.keys(METHOD_LABEL) as PaymentMethod[]).map((m) => (
@@ -74,6 +76,7 @@ export function CustomerPaymentDialog({
   onClose: () => void;
   onDone?: (payment: CustomerPaymentRecord) => void;
 }) {
+  const t = useT();
   const invoices = useOpenInvoices(customerId);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -118,11 +121,10 @@ export function CustomerPaymentDialog({
       title={`Record a payment from ${customerName}`}
       description={
         <p>
-          Applied to the invoices you fill in below, or — if you leave them all blank — to the oldest open invoices first.
-          Anything left over is held on the customer&apos;s account for their next invoice.
+          {t("Applied to the invoices you fill in below, or — if you leave them all blank — to the oldest open invoices first. Anything left over is held on the customer's account for their next invoice.")}
         </p>
       }
-      submitLabel="Record payment"
+      submitLabel={t('Record payment')}
       size="wide"
       pending={record.isPending}
       error={problem ?? record.error}
@@ -133,35 +135,35 @@ export function CustomerPaymentDialog({
         {(props) => <input {...props} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />}
       </Field>
       <MethodField value={method} onChange={setMethod} />
-      <Field label="Reference (optional)" hint="UPI transaction id, cheque number…">
+      <Field label={t('Reference (optional)')} hint={t('UPI transaction id, cheque number…')}>
         {(props) => <input {...props} maxLength={100} value={reference} onChange={(e) => setReference(e.target.value)} />}
       </Field>
-      <Field label="Received at (optional)" hint="Leave blank for now">
+      <Field label={t('Received at (optional)')} hint={t('Leave blank for now')}>
         {(props) => (
           <input {...props} type="datetime-local" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} />
         )}
       </Field>
-      <Field label={`Bank or gateway fee (${currency}, optional)`} hint="Deducted by the bank; booked as a finance cost">
+      <Field label={`Bank or gateway fee (${currency}, optional)`} hint={t('Deducted by the bank; booked as a finance cost')}>
         {(props) => <input {...props} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} />}
       </Field>
-      <Field label="Notes (optional)">
+      <Field label={t('Notes (optional)')}>
         {(props) => <input {...props} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} />}
       </Field>
       <div className="form-wide">
-        <h3 className="detail-subhead">Open invoices</h3>
+        <h3 className="detail-subhead">{t('Open invoices')}</h3>
         {invoices.isPending ? (
           <SkeletonLines lines={2} />
         ) : !invoices.data || invoices.data.items.length === 0 ? (
-          <p className="muted">No open invoices — the whole amount is held on account.</p>
+          <p className="muted">{t('No open invoices — the whole amount is held on account.')}</p>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Invoice</th>
-                  <th>Due</th>
-                  <th className="align-right">Outstanding</th>
-                  <th className="align-right">Apply</th>
+                  <th>{t('Invoice')}</th>
+                  <th>{t('Due')}</th>
+                  <th className="align-right">{t('Outstanding')}</th>
+                  <th className="align-right">{t('Apply')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -169,8 +171,8 @@ export function CustomerPaymentDialog({
                   <tr key={invoice.id}>
                     <td>
                       {invoice.invoiceNumber}
-                      {invoice.kind === 'finance_charge' && <div className="cell-sub">Finance charge</div>}
-                      {invoice.kind === 'crate_charge' && <div className="cell-sub">Lost crates</div>}
+                      {invoice.kind === 'finance_charge' && <div className="cell-sub">{t('Finance charge')}</div>}
+                      {invoice.kind === 'crate_charge' && <div className="cell-sub">{t('Lost crates')}</div>}
                     </td>
                     <td data-tone={invoice.state === 'overdue' ? 'bad' : undefined}>{formatDate(invoice.dueDate)}</td>
                     <td className="align-right">{formatMoney(invoice.outstanding, currency)}</td>
@@ -206,6 +208,7 @@ export function FarmerPaymentDialog({
   currency: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const lots = usePayableLots(farmerId);
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
   const [amount, setAmount] = useState('');
@@ -250,11 +253,10 @@ export function FarmerPaymentDialog({
       title={`Pay ${farmerName}`}
       description={
         <p>
-          Applied to the lots you fill in below, or — if you leave them all blank — to the oldest unpaid lots first.
-          Anything beyond what&apos;s owed is an advance, drawn down by this farmer&apos;s next graded lots.
+          {t("Applied to the lots you fill in below, or — if you leave them all blank — to the oldest unpaid lots first. Anything beyond what's owed is an advance, drawn down by this farmer's next graded lots.")}
         </p>
       }
-      submitLabel="Record payment"
+      submitLabel={t('Record payment')}
       size="wide"
       pending={record.isPending}
       error={problem ?? record.error}
@@ -265,34 +267,34 @@ export function FarmerPaymentDialog({
         {(props) => <input {...props} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />}
       </Field>
       <MethodField value={method} onChange={setMethod} />
-      <Field label="Reference (optional)" hint="UPI transaction id, cheque number…">
+      <Field label={t('Reference (optional)')} hint={t('UPI transaction id, cheque number…')}>
         {(props) => <input {...props} maxLength={100} value={reference} onChange={(e) => setReference(e.target.value)} />}
       </Field>
-      <Field label="Paid at (optional)" hint="Leave blank for now">
+      <Field label={t('Paid at (optional)')} hint={t('Leave blank for now')}>
         {(props) => <input {...props} type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />}
       </Field>
-      <Field label={`Bank fee (${currency}, optional)`} hint="Booked as a finance cost">
+      <Field label={`Bank fee (${currency}, optional)`} hint={t('Booked as a finance cost')}>
         {(props) => <input {...props} inputMode="decimal" value={fee} onChange={(e) => setFee(e.target.value)} />}
       </Field>
-      <Field label="Notes (optional)">
+      <Field label={t('Notes (optional)')}>
         {(props) => <input {...props} maxLength={500} value={notes} onChange={(e) => setNotes(e.target.value)} />}
       </Field>
       <div className="form-wide">
-        <h3 className="detail-subhead">Unpaid lots</h3>
+        <h3 className="detail-subhead">{t('Unpaid lots')}</h3>
         {lots.isPending ? (
           <SkeletonLines lines={2} />
         ) : unpaid.length === 0 ? (
-          <p className="muted">Nothing unpaid — the whole amount becomes an advance.</p>
+          <p className="muted">{t('Nothing unpaid — the whole amount becomes an advance.')}</p>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Graded</th>
-                  <th>Product</th>
-                  <th className="align-right">Quantity</th>
-                  <th className="align-right">Outstanding</th>
-                  <th className="align-right">Apply</th>
+                  <th>{t('Graded')}</th>
+                  <th>{t('Product')}</th>
+                  <th className="align-right">{t('Quantity')}</th>
+                  <th className="align-right">{t('Outstanding')}</th>
+                  <th className="align-right">{t('Apply')}</th>
                 </tr>
               </thead>
               <tbody>

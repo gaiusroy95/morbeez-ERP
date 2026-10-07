@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -86,7 +88,7 @@ fun PhotoCaptureButton(
             color = Fresh.ink,
             modifier = Modifier.weight(1f),
         )
-        if (captured) Text("Retake", style = MaterialTheme.typography.labelMedium, color = Fresh.primary)
+        if (captured) Text(stringResource(R.string.retake), style = MaterialTheme.typography.labelMedium, color = Fresh.primary)
     }
 }
 

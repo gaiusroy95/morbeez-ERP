@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screens.stopdetail
 
+import androidx.compose.ui.res.stringResource
+import com.morbeez.driver.R
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import com.morbeez.driver.ui.components.FreshTextField
+import com.morbeez.driver.data.remote.dto.FarmWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,6 +54,17 @@ fun StopDetailScreen(
 ) {
     LaunchedEffect(stopId) { viewModel.load(stopId) }
     val stop by viewModel.stop.collectAsStateWithLifecycle()
+    val items by viewModel.items.collectAsStateWithLifecycle()
+    // Pickup: the net weight per product as weighed at the farm (no tare sums here).
+    val farmWeights = remember { mutableStateMapOf<String, String>() }
+    fun weights() = items.mapNotNull { i ->
+        farmWeights[i.productId]?.replace(",", "")?.toDoubleOrNull()?.takeIf { it > 0 }?.let { FarmWeight(i.productId, it) }
+    }
+    val level by viewModel.authorityLevel.collectAsStateWithLifecycle()
+    // Unknown (null) lets the driver try: the server is the judge either way.
+    val canAct = level != 0
+    val canCollect = level == null || level!! >= 2
+    val canBuy = level == null || level!! >= 3
     var photoTaken by remember { mutableStateOf(false) }
 
     val current = stop
@@ -55,20 +72,20 @@ fun StopDetailScreen(
     val pending = current?.status == "pending"
 
     FieldScreen(
-        title = current?.counterpartyName ?: "Stop",
-        eyebrow = current?.let { "Stop ${it.sequenceNumber} · ${if (isPickup) "Pickup" else "Delivery"}" },
+        title = current?.counterpartyName ?: stringResource(R.string.stop),
+        eyebrow = current?.let { stringResource(R.string.stop_eyebrow, it.sequenceNumber, stringResource(if (isPickup) R.string.kind_pickup else R.string.kind_delivery)) },
         onBack = onBack,
         headerExtra = {
             if (current != null) {
                 Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     when (current.status) {
-                        "completed" -> Pill("Completed", Tone.Good)
-                        "skipped" -> Pill("Skipped", Tone.Attention)
-                        else -> Pill("To do", Tone.Lime)
+                        "completed" -> Pill(stringResource(R.string.pill_completed), Tone.Good)
+                        "skipped" -> Pill(stringResource(R.string.pill_skipped), Tone.Attention)
+                        else -> Pill(stringResource(R.string.pill_to_do), Tone.Lime)
                     }
                     if (current.pendingSync) {
                         Spacer(Modifier.width(8.dp))
-                        Pill("Saving…", Tone.Neutral, onDark = true)
+                        Pill(stringResource(R.string.saving), Tone.Neutral, onDark = true)
                     }
                 }
             }
@@ -76,9 +93,9 @@ fun StopDetailScreen(
         bottomBar = if (current != null && pending) {
             {
                 if (isPickup) {
-                    PrimaryAction("Complete pickup", onClick = { viewModel.completePickup(tripId, stopId, onBack) }, glyph = Glyph.Check)
+                    PrimaryAction(stringResource(R.string.complete_pickup), onClick = { viewModel.completePickup(tripId, stopId, weights(), onBack) }, glyph = Glyph.Check, enabled = canBuy)
                 } else {
-                    PrimaryAction("Confirm delivery", onClick = { onOpenDelivery(stopId) }, glyph = Glyph.Arrow)
+                    PrimaryAction(stringResource(R.string.confirm_delivery), onClick = { onOpenDelivery(stopId) }, glyph = Glyph.Arrow, enabled = canAct)
                 }
             }
         } else {
@@ -88,24 +105,61 @@ fun StopDetailScreen(
         if (current == null) return@FieldScreen
 
         FieldCard {
-            Eyebrow(if (isPickup) "What to collect" else "What to deliver")
+            Eyebrow(stringResource(if (isPickup) R.string.what_to_collect else R.string.what_to_deliver))
             Text(
                 current.summary,
                 style = MaterialTheme.typography.titleMedium,
                 color = Fresh.ink,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            if (!isPickup && current.collectTerms != null) {
+                Text(
+                    if (current.collectTerms == "cash") stringResource(R.string.collect_amount, current.collectAmount.orEmpty()) else stringResource(R.string.on_credit),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Fresh.primary,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             if (!current.notes.isNullOrBlank()) {
                 Spacer(Modifier.padding(top = 12.dp))
                 Callout(current.notes, tone = Tone.Active, glyph = Glyph.Pin)
             }
         }
 
+        if (pending) {
+            when {
+                !canAct -> Callout(stringResource(R.string.not_approved_yet), tone = Tone.Attention)
+                isPickup && !canBuy -> Callout(stringResource(R.string.needs_level_3), tone = Tone.Attention)
+                !isPickup && !canCollect -> Callout(stringResource(R.string.needs_level_2), tone = Tone.Active)
+            }
+        }
+
+        if (isPickup && pending && items.isNotEmpty()) {
+            FieldCard {
+                Eyebrow(stringResource(R.string.weighed_at_farm))
+                Text(
+                    stringResource(R.string.weighed_at_farm_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Fresh.inkMuted,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                )
+                items.forEach { item ->
+                    FreshTextField(
+                        value = farmWeights[item.productId].orEmpty(),
+                        onValueChange = { farmWeights[item.productId] = it },
+                        label = stringResource(R.string.farm_weight_label, item.productName, if (item.kind == "egg") stringResource(R.string.eggs) else item.uom),
+                        keyboardType = KeyboardType.Decimal,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        }
+
         PhotoCaptureButton(
             label = when {
-                photoTaken -> "Photo attached"
-                isPickup -> "Photograph the produce"
-                else -> "Photograph the delivery"
+                photoTaken -> stringResource(R.string.photo_attached)
+                isPickup -> stringResource(R.string.photo_produce)
+                else -> stringResource(R.string.photo_delivery)
             },
             captured = photoTaken,
             onCaptured = { path, mimeType ->
@@ -116,12 +170,12 @@ fun StopDetailScreen(
 
         if (pending) {
             if (!isPickup) {
-                SecondaryAction("Record cash or payment", onClick = { onOpenCollection(stopId) }, glyph = Glyph.Rupee)
+                SecondaryAction(stringResource(R.string.record_payment), onClick = { onOpenCollection(stopId) }, glyph = Glyph.Rupee, enabled = canCollect)
             }
-            SecondaryAction("Skip or report a problem", onClick = { onOpenIssueReport(stopId) }, glyph = Glyph.Warning)
+            SecondaryAction(stringResource(R.string.skip_or_report), onClick = { onOpenIssueReport(stopId) }, glyph = Glyph.Warning)
         } else {
             Callout(
-                if (current.status == "completed") "This stop is done." else "This stop was skipped.",
+                stringResource(if (current.status == "completed") R.string.stop_done else R.string.stop_skipped),
                 tone = if (current.status == "completed") Tone.Good else Tone.Attention,
                 glyph = if (current.status == "completed") Glyph.Check else Glyph.Warning,
             )

@@ -67,6 +67,15 @@ class RouteViewModel @Inject constructor(
         SyncWorker.requestNow(appContext)
     }
 
+    /** Something the owner must hear about at once — queued, sent the moment there's signal. */
+    fun reportProblem(kind: String, note: String) {
+        val tripId = state.value.trip?.id ?: return
+        viewModelScope.launch {
+            tripRepository.queueProblem(tripId, kind, note)
+            SyncWorker.requestNow(appContext)
+        }
+    }
+
     fun skipStop(stopId: String) {
         val tripId = state.value.trip?.id ?: return
         viewModelScope.launch { tripRepository.queueSkipStop(tripId, stopId) }

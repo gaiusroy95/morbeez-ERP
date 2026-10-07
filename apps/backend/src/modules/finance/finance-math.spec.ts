@@ -1,4 +1,4 @@
-import { addDays, allocateInOrder, daysBetween, financeChargeAmount, laterDate } from './finance-math';
+import { addDays, allocateInOrder, daysBetween, financeChargeAnnual, laterDate } from './finance-math';
 import { compareMoney, minMoney, moneyFromNumber, subtractMoney, sumMoney } from '../../common/money';
 
 describe('allocateInOrder', () => {
@@ -42,29 +42,29 @@ describe('allocateInOrder', () => {
   });
 });
 
-describe('financeChargeAmount', () => {
+describe('financeChargeAnnual (principal × annual rate × days ÷ 365)', () => {
   it.each([
-    // principal, % per 30 days, days, expected
-    ['10000.00', '2.00', 30, '200.00'],
-    ['10000.00', '2.00', 15, '100.00'],
-    ['10000.00', '1.50', 1, '5.00'],
-    ['12345.67', '1.75', 17, '122.43'], // 12345.67 × 0.0175 × 17/30 = 122.4279…
-  ])('%s at %s%% for %i days', (principal, rate, days, expected) => {
-    expect(financeChargeAmount(principal, rate, days)).toBe(expected);
+    // principal, % a year, days, expected
+    ['10000.00', '18.25', 15, '75.00'],
+    ['10000.00', '18.00', 30, '147.95'], // 10000 × 0.18 × 30 ÷ 365 = 147.945…
+    ['10000.00', '12.00', 365, '1200.00'],
+    ['12345.67', '24.00', 17, '138.00'], // 12345.67 × 0.24 × 17 ÷ 365 = 138.0009…
+  ])('%s at %s%% a year for %i days', (principal, rate, days, expected) => {
+    expect(financeChargeAnnual(principal, rate, days)).toBe(expected);
   });
 
   it('rounds half up to the paisa', () => {
-    // 100.00 × 1% × 15/30 = 0.50 exactly; 1.00 × 1.5% × 1/30 = 0.0005 → 0.00; 3.00 × 1% × 15/30 = 0.015 → 0.02
-    expect(financeChargeAmount('100.00', '1.00', 15)).toBe('0.50');
-    expect(financeChargeAmount('1.00', '1.50', 1)).toBe('0.00');
-    expect(financeChargeAmount('3.00', '1.00', 15)).toBe('0.02');
+    // 36.50 × 10% × 1 ÷ 365 = 0.01 exactly; 18.25 × 10% × 1 ÷ 365 = 0.005 → 0.01; 10.00 × 10% × 1 ÷ 365 = 0.0027… → 0.00
+    expect(financeChargeAnnual('36.50', '10.00', 1)).toBe('0.01');
+    expect(financeChargeAnnual('18.25', '10.00', 1)).toBe('0.01');
+    expect(financeChargeAnnual('10.00', '10.00', 1)).toBe('0.00');
   });
 
   it('charges nothing for no days, no rate, or no principal', () => {
-    expect(financeChargeAmount('5000.00', '2.00', 0)).toBe('0.00');
-    expect(financeChargeAmount('5000.00', '0.00', 30)).toBe('0.00');
-    expect(financeChargeAmount('0.00', '2.00', 30)).toBe('0.00');
-    expect(financeChargeAmount('5000.00', '2.00', -3)).toBe('0.00');
+    expect(financeChargeAnnual('5000.00', '18.00', 0)).toBe('0.00');
+    expect(financeChargeAnnual('5000.00', '0.00', 30)).toBe('0.00');
+    expect(financeChargeAnnual('0.00', '18.00', 30)).toBe('0.00');
+    expect(financeChargeAnnual('5000.00', '18.00', -3)).toBe('0.00');
   });
 });
 

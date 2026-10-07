@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from 'react';
 import { actionErrorMessage } from '@/lib/hooks/use-action';
+import { useT } from '@/lib/i18n';
 
 /**
  * A modal form. Built on <dialog>.showModal(), so the browser traps focus,
@@ -34,6 +35,7 @@ export function FormDialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const t = useT();
 
   useEffect(() => {
     const dialog = ref.current;
@@ -61,18 +63,18 @@ export function FormDialog({
         }}
       >
         <h2 id={titleId} className="dialog-title">
-          {title}
+          {t(title)}
         </h2>
-        {description && <div className="dialog-description">{description}</div>}
+        {description && <div className="dialog-description">{typeof description === 'string' ? t(description) : description}</div>}
         {children && <div className="form-grid">{children}</div>}
         {error ? (
           <p className="form-error" role="alert">
-            {typeof error === 'string' ? error : actionErrorMessage(error)}
+            {typeof error === 'string' ? t(error) : actionErrorMessage(error)}
           </p>
         ) : null}
         <div className="dialog-actions">
           <button type="button" className="button" onClick={onClose} disabled={pending}>
-            Cancel
+            {t('Cancel')}
           </button>
           <button
             type="submit"
@@ -80,7 +82,7 @@ export function FormDialog({
             disabled={pending}
             aria-busy={pending}
           >
-            {pending ? 'Saving…' : submitLabel}
+            {pending ? t('Saving…') : t(submitLabel)}
           </button>
         </div>
       </form>
@@ -102,13 +104,14 @@ export function Field({
 }) {
   const id = useId();
   const hintId = `${id}-hint`;
+  const t = useT();
   return (
     <div className="field" data-wide={wide || undefined}>
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{t(label)}</label>
       {children({ id, 'aria-describedby': hint ? hintId : undefined })}
       {hint && (
         <span id={hintId} className="field-hint">
-          {hint}
+          {t(hint)}
         </span>
       )}
     </div>

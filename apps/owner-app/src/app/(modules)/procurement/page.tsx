@@ -105,7 +105,7 @@ function NewPurchaseOrderDialog({
 
   const submit = () => {
     if (!farmerId) return setProblem('Choose the farmer.');
-    const parsed = parseLines(lines, false);
+    const parsed = parseLines(lines, false, products.records);
     if (!parsed.ok) return setProblem(parsed.error);
     setProblem(null);
     create.mutate({

@@ -200,6 +200,7 @@ export class FinanceService {
         creditLimit: customer.creditLimit,
         paymentTermsDays: customer.paymentTermsDays,
         financeChargeRateMonthly: customer.financeChargeRateMonthly,
+        financeChargeRateAnnual: customer.financeChargeRateAnnual,
         financeChargeGraceDays: customer.financeChargeGraceDays,
         creditHold: customer.creditHold,
         creditHoldReason: customer.creditHoldReason,

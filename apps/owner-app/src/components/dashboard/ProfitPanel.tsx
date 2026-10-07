@@ -4,6 +4,7 @@ import type { DashboardProfit } from '@morbeez/shared-types';
 import { useDashboardProfit } from '@/lib/hooks/use-dashboard';
 import { formatMoney } from '@/lib/format';
 import { ErrorState, Panel, SkeletonLines } from '../ui/Panel';
+import { useT } from '@/lib/i18n';
 
 interface BridgeStep {
   label: string;
@@ -47,6 +48,7 @@ function buildBridge(profit: DashboardProfit): BridgeStep[] {
 }
 
 function Bridge({ profit, currency }: { profit: DashboardProfit; currency: string }) {
+  const t = useT();
   return (
     <div className="bridge">
       {buildBridge(profit).map((step) => {
@@ -54,7 +56,7 @@ function Bridge({ profit, currency }: { profit: DashboardProfit; currency: strin
         const kind = step.kind === 'result' && negative ? 'loss' : step.kind;
         return (
           <div key={step.label} className="bridge-row">
-            <span className="bridge-label">{step.label}</span>
+            <span className="bridge-label">{t(step.label)}</span>
             <span className="bridge-track" aria-hidden="true">
               <span
                 className="bridge-bar"
@@ -74,18 +76,19 @@ function Bridge({ profit, currency }: { profit: DashboardProfit; currency: strin
 }
 
 function ByProduct({ profit, currency }: { profit: DashboardProfit; currency: string }) {
+  const t = useT();
   if (profit.byProduct.length === 0) {
-    return <p className="state">No deliveries in this period yet.</p>;
+    return <p className="state">{t('No deliveries in this period yet.')}</p>;
   }
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th scope="col">Product</th>
-            <th scope="col" className="align-right">Revenue</th>
-            <th scope="col" className="align-right">Gross profit</th>
-            <th scope="col" className="align-right">Margin</th>
+            <th scope="col">{t('Product')}</th>
+            <th scope="col" className="align-right">{t('Revenue')}</th>
+            <th scope="col" className="align-right">{t('Gross profit')}</th>
+            <th scope="col" className="align-right">{t('Margin')}</th>
           </tr>
         </thead>
         <tbody>
@@ -96,9 +99,9 @@ function ByProduct({ profit, currency }: { profit: DashboardProfit; currency: st
                 <td>
                   {line.productName}
                   {line.uncostedLines > 0 && (
-                    <span className="panel-meta" title="Some deliveries of this product have no costed lot">
+                    <span className="panel-meta" title={t('Some deliveries of this product have no costed lot')}>
                       {' '}
-                      · partly uncosted
+                      · {t('partly uncosted')}
                     </span>
                   )}
                 </td>
@@ -130,6 +133,7 @@ function ByProduct({ profit, currency }: { profit: DashboardProfit; currency: st
 
 export function ProfitPanel({ days, currency }: { days: number; currency: string }) {
   const { data, error, isPending, refetch } = useDashboardProfit(days, true);
+  const t = useT();
 
   return (
     <Panel title="Profit" meta="From deliveries in this period · operational estimate">
@@ -141,19 +145,19 @@ export function ProfitPanel({ days, currency }: { days: number; currency: string
         <>
           <div className="profit-headline">
             <div>
-              <div className="profit-figure-label">Gross profit</div>
+              <div className="profit-figure-label">{t('Gross profit')}</div>
               <div className="profit-figure-value" data-tone={Number(data.grossProfit) < 0 ? 'bad' : undefined}>
                 {formatMoney(data.grossProfit, currency)}
               </div>
             </div>
             <div>
-              <div className="profit-figure-label">Gross margin</div>
+              <div className="profit-figure-label">{t('Gross margin')}</div>
               <div className="profit-figure-value">
                 {data.grossMarginPercent === null ? '—' : `${data.grossMarginPercent}%`}
               </div>
             </div>
             <div>
-              <div className="profit-figure-label">After trip expenses</div>
+              <div className="profit-figure-label">{t('After trip expenses')}</div>
               <div
                 className="profit-figure-value"
                 data-tone={Number(data.operatingContribution) < 0 ? 'bad' : undefined}
@@ -167,10 +171,12 @@ export function ProfitPanel({ days, currency }: { days: number; currency: string
             <div>
               <Bridge profit={data} currency={currency} />
               <p className="footnote">
-                Cost of goods uses the actual lots reserved for each delivered order. This is an operating view, not
-                the ledger.
+                {t('Cost of goods uses the actual lots reserved for each delivered order. This is an operating view, not the ledger.')}
                 {Number(data.uncostedRevenue) > 0 &&
-                  ` ${formatMoney(data.uncostedRevenue, currency)} of revenue has no costed lot yet and is left out of the margin rather than counted as free.`}
+                  ' ' +
+                    t('{amount} of revenue has no costed lot yet and is left out of the margin rather than counted as free.', {
+                      amount: formatMoney(data.uncostedRevenue, currency),
+                    })}
               </p>
             </div>
             <ByProduct profit={data} currency={currency} />

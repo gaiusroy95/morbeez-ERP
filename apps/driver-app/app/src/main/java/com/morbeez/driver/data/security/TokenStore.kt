@@ -41,6 +41,20 @@ class TokenStore @Inject constructor(@ApplicationContext context: Context) {
     val deviceId: String
         get() = prefs.getString(KEY_DEVICE_ID, null) ?: generateAndStoreDeviceId()
 
+    /**
+     * The mobile number that has a PIN on this phone (the PIN itself never
+     * leaves the server, and works only with this phone's [deviceId]).
+     * Survives signing out: that's when the PIN is for.
+     */
+    var pinLogin: String?
+        get() = prefs.getString(KEY_PIN_LOGIN, null)
+        set(value) = prefs.edit().putString(KEY_PIN_LOGIN, value).apply()
+
+    /** Who signed in last, so a PIN set right after a password sign-in knows whose it is. */
+    var lastLogin: String?
+        get() = prefs.getString(KEY_LAST_LOGIN, null)
+        set(value) = prefs.edit().putString(KEY_LAST_LOGIN, value).apply()
+
     fun isLoggedIn(): Boolean = accessToken != null
 
     fun clear() {
@@ -57,5 +71,7 @@ class TokenStore @Inject constructor(@ApplicationContext context: Context) {
         const val KEY_ACCESS_TOKEN = "access_token"
         const val KEY_REFRESH_TOKEN = "refresh_token"
         const val KEY_DEVICE_ID = "device_id"
+        const val KEY_PIN_LOGIN = "pin_login"
+        const val KEY_LAST_LOGIN = "last_login"
     }
 }

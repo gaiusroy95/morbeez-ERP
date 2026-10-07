@@ -26,6 +26,14 @@ export interface TenantProfile {
   name: string;
   currency: string;
   timezone: string;
+  /** "HH:MM" — when the business's day ends; day-off delegations end here. */
+  operatingDayEnd?: string;
+  ownerAwayUntil?: string | null;
+  alertCashThreshold?: string;
+  alertCollectionThreshold?: string;
+  defaultShrinkageTolerancePct?: string;
+  defaultBreakageTolerancePct?: string;
+  weighmentPhoto?: 'optional' | 'required' | 'not_required';
 }
 
 export function useTenantProfile() {
