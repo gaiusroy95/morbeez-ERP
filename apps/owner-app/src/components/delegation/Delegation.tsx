@@ -531,16 +531,22 @@ export function GrantDialog({
 export function DriveMyselfDialog({ onClose }: { onClose: () => void }) {
   const t = useT();
   const [name, setName] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
   const add = useAction((body: { name: string }) => apiSend<EmployeeRecord>('POST', 'workforce/me/driver', body), REFRESH, onClose);
+  const submit = () => {
+    if (name.trim().length < 2) return setProblem(t('Type your name as drivers and trips should show it.'));
+    setProblem(null);
+    add.mutate({ name: name.trim() });
+  };
   return (
     <FormDialog
       title={t('I drive too')}
       description={t('Trips can then be assigned to you, and the Driver app shows your route when you sign in there with this login. You close your own trips here, as the owner.')}
       submitLabel={t('Add me as a driver')}
       pending={add.isPending}
-      error={add.error}
+      error={problem ?? add.error}
       onClose={onClose}
-      onSubmit={() => add.mutate({ name: name.trim() })}
+      onSubmit={submit}
     >
       <Field label={t('Your name on trips')} wide>
         {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Rajesh (owner)')} />}

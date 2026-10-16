@@ -36,8 +36,9 @@ export function actionErrorMessage(error: unknown): string {
     // The server's own words when it gave any — a 403 isn't always a role
     // problem (the proxy's cross-origin refusal is one too).
     if (error.status === 403 && /^Request failed/.test(error.message)) return "Your role isn't allowed to do this.";
-    if (error.status === 409)
-      return `${error.message} Someone may have changed this record just now — close and reopen it, then try again.`;
+    // A 409 is usually a business rule (over the credit limit, nothing left
+    // to reserve), whose message says why. An edit clash says "changed by
+    // someone else — reload" itself, so nothing is added here.
     return error.message;
   }
   return error instanceof Error ? error.message : 'Something went wrong.';

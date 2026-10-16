@@ -57,20 +57,21 @@ android {
         // A release build for sharing with the client before the Play Store:
         // signed with the debug key so the .apk installs directly, and pointed
         // at a hosted preview stack (infrastructure/runbooks/render-preview.md).
-        // Both addresses are required — a preview must never fall back to the
-        // production hosts above.
-        //   ./gradlew assemblePreview -Pmorbeez.apiUrl=https://<api>.onrender.com/ -Pmorbeez.ownerUrl=https://<web>.onrender.com/
+        // The addresses come from morbeez.previewApiUrl / morbeez.previewOwnerUrl
+        // in gradle.properties, or -Pmorbeez.apiUrl / -Pmorbeez.ownerUrl for a
+        // one-off. A preview must never fall back to the production hosts above.
+        //   ./gradlew assemblePreview
         create("preview") {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
             // Retrofit needs the trailing slash; add it rather than fail on it.
             val slash = { url: String? -> url?.trim()?.let { if (it.endsWith("/")) it else "$it/" } }
-            val api = slash(findProperty("morbeez.apiUrl") as String?)
-            val owner = slash(findProperty("morbeez.ownerUrl") as String?)
+            val api = slash((findProperty("morbeez.apiUrl") ?: findProperty("morbeez.previewApiUrl")) as String?)
+            val owner = slash((findProperty("morbeez.ownerUrl") ?: findProperty("morbeez.previewOwnerUrl")) as String?)
             val wantsPreview = gradle.startParameter.taskNames.any { it.contains("Preview", ignoreCase = true) }
             if (wantsPreview && (api == null || owner == null)) {
-                throw GradleException("A preview build needs -Pmorbeez.apiUrl=<url> and -Pmorbeez.ownerUrl=<url> (the hosted API and owner app).")
+                throw GradleException("A preview build needs morbeez.previewApiUrl and morbeez.previewOwnerUrl in gradle.properties (the hosted API and owner app).")
             }
             buildConfigField("String", "API_BASE_URL", "\"${api ?: ""}\"")
             buildConfigField("String", "OWNER_WEB_URL", "\"${owner ?: ""}\"")
