@@ -5,6 +5,7 @@ import type {
   ChecklistArea,
   ChecklistItem,
   HandoverSummary,
+  QuantityRow,
   ReconcileTripBody,
   TripCashDepositRecord,
   TripDecisionBody,
@@ -18,10 +19,11 @@ import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
 import { apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useTripReview } from '@/lib/hooks/use-modules';
+import { useTripQuantities } from '@/lib/hooks/use-trips';
 import { useCurrency } from '@/lib/hooks/use-lookups';
-import { formatDateTime, formatMoney } from '@/lib/format';
+import { formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
 import { sumMoney } from '@/lib/decimal';
-import { firstError, optionalText, parseMoney } from '@/lib/parse';
+import { firstError, optionalText, parseMoney, parseQuantity } from '@/lib/parse';
 import { useT } from '@/lib/i18n';
 
 const EFFECTS = [KEYS.logistics, KEYS.finance, KEYS.dashboard, KEYS.orders];
@@ -105,6 +107,7 @@ export function TripClosure({ trip, deposits }: { trip: TripRecord; deposits: Tr
   const t = useT();
   const currency = useCurrency();
   const review = useTripReview(trip.id, true);
+  const quantities = useTripQuantities(trip.id);
   const [open, setOpen] = useState<'close' | 'hold' | 'return' | null>(null);
 
   if (review.isPending) return <SkeletonLines lines={5} />;
@@ -185,7 +188,9 @@ export function TripClosure({ trip, deposits }: { trip: TripRecord; deposits: Tr
         </button>
       </ActionBar>
 
-      {open === 'close' && <CloseDialog trip={trip} handover={handover} checklist={checklist} onClose={() => setOpen(null)} />}
+      {open === 'close' && (
+        <CloseDialog trip={trip} handover={handover} checklist={checklist} quantities={quantities.data?.rows ?? []} onClose={() => setOpen(null)} />
+      )}
       {open === 'hold' && (
         <DecisionDialog
           trip={trip}
@@ -210,20 +215,30 @@ export function TripClosure({ trip, deposits }: { trip: TripRecord; deposits: Tr
   );
 }
 
+/** The balance as a count to start from: what should be on the vehicle, never below none. */
+const startCount = (r: QuantityRow) => String(Math.max(0, Number(r.expected)));
+
 function CloseDialog({
   trip,
   handover,
   checklist,
+  quantities,
   onClose,
 }: {
   trip: TripRecord;
   handover: HandoverSummary;
   checklist: ChecklistItem[];
+  /** The trip's products: the vehicle is counted for each at closing. */
+  quantities: QuantityRow[];
   onClose: () => void;
 }) {
   const t = useT();
   const currency = useCurrency();
   const [received, setReceived] = useState(handover.declared ?? (Number(handover.expected) > 0 ? handover.expected : '0.00'));
+  const [counts, setCounts] = useState<Record<string, string>>(() => Object.fromEntries(quantities.map((r) => [r.productId, startCount(r)])));
+  const parsedCounts = quantities.map((r) => ({ row: r, parsed: parseQuantity(counts[r.productId] ?? '0', `the ${r.product} on the vehicle`, false) }));
+  // Display-only: the backend checks the count again and records it.
+  const offCount = parsedCounts.filter(({ row, parsed }) => parsed.ok && Math.abs(parsed.value - Number(row.expected)) >= 0.0005);
   const [notes, setNotes] = useState('');
   const [reason, setReason] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
@@ -234,7 +249,7 @@ function CloseDialog({
   const variance = parsed.ok ? sumMoney([handover.expected, `-${parsed.value.toFixed(2)}`]) : null;
   const handoverOk = variance !== null && Number(variance) === 0;
   const otherExceptions = checklist.filter((c) => c.status === 'exception' && c.area !== 'handover');
-  const needsReason = !handoverOk || otherExceptions.length > 0;
+  const needsReason = !handoverOk || otherExceptions.length > 0 || offCount.length > 0;
 
   return (
     <FormDialog
@@ -250,7 +265,7 @@ function CloseDialog({
       error={problem ?? close.error}
       onClose={onClose}
       onSubmit={() => {
-        const error = firstError([parsed]);
+        const error = firstError([parsed, ...parsedCounts.map((c) => c.parsed)]);
         if (error) return setProblem(error);
         if (needsReason && reason.trim().length < 3) return setProblem(t('Say why you are approving it with an exception.'));
         setProblem(null);
@@ -259,6 +274,7 @@ function CloseDialog({
           cashReturned: (parsed as { value: number }).value,
           notes: optionalText(notes),
           exceptionNote: needsReason ? reason.trim() : undefined,
+          closingStock: parsedCounts.map(({ row, parsed }) => ({ productId: row.productId, quantity: (parsed as { value: number }).value })),
         });
       }}
     >
@@ -276,6 +292,33 @@ function CloseDialog({
       >
         {(props) => <input {...props} inputMode="decimal" value={received} onChange={(e) => setReceived(e.target.value)} />}
       </Field>
+      {quantities.length > 0 && <p className="form-section-title form-wide">{t('Vehicle closing stock — count what is on it')}</p>}
+      {parsedCounts.map(({ row, parsed }) => (
+        <Field
+          key={row.productId}
+          label={`${row.product} (${row.uom})`}
+          hint={
+            !parsed.ok
+              ? undefined
+              : Math.abs(parsed.value - Number(row.expected)) < 0.0005
+                ? t('As expected: {q}', { q: formatQuantity(String(Number(row.expected)), row.uom) })
+                : t('Expected {q}: {d} {dir}', {
+                    q: formatQuantity(String(Number(row.expected)), row.uom),
+                    d: formatQuantity(Math.abs(parsed.value - Number(row.expected)).toFixed(3), row.uom),
+                    dir: parsed.value < Number(row.expected) ? t('short') : t('over'),
+                  })
+          }
+        >
+          {(props) => (
+            <input
+              {...props}
+              inputMode="decimal"
+              value={counts[row.productId] ?? ''}
+              onChange={(e) => setCounts((c) => ({ ...c, [row.productId]: e.target.value }))}
+            />
+          )}
+        </Field>
+      ))}
       {needsReason && (
         <Field label={t('Reason for approving with an exception')} hint={t('Kept with the trip for the audit trail')}>
           {(props) => <textarea {...props} value={reason} onChange={(e) => setReason(e.target.value)} />}

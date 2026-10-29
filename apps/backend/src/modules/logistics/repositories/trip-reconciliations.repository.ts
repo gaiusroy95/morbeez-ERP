@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ChecklistItem, ClosureOutcome, TripReconciliationRecord } from '../entities/trip-reconciliation.entity';
+import { ClosingStockLine } from '../entities/trip-planning.entity';
 
 interface TripReconciliationRow {
   id: string;
@@ -17,6 +18,7 @@ interface TripReconciliationRow {
   outcome: ClosureOutcome;
   exception_note: string | null;
   checklist: ChecklistItem[] | null;
+  closing_stock: ClosingStockLine[] | null;
   notes: string | null;
   reconciled_by: string;
   reconciled_at: Date;
@@ -38,6 +40,7 @@ function toRecord(row: TripReconciliationRow): TripReconciliationRecord {
     outcome: row.outcome ?? 'pass',
     exceptionNote: row.exception_note ?? null,
     checklist: row.checklist ?? null,
+    closingStock: row.closing_stock ?? null,
     notes: row.notes,
     reconciledBy: row.reconciled_by,
     reconciledAt: row.reconciled_at,
@@ -196,14 +199,15 @@ export class TripReconciliationsRepository {
       outcome: ClosureOutcome;
       exceptionNote: string | null;
       checklist: ChecklistItem[];
+      closingStock?: ClosingStockLine[] | null;
     },
   ): Promise<TripReconciliationRecord> {
     try {
       const result = await client.query<TripReconciliationRow>(
         `INSERT INTO fulfilment.trip_reconciliation
            (trip_id, advance_amount, total_expenses, cash_returned, variance, notes, reconciled_by, spot_cash,
-            cash_collections, cash_deposited, direct_payments, cash_declared, outcome, exception_note, checklist)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            cash_collections, cash_deposited, direct_payments, cash_declared, outcome, exception_note, checklist, closing_stock)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
         [
           fields.tripId,
@@ -221,6 +225,7 @@ export class TripReconciliationsRepository {
           fields.outcome,
           fields.exceptionNote,
           JSON.stringify(fields.checklist),
+          fields.closingStock ? JSON.stringify(fields.closingStock) : null,
         ],
       );
       return toRecord(result.rows[0]);

@@ -2,54 +2,39 @@
 
 import { useState } from 'react';
 import type {
-  CreateTripBody,
   ExpenseCategory,
+  OrderRecord,
+  TripCard,
   TripExpenseRecord,
   TripRecord,
   TripStatus,
   TripStopRecord,
+  TripsBoardDay,
 } from '@morbeez/shared-types';
-import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
+import { ErrorState, SkeletonLines } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { EmptyRow, FilterTabs, PageHeader, Pager, SelectableRow } from '@/components/ui/ListControls';
+import { FilterTabs } from '@/components/ui/ListControls';
 import { DetailPanel, KeyValues } from '@/components/ui/DetailPanel';
 import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
+import { Icon } from '@/components/ui/Icon';
 import { apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
-import {
-  useConfirmedOrders,
-  useConfirmedPurchaseOrders,
-  usePickups,
-  useTripDetail,
-  useTrips,
-} from '@/lib/hooks/use-modules';
-import {
-  shortRef,
-  useActiveDrivers,
-  useActiveVehicles,
-  useCurrency,
-  useCustomerName,
-  useEmployeeName,
-  useFarmerName,
-  useTenantProfile,
-  useVehicleName,
-} from '@/lib/hooks/use-lookups';
+import { useConfirmedOrders, useConfirmedPurchaseOrders, usePickups, useTripDetail } from '@/lib/hooks/use-modules';
+import { useCurrency, useCustomerName, useEmployeeName, useFarmerName, useTenantProfile, useVehicleName } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
-import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
+import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, timeOf } from '@/lib/format';
 import { sumMoney } from '@/lib/decimal';
-import { optionalText, parseMoney, parseOptionalMoney } from '@/lib/parse';
+import { optionalText, parseMoney } from '@/lib/parse';
 import { ClosedTrip, TripClosure } from '@/components/logistics/TripClosure';
+import { CreateTripDialog } from '@/components/logistics/CreateTrip';
+import { navigateUrl, TripMap, tripDistance, useTripPoints } from '@/components/logistics/TripMap';
+import { TripQuantitiesView } from '@/components/logistics/TripQuantities';
+import { CreateBar, DayTabs, ListCard, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 import { useT } from '@/lib/i18n';
-
-const FILTERS = [
-  { value: 'all' as const, label: 'All' },
-  { value: 'in_progress' as const, label: 'On the road' },
-  { value: 'planned' as const, label: 'Planned' },
-  { value: 'completed' as const, label: 'To reconcile' },
-  { value: 'on_hold' as const, label: 'On hold' },
-  { value: 'reconciled' as const, label: 'Closed' },
-  { value: 'cancelled' as const, label: 'Cancelled' },
-];
+import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { formatPoNumber } from '@/lib/hooks/use-procurement';
+import { formatOrderNumber, useRouteName } from '@/lib/hooks/use-delivery-orders';
+import { useTripsBoard } from '@/lib/hooks/use-trips';
 
 const EXPENSE_LABEL: Record<ExpenseCategory, string> = { fuel: 'Fuel', toll: 'Toll', labour: 'Labour', other: 'Other' };
 
@@ -62,85 +47,6 @@ const TRIP_EFFECTS = [KEYS.logistics, KEYS.orders, KEYS.procurement, KEYS.invent
 function tripBadge(trip: TripRecord) {
   if (trip.status === 'completed') return <StatusBadge status="completed" tone="attention" label="To reconcile" />;
   return <StatusBadge status={trip.status} />;
-}
-
-function tripDate(trip: TripRecord, timeZone: string): string {
-  if (trip.startedAt) return formatDateTime(trip.startedAt, timeZone);
-  if (trip.plannedDate) return formatDate(trip.plannedDate.slice(0, 10));
-  return formatDateTime(trip.createdAt, timeZone);
-}
-
-// ---- New trip ----
-
-function NewTripDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (trip: TripRecord) => void }) {
-  const t = useT();
-  const vehicles = useActiveVehicles();
-  const drivers = useActiveDrivers();
-  const currency = useCurrency();
-  const [form, setForm] = useState({ vehicleId: '', driverId: '', date: '', advance: '' });
-  const [problem, setProblem] = useState<string | null>(null);
-  const create = useAction(
-    (body: CreateTripBody) => apiSend<TripRecord>('POST', 'logistics/trips', body),
-    TRIP_EFFECTS,
-    onCreated,
-  );
-  const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
-
-  const submit = () => {
-    if (!form.vehicleId || !form.driverId) return setProblem(t('Choose the vehicle and the driver.'));
-    const advance = parseOptionalMoney(form.advance, 'the cash advance');
-    if (!advance.ok) return setProblem(advance.error);
-    setProblem(null);
-    create.mutate({
-      vehicleId: form.vehicleId,
-      driverEmployeeId: form.driverId,
-      plannedDate: form.date || undefined,
-      advanceAmount: advance.value,
-    });
-  };
-
-  return (
-    <FormDialog
-      title={t('Plan a trip')}
-      description={<p>Add pickups and deliveries to it next; the driver sees it in the driver app once it has stops.</p>}
-      submitLabel={t('Plan trip')}
-      pending={create.isPending}
-      error={problem ?? create.error}
-      onClose={onClose}
-      onSubmit={submit}
-    >
-      <Field label={t('Vehicle')}>
-        {(props) => (
-          <select {...props} value={form.vehicleId} onChange={(e) => set({ vehicleId: e.target.value })}>
-            <option value="">{vehicles.isPending ? 'Loading…' : 'Choose a vehicle…'}</option>
-            {vehicles.records.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.registrationNumber}
-              </option>
-            ))}
-          </select>
-        )}
-      </Field>
-      <Field label={t('Driver')}>
-        {(props) => (
-          <select {...props} value={form.driverId} onChange={(e) => set({ driverId: e.target.value })}>
-            <option value="">{drivers.isPending ? 'Loading…' : 'Choose a driver…'}</option>
-            {drivers.records.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </Field>
-      <Field label={t('Date (optional)')}>
-        {(props) => <input {...props} type="date" value={form.date} onChange={(e) => set({ date: e.target.value })} />}
-      </Field>
-      <Field label={`Cash advance (${currency}, optional)`} hint={t('Given to the driver for fuel, tolls, labour')}>
-        {(props) => <input {...props} inputMode="decimal" value={form.advance} onChange={(e) => set({ advance: e.target.value })} />}
-      </Field>
-    </FormDialog>
-  );
 }
 
 // ---- Stops ----
@@ -157,6 +63,20 @@ function AddDeliveryDialog({ trip, onClose }: { trip: TripRecord; onClose: () =>
     () => apiSend<TripStopRecord>('POST', `logistics/trips/${trip.id}/stops/delivery`, { orderId, notes: optionalText(notes) }),
     TRIP_EFFECTS,
     onClose,
+  );
+  // Orders planned for this trip's day with its driver or vehicle come first.
+  const all = orders.data?.items ?? [];
+  const tripDay = trip.plannedDate?.slice(0, 10) ?? null;
+  const planned = all.filter(
+    (o) => tripDay !== null && o.deliveryDate === tripDay && (o.plannedDriverId === trip.driverEmployeeId || o.plannedVehicleId === trip.vehicleId),
+  );
+  const others = all.filter((o) => !planned.includes(o));
+  const option = (o: OrderRecord) => (
+    <option key={o.id} value={o.id}>
+      {formatOrderNumber(o.number)} · {customerName(o.customerId)}
+      {o.deliveryDate ? ` · ${formatDate(o.deliveryDate)}` : ''}
+      {o.totalValue ? ` · ${formatMoney(o.totalValue, currency)}` : ''}
+    </option>
   );
   return (
     <FormDialog
@@ -178,11 +98,14 @@ function AddDeliveryDialog({ trip, onClose }: { trip: TripRecord; onClose: () =>
             <option value="">
               {orders.isPending ? 'Loading…' : orders.data?.items.length ? 'Choose an order…' : 'No confirmed orders waiting'}
             </option>
-            {(orders.data?.items ?? []).map((o) => (
-              <option key={o.id} value={o.id}>
-                {customerName(o.customerId)} · {o.totalValue ? formatMoney(o.totalValue, currency) : shortRef(o.id)}
-              </option>
-            ))}
+            {planned.length > 0 ? (
+              <>
+                <optgroup label={t('Planned for this trip')}>{planned.map(option)}</optgroup>
+                {others.length > 0 && <optgroup label={t('Other confirmed orders')}>{others.map(option)}</optgroup>}
+              </>
+            ) : (
+              others.map(option)
+            )}
           </select>
         )}
       </Field>
@@ -244,7 +167,8 @@ function AddPickupDialog({ trip, onClose }: { trip: TripRecord; onClose: () => v
             </option>
             {(purchaseOrders.data?.items ?? []).map((po) => (
               <option key={po.id} value={po.id}>
-                {farmerName(po.farmerId)} · raised {formatDateTime(po.createdAt, timeZone)}
+                {formatPoNumber(po.number)} · {farmerName(po.farmerId)}
+                {po.pickupDate ? ` · ${t('Pickup')} ${formatDate(po.pickupDate)}` : ` · raised ${formatDateTime(po.createdAt, timeZone)}`}
               </option>
             ))}
           </select>
@@ -330,7 +254,85 @@ function ExpenseDialog({ trip, onClose }: { trip: TripRecord; onClose: () => voi
 // ---- Detail ----
 
 type Open = 'delivery' | 'pickup' | 'start' | 'complete' | 'cancel' | 'expense';
+type Tab = 'overview' | 'stops' | 'quantities' | 'expenses';
 
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'stops', label: 'Stops' },
+  { value: 'quantities', label: 'Quantities' },
+  { value: 'expenses', label: 'Expenses' },
+];
+
+/** "Ginger 500 kg · +1" for a stop. */
+function stopLoad(stop: TripStopRecord): string {
+  const items = stop.items ?? [];
+  const first = items[0];
+  if (!first) return '';
+  return `${first.productName} ${formatQuantity(first.quantity, first.uom)}${items.length > 1 ? ` · +${items.length - 1}` : ''}`;
+}
+
+const FARM_REASONS: Record<string, string> = {
+  quality_issue: 'Quality issue',
+  quantity_short: 'Quantity short',
+  damaged: 'Damaged',
+  farmer_not_ready: 'Farmer not ready',
+  other: 'Other',
+};
+
+/** A completed farm stop (driver app D2): "Loaded 795 kg · Rejected: Ginger (Quality issue) · Packed by Mani, loaded by Kumar". */
+function farmOutcome(farm: NonNullable<TripStopRecord['farm']>, t: (s: string, v?: Record<string, string>) => string): string {
+  const parts = [t('Loaded {kg}', { kg: formatQuantity(farm.loadedKg, 'kg') })];
+  const rejected = farm.lines.filter((l) => l.outcome === 'rejected');
+  if (rejected.length > 0) {
+    parts.push(`${t('Rejected')}: ${rejected.map((l) => `${l.productName} (${t(FARM_REASONS[l.reason ?? 'other'])}${l.note ? ` — ${l.note}` : ''})`).join(', ')}`);
+  }
+  if (farm.packer && farm.loader) {
+    parts.push(
+      farm.packer.employeeId === farm.loader.employeeId
+        ? t('Packed and loaded by {name}', { name: farm.packer.name })
+        : t('Packed by {packer}, loaded by {loader}', { packer: farm.packer.name, loader: farm.loader.name }),
+    );
+  }
+  return parts.join(' · ');
+}
+
+const SHORT_REASONS: Record<string, string> = {
+  customer_took_less: 'The customer took less',
+  damaged: 'Damaged',
+  not_enough_on_vehicle: 'Not enough on the vehicle',
+  quality_issue: 'Quality issue',
+  other: 'Other',
+};
+
+/** A completed delivery (driver app D3): "QR scanned · Short: Tomato 300 of 350 kg (The customer took less) · Crates 20 left, 18 back". */
+function deliveryOutcome(delivery: NonNullable<TripStopRecord['delivery']>, t: (s: string, v?: Record<string, string>) => string): string {
+  const parts: string[] = [];
+  if (delivery.qrStatus === 'scanned') parts.push(t('QR scanned'));
+  else if (delivery.qrStatus === 'not_scanned') parts.push(`${t('QR not scanned')}${delivery.qrNote ? ` — ${delivery.qrNote}` : ''}`);
+  if (delivery.shortfalls.length > 0) {
+    const lines = delivery.shortfalls.map(
+      (s) =>
+        `${t('{product} {delivered} of {ordered}', { product: s.productName, delivered: formatQuantity(s.delivered, s.uom), ordered: formatQuantity(s.ordered, s.uom) })} (${t(SHORT_REASONS[s.reason])}${s.note ? ` — ${s.note}` : ''})`,
+    );
+    parts.push(t('Short: {lines}', { lines: lines.join(', ') }));
+  }
+  if (delivery.crates.dropped > 0 || delivery.crates.collected > 0) {
+    parts.push(t('Crates {left} left, {back} back', { left: String(delivery.crates.dropped), back: String(delivery.crates.collected) }));
+  }
+  return parts.join(' · ');
+}
+
+function stopTitle(stop: TripStopRecord, t: (s: string) => string): string {
+  return stop.party?.name ?? (stop.stopType === 'delivery' ? t('Delivery') : t('Pickup'));
+}
+
+/**
+ * Trip details (client design: Trip Details & Reconciliation): the number,
+ * route, day and crew; tabs for the overview (route drawn from map pins,
+ * counts, the stops as a timeline), the stops (reorder while planned,
+ * navigate), the quantities, and the expenses; and, once submitted, the
+ * owner's reconcile and close.
+ */
 function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }) {
   const t = useT();
   const { data, error, isPending, refetch } = useTripDetail(tripId);
@@ -338,11 +340,13 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
   const vehicleName = useVehicleName();
   const employeeName = useEmployeeName();
+  const routeName = useRouteName();
   const { data: session } = useSession();
   const canDispatch = hasPermission(session, 'logistics:dispatch');
   const canWrite = hasPermission(session, 'logistics:write');
   const canReconcile = hasPermission(session, 'logistics:reconcile');
   const [open, setOpen] = useState<Open | null>(null);
+  const [tab, setTab] = useState<Tab>('overview');
   const close = () => setOpen(null);
   const transition = useAction(
     (step: 'start' | 'complete' | 'cancel') =>
@@ -350,6 +354,12 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
     TRIP_EFFECTS,
     close,
   );
+  const reorder = useAction(
+    (stopIds: string[]) => apiSend<TripStopRecord[]>('PUT', `logistics/trips/${tripId}/stops/order`, { version: data?.trip.version, stopIds }),
+    TRIP_EFFECTS,
+  );
+  const stopsForMap = data?.stops ?? [];
+  const { depot, points } = useTripPoints(stopsForMap);
 
   if (isPending || error) {
     return (
@@ -362,6 +372,15 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
   const { trip, stops, expenses, reconciliation, deposits } = data;
   const pending = stops.filter((s) => s.status === 'pending').length;
   const active = trip.status === 'planned' || trip.status === 'in_progress';
+  const customers = new Set(stops.filter((s) => s.stopType === 'delivery').map((s) => s.party?.id)).size;
+  const farmers = new Set(stops.filter((s) => s.stopType === 'pickup').map((s) => s.party?.id)).size;
+  const distance = tripDistance(depot, points);
+  const navigate = navigateUrl(depot, points);
+  const move = (i: number, by: -1 | 1) => {
+    const ids = stops.map((s) => s.id);
+    [ids[i], ids[i + by]] = [ids[i + by], ids[i]];
+    reorder.mutate(ids);
+  };
   const confirmStep = (step: 'start' | 'complete' | 'cancel', title: string, body: React.ReactNode, label: string) => (
     <FormDialog
       title={title}
@@ -379,134 +398,244 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
   );
 
   return (
-    <DetailPanel title={`Trip · ${vehicleName(trip.vehicleId)}`} onClose={onClose}>
-      <KeyValues
-        items={[
-          ['Driver', employeeName(trip.driverEmployeeId)],
-          ['Status', tripBadge(trip)],
-          ['Planned for', trip.plannedDate ? formatDate(trip.plannedDate.slice(0, 10)) : '—'],
-          ['Started', formatDateTime(trip.startedAt, timeZone)],
-          ['Finished', formatDateTime(trip.completedAt, timeZone)],
-          ['Cash advance', formatMoney(trip.advanceAmount, currency)],
-        ]}
-      />
-      {trip.status === 'in_progress' && trip.reviewNote && (
-        <p className="action-note">{t('Returned to the driver:')} {trip.reviewNote}</p>
-      )}
-      {canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && <TripClosure trip={trip} deposits={deposits} />}
-      <ActionBar>
-        {canWrite && trip.status === 'planned' && (
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={stops.length === 0}
-            title={stops.length === 0 ? 'Add a stop first' : undefined}
-            onClick={() => setOpen('start')}
-          >
-            {t('Start trip')}
-          </button>
-        )}
-        {canWrite && trip.status === 'in_progress' && (
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={pending > 0}
-            title={pending > 0 ? `${pending} stop(s) still pending` : undefined}
-            onClick={() => setOpen('complete')}
-          >
-            Complete trip
-          </button>
-        )}
-        {canDispatch && trip.status === 'planned' && (
-          <>
-            <button type="button" className="button" onClick={() => setOpen('delivery')}>
-              {t('Add delivery')}
-            </button>
-            <button type="button" className="button" onClick={() => setOpen('pickup')}>
-              {t('Add pickup')}
-            </button>
-          </>
-        )}
-        {canWrite && (trip.status === 'planned' || trip.status === 'in_progress') && (
-          <button type="button" className="button" onClick={() => setOpen('expense')}>
-            {t('Record expense')}
-          </button>
-        )}
-        {canWrite && active && (
-          <button type="button" className="button button-danger" onClick={() => setOpen('cancel')}>
-            {t('Cancel trip')}
-          </button>
-        )}
-      </ActionBar>
+    <DetailPanel title={`${trip.number}`} onClose={onClose}>
+      <p className="trip-head">
+        {trip.routeId ? routeName(trip.routeId) : t('No route')} · {trip.plannedDate ? formatDate(trip.plannedDate) : formatDate(trip.createdAt.slice(0, 10))}
+        {trip.startedAt && ` · ${t('Started')} ${timeOf(trip.startedAt, timeZone)}`}
+      </p>
+      <div className="trip-tabs">
+        <FilterTabs label="Trip details" options={TABS} value={tab} onChange={(v) => setTab(v as Tab)} />
+      </div>
 
-      <h3 className="detail-subhead">
-        {t('Stops ·')} {stops.length - pending} of {stops.length} done
-      </h3>
-      <ol className="stop-list">
-        {stops.length === 0 && <li className="muted">{t('No stops planned yet.')}</li>}
-        {stops.map((stop) => (
-          <li key={stop.id} data-status={stop.status}>
-            <span className="stop-seq">{stop.sequenceNumber}</span>
-            <span>
-              {stop.stopType === 'delivery'
-                ? `Delivery · order ${shortRef(stop.orderId ?? '')}`
-                : `Pickup · ${shortRef(stop.pickupId ?? '')}`}
-              {stop.completedAt && <span className="muted"> · {formatDateTime(stop.completedAt, timeZone)}</span>}
-              {stop.notes && <span className="muted"> · {stop.notes}</span>}
-            </span>
-            <StatusBadge status={stop.status} />
-          </li>
-        ))}
-      </ol>
-      {trip.status === 'in_progress' && pending > 0 && (
-        <p className="footnote">
-          {t('The driver completes each stop from the driver app, with proof of delivery and any cash collected.')}
-        </p>
-      )}
-
-      <h3 className="detail-subhead">{t('Expenses')}</h3>
-      {expenses.length === 0 ? (
-        <p className="muted">{t('None recorded.')}</p>
-      ) : (
-        <div className="table-wrap">
-          <table className="table">
-            <tbody>
-              {expenses.map((expense) => (
-                <tr key={expense.id}>
-                  <td>{EXPENSE_LABEL[expense.category]}</td>
-                  <td className="muted">{expense.notes ?? ''}</td>
-                  <td className="align-right">{formatMoney(expense.amount, currency)}</td>
-                </tr>
-              ))}
-              <tr className="total-row">
-                <td colSpan={2}>{t('Total')}</td>
-                <td className="align-right">{formatMoney(sumMoney(expenses.map((e) => e.amount)), currency)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {reconciliation && (
+      {tab === 'overview' && (
         <>
-          <h3 className="detail-subhead">{t('Closure')}</h3>
-          <ClosedTrip reconciliation={reconciliation} timeZone={timeZone} />
+          <KeyValues
+            items={[
+              ['Status', tripBadge(trip)],
+              ['Driver', employeeName(trip.driverEmployeeId)],
+              ['Vehicle', vehicleName(trip.vehicleId)],
+              ['Packer', trip.packerEmployeeId ? employeeName(trip.packerEmployeeId) : '—'],
+              ['Loader', trip.loaderEmployeeId ? employeeName(trip.loaderEmployeeId) : '—'],
+              ['Planned for', trip.plannedDate ? formatDate(trip.plannedDate) : '—'],
+              ['Started', formatDateTime(trip.startedAt, timeZone)],
+              ['Finished', formatDateTime(trip.completedAt, timeZone)],
+              ['Cash advance', formatMoney(trip.advanceAmount, currency)],
+            ]}
+          />
+          {trip.status === 'in_progress' && trip.reviewNote && (
+            <p className="action-note">{t('Returned to the driver:')} {trip.reviewNote}</p>
+          )}
+          {canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && <TripClosure trip={trip} deposits={deposits} />}
+          <ActionBar>
+            {canWrite && trip.status === 'planned' && (
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={stops.length === 0}
+                title={stops.length === 0 ? t('Add a stop first') : undefined}
+                onClick={() => setOpen('start')}
+              >
+                {t('Start trip')}
+              </button>
+            )}
+            {canWrite && trip.status === 'in_progress' && (
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={pending > 0}
+                title={pending > 0 ? t('{n} stop(s) still pending', { n: pending }) : undefined}
+                onClick={() => setOpen('complete')}
+              >
+                {t('Complete trip')}
+              </button>
+            )}
+            {canDispatch && trip.status === 'planned' && (
+              <>
+                <button type="button" className="button" onClick={() => setOpen('delivery')}>
+                  {t('Add delivery')}
+                </button>
+                <button type="button" className="button" onClick={() => setOpen('pickup')}>
+                  {t('Add pickup')}
+                </button>
+              </>
+            )}
+            {canWrite && (trip.status === 'planned' || trip.status === 'in_progress') && (
+              <button type="button" className="button" onClick={() => setOpen('expense')}>
+                {t('Record expense')}
+              </button>
+            )}
+            {canWrite && active && (
+              <button type="button" className="button button-danger" onClick={() => setOpen('cancel')}>
+                {t('Cancel trip')}
+              </button>
+            )}
+          </ActionBar>
+
+          <TripMap stops={stops} />
+          <div className="count-tiles trip-tiles">
+            <span className="count-tile">
+              <span className="count-tile-value">{farmers}</span>
+              <span className="count-tile-label">{t('Farmers')}</span>
+            </span>
+            <span className="count-tile">
+              <span className="count-tile-value">{customers}</span>
+              <span className="count-tile-label">{t('Customers')}</span>
+            </span>
+            <span className="count-tile">
+              <span className="count-tile-value">{stops.length}</span>
+              <span className="count-tile-label">{t('Stops')}</span>
+            </span>
+            <span className="count-tile">
+              <span className="count-tile-value">{distance === null ? '—' : `~${Math.round(distance)} km`}</span>
+              <span className="count-tile-label">{t('Distance')}</span>
+            </span>
+          </div>
+
+          <h3 className="detail-subhead">
+            {t('Stops ·')} {stops.length - pending} of {stops.length} done
+          </h3>
+          <ol className="stop-list timeline">
+            {stops.length === 0 && <li className="muted">{t('No stops planned yet.')}</li>}
+            {stops.map((stop) => (
+              <li key={stop.id} data-status={stop.status}>
+                <span className="stop-seq">{stop.sequenceNumber}</span>
+                <span className="timeline-time">{timeOf(stop.completedAt, timeZone) ?? '—'}</span>
+                <span>
+                  <strong>{stopTitle(stop, t)}</strong>
+                  <span className="muted">
+                    {' '}
+                    · {stop.stopType === 'delivery' ? t('Delivery') : t('Pickup')}
+                    {stopLoad(stop) ? ` · ${stopLoad(stop)}` : ''}
+                  </span>
+                </span>
+                <StatusBadge status={stop.status} />
+              </li>
+            ))}
+          </ol>
+          {trip.status === 'in_progress' && pending > 0 && (
+            <p className="footnote">{t('The driver completes each stop from the driver app, with proof of delivery and any cash collected.')}</p>
+          )}
+          {reconciliation && (
+            <>
+              <h3 className="detail-subhead">{t('Closure')}</h3>
+              <ClosedTrip reconciliation={reconciliation} timeZone={timeZone} />
+            </>
+          )}
+          {!reconciliation && !canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && (
+            <p className="muted">{t('Waiting for the owner to reconcile and close.')}</p>
+          )}
         </>
       )}
-      {!reconciliation && !canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && (
-        <p className="muted">{t('Waiting for the owner to reconcile and close.')}</p>
+
+      {tab === 'stops' && (
+        <>
+          {navigate && (
+            <a className="button navigate-link" href={navigate} target="_blank" rel="noopener noreferrer">
+              <Icon name="navigate" size={16} /> {t('Navigate the route')}
+            </a>
+          )}
+          <ol className="stop-list" data-updating={reorder.isPending || undefined}>
+            {stops.length === 0 && <li className="muted">{t('No stops planned yet.')}</li>}
+            {stops.map((stop, i) => (
+              <li key={stop.id} data-status={stop.status}>
+                <span className="stop-seq">{stop.sequenceNumber}</span>
+                <span className="stop-main">
+                  <strong>{stopTitle(stop, t)}</strong>
+                  <span className="muted">
+                    {stop.stopType === 'delivery'
+                      ? `${t('Delivery')}${stop.orderId ? ` · ${t('order')}` : ''}`
+                      : `${t('Pickup')}`}
+                    {stopLoad(stop) ? ` · ${stopLoad(stop)}` : ''}
+                    {stop.party?.phone ? ` · ${stop.party.phone}` : ''}
+                  </span>
+                  {stop.collect?.terms === 'cash' && (
+                    <span className="muted">
+                      {t('Collect')} {formatMoney(stop.collect.amount, currency)}
+                    </span>
+                  )}
+                  {stop.notes && <span className="muted">{stop.notes}</span>}
+                  {stop.farm && <span className="muted">{farmOutcome(stop.farm, t)}</span>}
+                  {stop.delivery && deliveryOutcome(stop.delivery, t) && <span className="muted">{deliveryOutcome(stop.delivery, t)}</span>}
+                  {stop.completedAt && <span className="muted">{formatDateTime(stop.completedAt, timeZone)}</span>}
+                </span>
+                <StatusBadge status={stop.status} />
+                {canDispatch && trip.status === 'planned' && stops.length > 1 && (
+                  <span className="route-stop-actions">
+                    <button type="button" className="icon-button" aria-label={t('Move {name} up', { name: stopTitle(stop, t) })} disabled={i === 0} onClick={() => move(i, -1)}>
+                      <Icon name="arrowUp" size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={t('Move {name} down', { name: stopTitle(stop, t) })}
+                      disabled={i === stops.length - 1}
+                      onClick={() => move(i, 1)}
+                    >
+                      <Icon name="arrowDown" size={16} />
+                    </button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+          {reorder.error ? (
+            <p className="form-error" role="alert">
+              {t('The new order was not saved — reload and try again.')}
+            </p>
+          ) : null}
+          {canDispatch && trip.status === 'planned' && (
+            <ActionBar>
+              <button type="button" className="button" onClick={() => setOpen('delivery')}>
+                {t('Add delivery')}
+              </button>
+              <button type="button" className="button" onClick={() => setOpen('pickup')}>
+                {t('Add pickup')}
+              </button>
+            </ActionBar>
+          )}
+        </>
+      )}
+
+      {tab === 'quantities' && <TripQuantitiesView tripId={trip.id} />}
+
+      {tab === 'expenses' && (
+        <>
+          {expenses.length === 0 ? (
+            <p className="muted">{t('None recorded.')}</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <tbody>
+                  {expenses.map((expense) => (
+                    <tr key={expense.id}>
+                      <td>{t(EXPENSE_LABEL[expense.category])}</td>
+                      <td className="muted">{expense.notes ?? ''}</td>
+                      <td className="align-right">{formatMoney(expense.amount, currency)}</td>
+                    </tr>
+                  ))}
+                  <tr className="total-row">
+                    <td colSpan={2}>{t('Total')}</td>
+                    <td className="align-right">{formatMoney(sumMoney(expenses.map((e) => e.amount)), currency)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          {canWrite && (trip.status === 'planned' || trip.status === 'in_progress') && (
+            <ActionBar>
+              <button type="button" className="button" onClick={() => setOpen('expense')}>
+                {t('Record expense')}
+              </button>
+            </ActionBar>
+          )}
+        </>
       )}
 
       {open === 'delivery' && <AddDeliveryDialog trip={trip} onClose={close} />}
       {open === 'pickup' && <AddPickupDialog trip={trip} onClose={close} />}
       {open === 'expense' && <ExpenseDialog trip={trip} onClose={close} />}
       {open === 'start' &&
-        confirmStep(
-          'start',
-          'Start this trip?',
-          <p>{t('Marks the vehicle as on the road with')} {stops.length} stop(s).</p>,
-          'Start trip',
-        )}
+        confirmStep('start', 'Start this trip?', <p>{t('Marks the vehicle as on the road with {n} stop(s).', { n: stops.length })}</p>, 'Start trip')}
       {open === 'complete' &&
         confirmStep(
           'complete',
@@ -525,100 +654,117 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
   );
 }
 
+// ---- The list ----
+
+const STAGE: Record<TripStatus, { label: string; tone: CardTone }> = {
+  planned: { label: 'Planned', tone: 'pending' },
+  in_progress: { label: 'In Progress', tone: 'progress' },
+  completed: { label: 'To close', tone: 'pending' },
+  on_hold: { label: 'On hold', tone: 'bad' },
+  reconciled: { label: 'Completed', tone: 'done' },
+  cancelled: { label: 'Cancelled', tone: 'muted' },
+};
+
+const STAGE_FILTER = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'planned', label: 'Planned' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'To close' },
+  { value: 'on_hold', label: 'On hold' },
+  { value: 'reconciled', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+/** "4 Customers · 2 Farmers". */
+function partiesLine(card: TripCard, t: (s: string, v?: Record<string, string | number>) => string): string {
+  return [
+    card.customers ? t(card.customers === 1 ? '{n} Customer' : '{n} Customers', { n: card.customers }) : null,
+    card.farmers ? t(card.farmers === 1 ? '{n} Farmer' : '{n} Farmers', { n: card.farmers }) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ') || t('No stops yet');
+}
+
+/** The Trips list (client design V1.1, screen 7). */
 export default function LogisticsPage() {
   const t = useT();
-  const [status, setStatus] = useState<TripStatus | 'all'>('all');
-  const [page, setPage] = useState(1);
+  const [day, setDay] = useState<TripsBoardDay>('today');
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState('all');
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  useOpenOnNew(() => setCreating(true));
   const { data: session } = useSession();
   const canDispatch = hasPermission(session, 'logistics:dispatch');
-  const { data, error, isPending, isPlaceholderData, refetch } = useTrips(status === 'all' ? undefined : status, page);
-  const currency = useCurrency();
-  const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
-  const vehicleName = useVehicleName();
-  const employeeName = useEmployeeName();
+  const board = useTripsBoard(day, query);
+  const cards = (board.data?.items ?? []).filter((c) => stage === 'all' || c.status === stage);
+  const counts = board.data?.counts;
 
   return (
-    <div className="stack">
-      <PageHeader
-        title={t('Trips')}
-        subtitle={t('Deliveries and pickups on the road, and the cash each trip carried.')}
-        actions={
-          canDispatch && (
-            <button type="button" className="button button-primary" onClick={() => setCreating(true)}>
-              {t('Plan a trip')}
-            </button>
-          )
-        }
-      />
-      {creating && (
-        <NewTripDialog
-          onClose={() => setCreating(false)}
-          onCreated={(trip) => {
-            setCreating(false);
-            setSelected(trip.id);
+    <div className="list-split">
+      <div className="list-screen">
+        <h1 className="page-title visually-hidden">{t('Trips')}</h1>
+        {creating && (
+          <CreateTripDialog
+            onClose={() => setCreating(false)}
+            onCreated={(trip) => {
+              setCreating(false);
+              setSelected(trip.id);
+            }}
+          />
+        )}
+        <DayTabs
+          label="Which day"
+          value={day}
+          onChange={(value) => {
+            setDay(value);
+            setSelected(null);
           }}
+          options={[
+            { value: 'today', label: 'Today', count: counts?.today },
+            { value: 'tomorrow', label: 'Tomorrow', count: counts?.tomorrow },
+            { value: 'all', label: 'All', count: counts?.all },
+          ]}
         />
-      )}
-      <div className="split" data-detail={selected ? 'open' : undefined}>
-        <Panel
-          title={t('Trips')}
-          meta={
-            <FilterTabs
-              label={t('Filter by status')}
-              options={FILTERS}
-              value={status}
-              onChange={(value) => {
-                setStatus(value);
-                setPage(1);
-                setSelected(null);
-              }}
-            />
-          }
-        >
-          {isPending ? (
-            <SkeletonLines lines={6} />
-          ) : error ? (
-            <ErrorState error={error} onRetry={() => refetch()} />
-          ) : (
-            <div data-updating={isPlaceholderData || undefined} className="updating">
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>{t('When')}</th>
-                      <th>{t('Vehicle')}</th>
-                      <th>{t('Driver')}</th>
-                      <th>{t('Status')}</th>
-                      <th className="align-right">{t('Advance')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.items.length === 0 && <EmptyRow colSpan={5}>{t('No trips here.')}</EmptyRow>}
-                    {data.items.map((trip) => (
-                      <SelectableRow
-                        key={trip.id}
-                        selected={selected === trip.id}
-                        onSelect={() => setSelected(trip.id)}
-                        label={`Trip on ${vehicleName(trip.vehicleId)}`}
-                      >
-                        <td>{tripDate(trip, timeZone)}</td>
-                        <td>{vehicleName(trip.vehicleId)}</td>
-                        <td>{employeeName(trip.driverEmployeeId)}</td>
-                        <td>{tripBadge(trip)}</td>
-                        <td className="align-right">{formatMoney(trip.advanceAmount, currency)}</td>
-                      </SelectableRow>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
-            </div>
-          )}
-        </Panel>
-        {selected && <TripDetail key={selected} tripId={selected} onClose={() => setSelected(null)} />}
+        <SearchFilter
+          value={query}
+          onChange={setQuery}
+          placeholder="Search trip, route…"
+          filter={{ value: stage, options: STAGE_FILTER, onChange: setStage, label: 'Filter by status' }}
+        />
+        {board.isPending ? (
+          <SkeletonLines lines={5} height={64} />
+        ) : board.error ? (
+          <div className="panel">
+            <ErrorState error={board.error} onRetry={() => board.refetch()} />
+          </div>
+        ) : (
+          <div className="card-list" data-updating={board.isPlaceholderData || undefined}>
+            {cards.length === 0 && (
+              <div className="list-empty">{query || stage !== 'all' ? t('Nothing matches.') : t('No trips for this day.')}</div>
+            )}
+            {cards.map((card) => (
+              <ListCard
+                key={card.id}
+                number={card.number}
+                title={card.routeName ?? t('No route')}
+                place={partiesLine(card, t)}
+                detail={`${formatQuantity(String(Number(card.kg)), 'kg')} · ${t('{done} of {all} stops done', { done: card.stopsDone, all: card.stops })}`}
+                time={clock(card.time)}
+                status={STAGE[card.status].label}
+                tone={STAGE[card.status].tone}
+                person={card.driverName}
+                vehicle={card.vehicle}
+                initial={card.routeName ?? 'T'}
+                selected={selected === card.id}
+                onOpen={() => setSelected(card.id)}
+              />
+            ))}
+          </div>
+        )}
+        {canDispatch && <CreateBar label="Create Trip" onClick={() => setCreating(true)} />}
       </div>
+      {selected && <TripDetail key={selected} tripId={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

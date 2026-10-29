@@ -42,6 +42,12 @@ async function api(token, method, p, body) {
   const detail = () => page.locator('.detail');
   const fill = (label, value) => dialog().getByLabel(label).fill(value);
   const choose = (label, option) => dialog().getByLabel(label).selectOption({ label: option });
+  // Farmer, customer and product are searchable pickers (SearchSelect): open, type, pick.
+  async function pick(label, option) {
+    await dialog().getByLabel(label, { exact: true }).click();
+    await dialog().locator('.picker-search').fill(option);
+    await dialog().getByRole('option', { name: option, exact: true }).click();
+  }
   // Submit the open dialog and wait for it to close; if it stays open, the
   // form's error message is the failure detail.
   async function submit(name) {
@@ -79,9 +85,9 @@ async function api(token, method, p, body) {
 
     // ---------------- Customers ----------------
     await page.goto(`${BASE}/customers`);
-    await page.waitForSelector('.row-selectable');
+    await page.waitForSelector('.party-card');
     await step('customer: validation stops a bad form before the round trip', async () => {
-      await page.getByRole('button', { name: 'New customer' }).click();
+      await page.getByRole('button', { name: 'Add Customer' }).click();
       await fill('Name', 'G');
       await dialog().getByRole('button', { name: 'Add customer' }).click();
       const message = await dialog().locator('.form-error').textContent();
@@ -109,7 +115,8 @@ async function api(token, method, p, body) {
       await fill('Reason for the hold', 'Cheque bounced');
       must(await submit('Save terms'));
       await page.waitForFunction(() => /Cheque bounced/.test(document.querySelector('.detail').textContent));
-      const listBadge = await page.locator('.row-selectable:has-text("Green Leaf") .badge').allTextContents();
+      await page.waitForFunction(() => /On hold/.test(document.querySelector('.party-card[aria-current]')?.textContent ?? ''));
+      const listBadge = await page.locator('.party-card:has-text("Green Leaf") .list-card-status').allTextContents();
       if (!listBadge.includes('On hold')) throw new Error(`list badges: ${listBadge}`);
       return listBadge.join(', ');
     });
@@ -123,33 +130,32 @@ async function api(token, method, p, body) {
 
     // ---------------- Procurement ----------------
     await page.goto(`${BASE}/procurement`);
-    await page.waitForSelector('.panel');
-    await step('PO: create with two lines', async () => {
-      await page.getByRole('button', { name: 'New purchase order' }).click();
-      await choose('Farmer', 'Ramesh Patil');
-      await dialog().getByLabel('Line 1 product').selectOption({ label: 'Tomato' });
+    await page.waitForSelector('.list-screen');
+    await step('PO: create with two lines, driver and vehicle', async () => {
+      await page.getByRole('button', { name: 'Create Procurement' }).click();
+      await pick('Farmer', 'Ramesh Patil');
+      await fill('Pickup time (optional)', '09:30');
+      await choose('Driver', 'Suresh Kale');
+      await choose('Vehicle', 'MH12AB4521');
+      await pick('Line 1 product', 'Tomato');
       await dialog().getByLabel(/Line 1 quantity/).fill('100');
-      await dialog().getByLabel(/Line 1 indicative rate/).fill('20');
+      await dialog().getByLabel(/Line 1 rate/).fill('20');
       await dialog().getByRole('button', { name: 'Add a line' }).click();
-      await dialog().getByLabel('Line 2 product').selectOption({ label: 'Onion' });
+      await pick('Line 2 product', 'Onion');
       await dialog().getByLabel(/Line 2 quantity/).fill('50');
-      await dialog().getByLabel(/Line 2 indicative rate/).fill('18');
+      await dialog().getByLabel(/Line 2 rate/).fill('18');
       const estimate = await dialog().locator('.lines-total strong').textContent();
-      must(await submit('Raise purchase order'));
-      await page.waitForFunction(() => /To confirm/.test(document.querySelector('.detail')?.textContent ?? ''));
+      must(await submit('Save Procurement'));
       return `estimate ${estimate}`;
     });
-    await step('PO: confirm (under the approval threshold)', async () => {
-      await detail().getByRole('button', { name: 'Confirm', exact: true }).click();
-      must(await submit('Confirm'));
-      await page.waitForFunction(() => /Awaiting produce/.test(document.querySelector('.detail').textContent));
-    });
-    await step('PO: schedule a pickup', async () => {
-      await detail().getByRole('button', { name: 'Schedule pickup' }).click();
-      await choose('Vehicle (optional)', 'MH12AB4521');
-      await choose('Driver (optional)', 'Suresh Kale');
-      must(await submit('Schedule'));
+    await step('PO: saving confirms it (under the approval threshold) and schedules the pickup', async () => {
+      await page.waitForFunction(() => /Awaiting produce/.test(document.querySelector('.detail')?.textContent ?? ''));
       await page.waitForFunction(() => /Scheduled/.test(document.querySelector('.detail .plain-list')?.textContent ?? ''));
+      const card = (await page.locator('.list-card').first().textContent()).replace(/\s+/g, ' ');
+      if (!/P-\d{5}/.test(card) || !/Ramesh Patil/.test(card) || !/09:30 AM/.test(card) || !/Suresh Kale/.test(card) || !/MH12AB4521/.test(card)) {
+        throw new Error(`card: ${card}`);
+      }
+      return card;
     });
     await step('PO: receive goods linked to the pickup', async () => {
       await detail().getByRole('button', { name: 'Receive goods' }).click();
@@ -193,16 +199,15 @@ async function api(token, method, p, body) {
     await page.screenshot({ path: path.join(OUT, 'e2e-2-procurement.png'), fullPage: true });
 
     await step('PO over ₹50,000: approval requested, approved, finalized', async () => {
-      await page.getByRole('button', { name: 'New purchase order' }).click();
-      await choose('Farmer', 'Lakshmi Devi');
-      await dialog().getByLabel('Line 1 product').selectOption({ label: 'Tomato' });
+      await page.getByRole('button', { name: 'Create Procurement' }).click();
+      await pick('Farmer', 'Lakshmi Devi');
+      await choose('Driver', 'Suresh Kale');
+      await choose('Vehicle', 'MH12AB4521');
+      await pick('Line 1 product', 'Tomato');
       await dialog().getByLabel(/Line 1 quantity/).fill('3000');
-      await dialog().getByLabel(/Line 1 indicative rate/).fill('20');
-      must(await submit('Raise purchase order'));
-      await page.waitForFunction(() => /To confirm/.test(document.querySelector('.detail')?.textContent ?? ''));
-      await detail().getByRole('button', { name: 'Confirm', exact: true }).click();
-      must(await submit('Confirm'));
-      await page.waitForFunction(() => /Needs approval/.test(document.querySelector('.detail').textContent));
+      await dialog().getByLabel(/Line 1 rate/).fill('20');
+      must(await submit('Save Procurement'));
+      await page.waitForFunction(() => /Needs approval/.test(document.querySelector('.detail')?.textContent ?? ''));
       // The owner raised it, so the owner can't decide it.
       await page.waitForFunction(() => /You raised it/.test(document.querySelector('.detail').textContent));
       if ((await detail().getByRole('button', { name: 'Approve' }).count()) > 0) throw new Error('Approve offered to the requester');
@@ -215,14 +220,18 @@ async function api(token, method, p, body) {
       const decided = await api(ops, 'POST', `/approval-requests/${po.approvalRequestId}/approve`, { version: request.body.version, note: 'Season stock-up' });
       if (decided.status >= 300) throw new Error(JSON.stringify(decided.body));
       await page.reload();
-      await page.locator('.row-selectable').first().click();
+      await page.locator('.list-card', { hasText: 'Lakshmi Devi' }).first().click();
       await page.waitForFunction(() => /Approved/.test(document.querySelector('.detail')?.textContent ?? ''));
       await detail().getByRole('button', { name: 'Confirm purchase order' }).click();
       await page.waitForFunction(() => /Awaiting produce/.test(document.querySelector('.detail .key-values').textContent));
+      // The pickup planned on the form is scheduled once approved.
+      await page.waitForFunction(() => /Scheduled/.test(document.querySelector('.detail .plain-list')?.textContent ?? ''));
     });
 
     // ---------------- Inventory ----------------
     await page.goto(`${BASE}/inventory`);
+    // Inventory opens on Vehicle Stock (redesign Phase 6); the products and their lots are under Total Stock.
+    await page.getByRole('button', { name: 'Total Stock' }).click();
     // Wait for inventory rows specifically: the previous page's purchase-order rows are also .row-selectable.
     await page.waitForSelector('.row-selectable:has-text("Onion")');
     await step('inventory: graded stock shows as available', async () => {
@@ -250,41 +259,47 @@ async function api(token, method, p, body) {
 
     // ---------------- Orders ----------------
     await page.goto(`${BASE}/orders`);
-    await page.waitForSelector('.panel');
+    await page.waitForSelector('.list-screen');
     await step('order: create with list price and a negotiated rate', async () => {
-      await page.getByRole('button', { name: 'New order' }).click();
-      await choose('Customer', 'Hotel Sagar');
+      await page.getByRole('button', { name: 'Create Delivery Order' }).click();
+      await pick('Customer', 'Hotel Sagar');
       await page.waitForFunction(() => /Credit available/.test(document.querySelector('dialog[open]').textContent));
       const credit = (await dialog().locator('.action-note').textContent()).replace(/\s+/g, ' ');
-      await dialog().getByLabel('Line 1 product').selectOption({ label: 'Tomato' });
+      await choose('Driver', 'Suresh Kale');
+      await choose('Vehicle', 'MH12AB4521');
+      await pick('Line 1 product', 'Tomato');
       await dialog().getByLabel(/Line 1 quantity/).fill('50');
       await dialog().getByRole('button', { name: 'Add a line' }).click();
-      await dialog().getByLabel('Line 2 product').selectOption({ label: 'Onion' });
+      await pick('Line 2 product', 'Onion');
       await dialog().getByLabel(/Line 2 quantity/).fill('50');
       await dialog().getByLabel(/Line 2 rate/).fill('28');
-      must(await submit('Place order'));
-      await page.waitForFunction(() => /To confirm/.test(document.querySelector('.detail')?.textContent ?? ''));
+      must(await submit('Save Order'));
+      await page.waitForFunction(() => /D-\d{5}/.test(document.querySelector('.detail')?.textContent ?? ''));
       const lines = (await detail().locator('tbody').textContent()).replace(/\s+/g, ' ');
       if (!/₹32/.test(lines) || !/₹28/.test(lines)) throw new Error(lines);
       return `${credit.slice(0, 60)}… | ${lines}`;
     });
-    await step('order: confirm reserves stock', async () => {
-      await detail().getByRole('button', { name: 'Confirm order' }).click();
-      must(await submit('Confirm order'));
-      await page.waitForFunction(() => /Confirmed/.test(document.querySelector('.detail .key-values').textContent));
+    await step('order: saving confirms it and reserves stock (stock is in, credit allows)', async () => {
+      await page.waitForFunction(() => /Confirmed/.test(document.querySelector('.detail .key-values')?.textContent ?? ''));
+      const card = (await page.locator('.list-card', { hasText: 'Hotel Sagar' }).first().textContent()).replace(/\s+/g, ' ');
+      if (!/D-\d{5}/.test(card) || !/Suresh Kale/.test(card) || !/MH12AB4521/.test(card) || !/Pending/.test(card)) throw new Error(card);
+      return card;
     });
     await page.screenshot({ path: path.join(OUT, 'e2e-4-orders.png'), fullPage: true });
 
     // ---------------- Trips ----------------
     await page.goto(`${BASE}/logistics`);
-    await page.waitForSelector('.panel');
+    await page.waitForSelector('.list-screen');
     await step('trip: plan with a cash advance', async () => {
-      await page.getByRole('button', { name: 'Plan a trip' }).click();
-      await choose('Vehicle', 'MH12AB4521');
+      await page.getByRole('button', { name: 'Create Trip' }).click();
       await choose('Driver', 'Suresh Kale');
+      await choose('Vehicle', 'MH12AB4521');
       await fill('Cash advance (INR, optional)', '1000');
-      must(await submit('Plan trip'));
+      await dialog().getByRole('button', { name: 'Review Trip →' }).click();
+      await dialog().getByRole('heading', { name: 'Review Trip' }).waitFor();
+      must(await submit('Create Trip'));
       await page.waitForFunction(() => /Planned/.test(document.querySelector('.detail')?.textContent ?? ''));
+      return (await detail().locator('h2, h3').first().textContent()) ?? '';
     });
     await step('trip: start is disabled with no stops', async () => {
       if (!(await detail().getByRole('button', { name: 'Start trip' }).isDisabled())) throw new Error('enabled');
@@ -306,7 +321,9 @@ async function api(token, method, p, body) {
       await detail().getByRole('button', { name: 'Record expense' }).click();
       await fill('Amount (INR)', '400');
       must(await submit('Record expense'));
+      await detail().getByRole('button', { name: 'Expenses', exact: true }).click();
       await page.waitForFunction(() => /Fuel/.test(document.querySelector('.detail').textContent));
+      await detail().getByRole('button', { name: 'Overview', exact: true }).click();
     });
     await step('driver delivers with proof (driver app, via API)', async () => {
       const token = await apiLogin('owner@dev.morbeez.local');
@@ -319,7 +336,7 @@ async function api(token, method, p, body) {
       });
       if (r.status >= 300) throw new Error(JSON.stringify(r.body));
       await page.reload();
-      await page.locator('.row-selectable').first().click();
+      await page.locator('.list-card').first().click();
       await page.waitForFunction(() => /1 of 1 done/.test(document.querySelector('.detail')?.textContent ?? ''));
       return `stop ${r.body.status}`;
     });
@@ -351,10 +368,10 @@ async function api(token, method, p, body) {
 
     // ---------------- Orders after delivery ----------------
     await page.goto(`${BASE}/orders`);
-    await page.waitForSelector('.row-selectable');
+    await page.waitForSelector('.list-card');
     await step('order shows delivered', async () => {
-      const badge = await page.locator('.row-selectable:has-text("Hotel Sagar") .badge').first().textContent();
-      if (badge !== 'Delivered') throw new Error(badge);
+      const badge = await page.locator('.list-card:has-text("Hotel Sagar") .list-card-status').first().textContent();
+      if (badge.trim() !== 'Completed') throw new Error(badge);
     });
 
     // ---------------- Finance ----------------
@@ -412,18 +429,20 @@ async function api(token, method, p, body) {
 
     await step('customer detail reflects invoice and payment', async () => {
       await page.goto(`${BASE}/customers`);
-      await page.locator('.row-selectable:has-text("Hotel Sagar")').click();
-      await page.waitForFunction(() => /Credit available.*₹/.test(document.querySelector('.detail').textContent.replace(/\s+/g, ' ')));
+      await page.locator('.party-card:has-text("Hotel Sagar")').click();
+      await page.waitForFunction(() => /Total Sales/.test(document.querySelector('.detail')?.textContent ?? ''));
       const text = await detailText();
-      if (!/Invoiced to date\s*₹3,000/.test(text) || !/Collected to date\s*₹1,200/.test(text)) throw new Error(text.slice(0, 300));
-      return text.match(/Invoiced.*?Last payment/)?.[0];
+      if (!/Total Sales\s*₹3,000/.test(text) || !/Outstanding\s*₹1,800/.test(text)) throw new Error(text.slice(0, 300));
+      await detail().getByRole('button', { name: 'Payments', exact: true }).click();
+      await page.waitForFunction(() => /₹1,200/.test(document.querySelector('.detail')?.textContent ?? ''));
+      return text.match(/Total Sales.*?Credit Limit/)?.[0];
     });
 
     // ---------------- Phone width, dialog open ----------------
     await step('phone: dialog fits a 390px screen without sideways scroll', async () => {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${BASE}/orders`);
-      await page.getByRole('button', { name: 'New order' }).click();
+      await page.getByRole('button', { name: 'Create Delivery Order' }).first().click();
       await page.waitForSelector('dialog[open]');
       const box = await dialog().boundingBox();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -450,10 +469,11 @@ async function api(token, method, p, body) {
       await p2.waitForURL((u) => !/\/login/.test(u.toString()));
       await step(`${email.split('@')[0]}: action buttons follow permissions`, async () => {
         await p2.goto(`${BASE}/orders`);
-        await p2.waitForSelector('.panel');
+        await p2.waitForSelector('.list-screen');
         await p2.waitForTimeout(800);
-        const newOrder = await p2.getByRole('button', { name: 'New order' }).count();
-        await p2.goto(`${BASE}/finance`);
+        const newOrder = await p2.getByRole('button', { name: 'Create Delivery Order' }).count();
+        // The receivables report, under the Finance hub (redesign Phase 6).
+        await p2.goto(`${BASE}/finance#receivables`);
         await p2.waitForTimeout(1500);
         const pay = await p2.getByRole('button', { name: 'Record payment' }).count();
         const got = { orders: newOrder > 0, payment: pay > 0 };

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -16,6 +16,8 @@ import { TransferLotDto } from './dto/transfer-lot.dto';
 import { LocationRecord } from './entities/location.entity';
 import { InventoryMovementRecord, StockSummary } from './entities/inventory-movement.entity';
 import { LotRecord, ProductStockRow } from '../procurement/entities/lot.entity';
+import { VehicleStockRow } from '../procurement/repositories/lot-stock.repository';
+import { VehicleBoard } from './entities/vehicle-board.entity';
 
 @ApiTags('inventory')
 @ApiBearerAuth()
@@ -75,6 +77,20 @@ export class InventoryController {
   @RequirePermissions('inventory:read')
   getStockOverview(@CurrentUser() user: AuthContext): Promise<ProductStockRow[]> {
     return this.inventoryService.getStockOverview(user.tenantId);
+  }
+
+  /** The owner's Vehicle Stock: each vehicle on the road or with stock aboard — committed and free. */
+  @Get('vehicles')
+  @RequirePermissions('inventory:read')
+  getVehicleBoard(@CurrentUser() user: AuthContext): Promise<VehicleBoard> {
+    return this.inventoryService.getVehicleBoard(user.tenantId);
+  }
+
+  /** What's on every vehicle now, product by product (or one vehicle's, with ?vehicleId=). */
+  @Get('vehicle-stock')
+  @RequirePermissions('inventory:read')
+  getVehicleStock(@CurrentUser() user: AuthContext, @Query('vehicleId', new ParseUUIDPipe({ optional: true })) vehicleId?: string): Promise<VehicleStockRow[]> {
+    return this.inventoryService.getVehicleStock(user.tenantId, vehicleId ?? null);
   }
 
   @Get('products/:productId/stock-summary')

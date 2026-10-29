@@ -73,8 +73,11 @@ function client(token) {
       const stop = await owner.post(`/logistics/trips/${trip.id}/stops/pickup`, { pickupId: pickup.id });
       trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
       await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/complete-pickup`, { weights: [{ productId: birds.id, netQuantity: kg }] });
+      // Accepted at the farm at the owner's rate, onto the vehicle (driver app
+      // D0); closing the trip brings the birds back to the store.
+      trip = await owner.post(`/logistics/trips/${trip.id}/complete`, { version: (await owner.get(`/logistics/trips/${trip.id}`)).version, cashDeclared: 0 });
+      await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 0, exceptionNote: 'Birds back to the shed' });
       const [lot] = await owner.get(`/procurement/purchase-orders/${po.id}/lots`);
-      await owner.post(`/procurement/lots/${lot.id}/grade`, { version: lot.version, acceptedQuantity: kg, rejectedQuantity: 0, unitCost: 95, grade: 'A' });
       return lot;
     };
     // The confirm response carries no lines; read the order back for them.
@@ -83,7 +86,11 @@ function client(token) {
       return owner.get(`/orders/${o.id}`);
     };
     const lot = await buyBirds(500);
-    check('the farm weight entered at the pickup receives the goods', Number(lot.receivedQuantity) === 500 && lot.pickupId !== null, `${lot.receivedQuantity}`);
+    check(
+      "the farm weight entered at the pickup is accepted there, at the purchase order's rate",
+      Number(lot.receivedQuantity) === 500 && Number(lot.acceptedQuantity) === 500 && lot.unitCost === '95.00' && lot.status === 'available' && lot.pickupId !== null,
+      `${lot.receivedQuantity} ${lot.acceptedQuantity} ${lot.unitCost} ${lot.status}`,
+    );
 
     // ---- Customer-end weight settles the sale ----
     const order1 = await owner.post('/orders', { customerId: hotel.id, lines: [{ productId: birds.id, quantity: 500, unitPrice: 120 }] });

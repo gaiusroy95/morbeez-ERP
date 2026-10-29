@@ -6,15 +6,23 @@ import {
   AlertSeverity,
   DashboardAlert,
   DashboardAlerts,
+  DashboardHome,
   DashboardKpis,
+  HomeAlert,
+  HomePeriodName,
   DashboardOperations,
   DashboardPeriod,
   DashboardProfit,
+  DashboardRange,
+  FinanceSummary,
   KpiValue,
+  ProfitInsights,
 } from './entities/dashboard.entity';
+import { RangeName, RangeQueryDto } from './dto/range-query.dto';
+import { AccountingService } from '../accounting/accounting.service';
 import { PeriodQueryDto } from '../../common/dto/period-query.dto';
-import { subtractMoney } from '../../common/money';
-import { assertRealDate, daysInclusive } from '../../common/period';
+import { isPositiveMoney, subtractMoney, sumMoney } from '../../common/money';
+import { addDays, assertRealDate, daysInclusive } from '../../common/period';
 
 export { subtractMoney };
 
@@ -40,7 +48,70 @@ export class DashboardService {
   constructor(
     private readonly db: DatabaseService,
     private readonly dashboard: DashboardRepository,
+    private readonly accounting: AccountingService,
   ) {}
+
+  /**
+   * The owner's Finance hub (redesign V1.1, screen 15). Receivables,
+   * payables and cash as they stand now; expenses for the period from the
+   * ledger's profit and loss — every cost but the goods sold.
+   */
+  async getFinanceSummary(tenantId: string, query: RangeQueryDto): Promise<FinanceSummary> {
+    const period = await this.db.withTenant(tenantId, (client) => this.rangeOf(client, query));
+    // Accounting opens its own transaction: read it before this one starts.
+    const pnl = await this.accounting.getProfitAndLoss(tenantId, { from: period.fromDate, to: period.toDate });
+    return this.db.withTenant(tenantId, async (client) => {
+      const balances = await this.dashboard.balances(client);
+      return {
+        range: toRange(period, query.period ?? 'month'),
+        receivables: balances.receivables_outstanding,
+        payables: balances.farmer_payables_outstanding,
+        cashBalance: await this.dashboard.cashBalance(client),
+        expenses: sumMoney([pnl.figures.operatingExpenses, pnl.figures.financeCosts, pnl.figures.otherExpenses]),
+      };
+    });
+  }
+
+  /**
+   * Profit & Insights (redesign V1.1, screen 16): the period's revenue,
+   * total cost, net profit and margin from the ledger's profit and loss —
+   * the books' own figures — against the same number of days before; and
+   * product by product, sales against the cost of the kilos sold.
+   */
+  async getInsights(tenantId: string, query: RangeQueryDto): Promise<ProfitInsights> {
+    const period = await this.db.withTenant(tenantId, (client) => this.rangeOf(client, query));
+    const pnl = await this.accounting.getProfitAndLoss(tenantId, { from: period.fromDate, to: period.toDate });
+    const rows = await this.db.withTenant(tenantId, (client) => this.dashboard.productProfit(client, period.startAt, period.endAt));
+    const revenue = pnl.figures.netSales;
+    const netProfit = pnl.figures.netProfit;
+    return {
+      range: toRange(period, query.period ?? 'month'),
+      revenue,
+      revenueChangePercent: percentChange(revenue, pnl.previous.figures.netSales),
+      // Everything it took to earn the revenue, net of any other income.
+      totalCost: subtractMoney(revenue, netProfit),
+      netProfit,
+      netProfitChangePercent: percentChange(netProfit, pnl.previous.figures.netProfit),
+      marginPercent: percentOf(netProfit, revenue),
+      previous: { revenue: pnl.previous.figures.netSales, netProfit: pnl.previous.figures.netProfit },
+      products: rows.map((r) => {
+        const profit = subtractMoney(r.revenue, r.cost);
+        return { productId: r.product_id, product: r.product, revenue: r.revenue, costOfGoods: r.cost, profit, marginPercent: percentOf(profit, r.revenue) };
+      }),
+    };
+  }
+
+  /** Today, the last 7 days or this month so far in the business's timezone — or the owner's own dates. */
+  private async rangeOf(client: PoolClient, query: RangeQueryDto): Promise<ResolvedPeriod> {
+    const name: RangeName = query.period ?? 'month';
+    if (name === 'custom') {
+      if (!query.from || !query.to) throw new BadRequestException('A custom period needs from and to');
+      return this.resolvePeriod(client, { from: query.from, to: query.to });
+    }
+    const today = await this.resolvePeriodOrThrow(client, null, null, 1);
+    const from = name === 'today' ? today.toDate : name === 'week' ? addDays(today.toDate, -6) : `${today.toDate.slice(0, 8)}01`;
+    return this.resolvePeriodOrThrow(client, from, today.toDate, 1);
+  }
 
   getKpis(tenantId: string, query: PeriodQueryDto): Promise<DashboardKpis> {
     return this.db.withTenant(tenantId, async (client) => {
@@ -141,6 +212,62 @@ export class DashboardService {
     });
   }
 
+  /**
+   * The owner's Home screen in one call (redesign V1.1): net contribution
+   * (sales − purchases) for today, the last 7 days or the month so far,
+   * against the period before; balances; today's work; alerts with where
+   * each opens; the newest AI suggestion.
+   */
+  getHome(tenantId: string, name: HomePeriodName): Promise<DashboardHome> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const today = await this.resolvePeriodOrThrow(client, null, null, 1);
+      const from = name === 'today' ? today.toDate : name === 'week' ? null : `${today.toDate.slice(0, 8)}01`;
+      const period = await this.resolvePeriodOrThrow(client, from, today.toDate, 7);
+      const current = await this.dashboard.periodFlows(client, period.startAt, period.endAt);
+      const previous = await this.dashboard.periodFlows(client, period.previousStartAt, period.startAt);
+      const balances = await this.dashboard.balances(client);
+      const home = await this.dashboard.home(client, today.startAt, today.endAt, today.toDate);
+      const row = await this.dashboard.alerts(client, ALERT_THRESHOLDS);
+      const insight = await this.dashboard.latestInsight(client);
+
+      const net = subtractMoney(current.delivered_revenue, current.procurement_spend);
+      const prior = subtractMoney(previous.delivered_revenue, previous.procurement_spend);
+      const change = Number(prior) !== 0 ? (((Number(net) - Number(prior)) / Math.abs(Number(prior))) * 100).toFixed(1) : null;
+
+      const alerts: HomeAlert[] = [
+        { code: 'customers_overdue', severity: 'critical', count: home.customers_overdue, amount: home.customers_overdue_amount, href: '/finance#receivables' },
+        { code: 'cash_variance', severity: 'critical', count: row.variance_count, amount: row.variance_amount, href: '/finance#trips' },
+        { code: 'customer_credit_breach', severity: 'critical', count: row.credit_breach_count, amount: row.credit_breach_amount, href: '/customers' },
+        { code: 'expense_approvals', severity: 'warning', count: home.expense_approvals, amount: null, href: '/logistics' },
+        { code: 'vehicle_documents_due', severity: 'warning', count: home.vehicle_documents_due, amount: null, href: '/vehicles' },
+        { code: 'farmer_payments_overdue', severity: 'warning', count: row.overdue_count, amount: row.overdue_value, href: '/finance#payables' },
+        { code: 'approvals_pending', severity: 'warning', count: row.approvals_pending, amount: null, href: '/orders' },
+        { code: 'lots_awaiting_grading', severity: 'warning', count: row.ungraded_count, amount: null, href: '/procurement' },
+        { code: 'aging_stock', severity: 'warning', count: row.aging_count, amount: row.aging_value, href: '/inventory' },
+        { code: 'trips_unreconciled', severity: 'warning', count: row.unreconciled_count, amount: null, href: '/logistics' },
+      ];
+
+      return {
+        period: { ...toPeriod(period), name },
+        netContribution: { value: net, previous: prior, changePercent: change },
+        sales: current.delivered_revenue,
+        purchases: current.procurement_spend,
+        receivables: balances.receivables_outstanding,
+        payables: balances.farmer_payables_outstanding,
+        cash: home.cash,
+        activeTrips: { active: home.trips_active, total: home.trips_today },
+        today: {
+          procurement: home.procurement_today,
+          deliveries: home.deliveries_today,
+          collections: home.collections_today,
+          activeTrips: home.trips_active,
+        },
+        alerts: alerts.filter((a) => a.count > 0).sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
+        insight,
+      };
+    });
+  }
+
   getOperations(tenantId: string): Promise<DashboardOperations> {
     return this.db.withTenant(tenantId, async (client) => {
       const today = await this.resolvePeriodOrThrow(client, null, null, 1);
@@ -208,6 +335,23 @@ export class DashboardService {
     if (!period) throw new NotFoundException('Tenant not found');
     return period;
   }
+}
+
+function toRange(period: ResolvedPeriod, name: RangeName): DashboardRange {
+  return { name, from: period.fromDate, to: period.toDate, previousFrom: period.previousFrom, previousTo: period.previousTo, currency: period.currency };
+}
+
+/** How far [current] moved from [previous], in percent to one place; null when there's nothing to compare with. */
+export function percentChange(current: string, previous: string): string | null {
+  const before = Number(previous);
+  if (before === 0) return null;
+  return (((Number(current) - before) / Math.abs(before)) * 100).toFixed(1);
+}
+
+/** [part] as a percentage of [whole], to one place; null when the whole is nothing. */
+export function percentOf(part: string, whole: string): string | null {
+  if (!isPositiveMoney(whole)) return null;
+  return ((Number(part) / Number(whole)) * 100).toFixed(1);
 }
 
 function toPeriod(period: ResolvedPeriod): DashboardPeriod {

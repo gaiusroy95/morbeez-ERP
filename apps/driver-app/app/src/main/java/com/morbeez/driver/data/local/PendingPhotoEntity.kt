@@ -14,9 +14,11 @@ data class PendingPhotoEntity(
     @PrimaryKey val id: String,
     val tripId: String,
     val stopId: String,
-    val photoType: String, // pickup | delivery | pod | issue
+    val photoType: String, // pickup | delivery | pod | issue | weighment | load | rejection
     val localPath: String,
     val mimeType: String,
     val createdAt: Long,
     val status: String = "pending", // pending | failed_needs_review | done
+    /** A farm stop's rejection photo: the product it shows. */
+    val productId: String? = null,
 )

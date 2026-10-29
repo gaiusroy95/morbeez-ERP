@@ -12,6 +12,8 @@ import { PriceSuggestionsQueryDto } from './dto/price-suggestions-query.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VersionDto } from './dto/version.dto';
 import { OrderRecord } from './entities/customer-order.entity';
+import { OrdersBoardQueryDto } from './dto/orders-board.dto';
+import { OrdersBoard } from './entities/orders-board.entity';
 
 @ApiTags('orders')
 @ApiBearerAuth()
@@ -29,6 +31,13 @@ export class OrdersController {
     return this.ordersService.listOrders(user.tenantId, query.status, query.page ?? 1, query.pageSize ?? 25);
   }
 
+  /** The Delivery Orders list: Today / Tomorrow / All, with search (redesign V1.1). */
+  @Get('board')
+  @RequirePermissions('orders:read')
+  board(@CurrentUser() user: AuthContext, @Query() query: OrdersBoardQueryDto): Promise<OrdersBoard> {
+    return this.ordersService.getBoard(user.tenantId, query.day ?? 'today', query.q ?? null, query.page ?? 1, query.pageSize ?? 50);
+  }
+
   /** The suggested starting price for each product on a new order for this customer. */
   @Get('price-suggestions')
   @RequirePermissions('orders:read')
@@ -44,8 +53,10 @@ export class OrdersController {
 
   @Post()
   @RequirePermissions('orders:write')
-  create(@CurrentUser() user: AuthContext, @Body() dto: CreateOrderDto): Promise<OrderRecord> {
-    return this.ordersService.createOrder(user.tenantId, user.userId, dto);
+  create(@CurrentUser() user: AuthContext, @Body() dto: CreateOrderDto): Promise<OrderRecord & { confirmProblem?: string }> {
+    return this.ordersService.createOrder(user.tenantId, user.userId, dto, {
+      mayExtendCredit: user.permissions.includes('customers:credit'),
+    });
   }
 
   @Post(':id/confirm')

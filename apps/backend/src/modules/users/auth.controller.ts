@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Ip, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Ip, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthService, TokenPair } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -8,6 +8,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { PinAuthService } from './pin-auth.service';
 import { PinLoginDto, RemovePinDto, SetPinDto } from './dto/pin.dto';
+import { CompletePasswordSetupDto } from './dto/password-setup.dto';
+import { PasswordSetupInfo, UsersService } from './users.service';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -15,7 +17,25 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly pins: PinAuthService,
+    private readonly users: UsersService,
   ) {}
+
+  /**
+   * A staff member's one-time link (sent by the owner): whose it is and
+   * whether it still works. Public: they aren't signed in yet. The token is
+   * 32 random bytes, so it can't be guessed; only its hash is stored.
+   */
+  @Get('password-setup/:token')
+  passwordSetup(@Param('token') token: string): Promise<PasswordSetupInfo> {
+    return this.users.describePasswordSetup(token);
+  }
+
+  /** Chooses the password; the link then stops working. */
+  @Post('password-setup')
+  @HttpCode(HttpStatus.OK)
+  completePasswordSetup(@Body() dto: CompletePasswordSetupDto): Promise<{ login: string }> {
+    return this.users.completePasswordSetup(dto.token, dto.password);
+  }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)

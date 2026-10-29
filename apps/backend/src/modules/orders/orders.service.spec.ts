@@ -1,11 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { PoolClient } from 'pg';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrdersRepository } from './repositories/orders.repository';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
-import { ProcurementService } from '../procurement/procurement.service';
+import { LotStockService } from '../procurement/lot-stock.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { DatabaseService } from '../../infra/database/database.service';
@@ -13,12 +13,25 @@ import { AuditService } from '../../infra/audit/audit.service';
 import { OrderRecord } from './entities/customer-order.entity';
 import { CustomerRecord } from '../customers/entities/customer.entity';
 import { ProductRecord } from '../products/entities/product.entity';
+import { RoutesService } from '../routes/routes.service';
+import { VehiclesService } from '../vehicles/vehicles.service';
+import { WorkforceService } from '../workforce/workforce.service';
+import { OrdersBoardRepository } from './repositories/orders-board.repository';
 
 const fakeClient = {} as PoolClient;
 
 const baseOrder: OrderRecord = {
   id: 'order-1',
   tenantId: 'tenant-1',
+  number: 1,
+  deliveryDate: null,
+  deliveryTime: null,
+  routeId: null,
+  plannedDriverId: null,
+  plannedVehicleId: null,
+  deliveryAddress: null,
+  creditTermDays: null,
+  notes: null,
   customerId: 'customer-1',
   status: 'placed',
   approvalRequestId: null,
@@ -26,7 +39,7 @@ const baseOrder: OrderRecord = {
   createdAt: new Date(),
   updatedAt: new Date(),
   createdBy: 'user-1',
-  lines: [{ id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10', unitPrice: '50' }],
+  lines: [{ id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10', unitPrice: '50', deliveredQuantity: null }],
 };
 
 const baseCustomer: CustomerRecord = {
@@ -34,6 +47,9 @@ const baseCustomer: CustomerRecord = {
   tenantId: 'tenant-1',
   name: 'Test Customer',
   contact: {},
+  place: null,
+  address: null,
+  routeId: null,
   preferredLanguage: 'en',
   creditLimit: '1000',
   paymentTermsDays: 30,
@@ -42,6 +58,8 @@ const baseCustomer: CustomerRecord = {
   financeChargeGraceDays: 0,
   creditHold: false,
   creditHoldReason: null,
+  isWalkIn: false,
+  qrToken: 'QR0000000000TEST',
   status: 'active',
   version: 1,
   createdAt: new Date(),
@@ -71,7 +89,7 @@ describe('OrdersService', () => {
   let orders: jest.Mocked<OrdersRepository>;
   let customers: jest.Mocked<CustomersService>;
   let products: jest.Mocked<ProductsService>;
-  let procurement: jest.Mocked<ProcurementService>;
+  let stock: jest.Mocked<LotStockService>;
   let approvals: jest.Mocked<ApprovalsService>;
   let receivables: jest.Mocked<ReceivablesService>;
 
@@ -92,17 +110,23 @@ describe('OrdersService', () => {
             confirmWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
             deliverWithClient: jest.fn(),
+            setDeliveredQuantityWithClient: jest.fn(),
             lastPricesWithClient: jest.fn().mockResolvedValue(new Map()),
           },
         },
         { provide: CustomersService, useValue: { getById: jest.fn() } },
+        { provide: RoutesService, useValue: { assertUsable: jest.fn() } },
+        { provide: VehiclesService, useValue: { getById: jest.fn().mockResolvedValue({ status: 'active' }) } },
+        { provide: WorkforceService, useValue: { getById: jest.fn().mockResolvedValue({ status: 'active' }) } },
+        { provide: OrdersBoardRepository, useValue: { board: jest.fn() } },
         { provide: ProductsService, useValue: { getById: jest.fn() } },
         {
-          provide: ProcurementService,
+          provide: LotStockService,
           useValue: {
-            reserveLotsForOrderLineWithClient: jest.fn(),
-            releaseLotsForOrderLine: jest.fn(),
-            consumeLotsForOrderLineWithClient: jest.fn(),
+            reserveForOrderLineWithClient: jest.fn().mockResolvedValue({ reserved: '0.000', toCome: '0.000' }),
+            releaseForOrderLine: jest.fn(),
+            releaseForOrderLineWithClient: jest.fn(),
+            deliverForOrderLineWithClient: jest.fn(),
           },
         },
         {
@@ -131,7 +155,7 @@ describe('OrdersService', () => {
     orders = module.get(OrdersRepository);
     customers = module.get(CustomersService);
     products = module.get(ProductsService);
-    procurement = module.get(ProcurementService);
+    stock = module.get(LotStockService);
     approvals = module.get(ApprovalsService);
     receivables = module.get(ReceivablesService);
   });
@@ -193,6 +217,82 @@ describe('OrdersService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it("createOrder keeps the delivery plan, with the customer's address and route unless others are given", async () => {
+    customers.getById.mockResolvedValue({ ...baseCustomer, address: 'Near Mysuru Bus Stand', routeId: 'route-1' });
+    products.getById.mockResolvedValue(baseProduct);
+    orders.createWithClient.mockResolvedValue(baseOrder);
+    const lines = [{ productId: 'product-1', quantity: 10, unitPrice: 50 }];
+
+    await service.createOrder('tenant-1', 'user-1', {
+      customerId: 'customer-1',
+      lines,
+      deliveryDate: '2026-10-24',
+      deliveryTime: '09:00',
+      driverEmployeeId: 'driver-1',
+      vehicleId: 'vehicle-1',
+      creditTermDays: 15,
+      notes: ' Ring twice ',
+    });
+    expect(orders.createWithClient).toHaveBeenLastCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({
+        deliveryDate: '2026-10-24',
+        deliveryTime: '09:00',
+        routeId: 'route-1',
+        plannedDriverId: 'driver-1',
+        plannedVehicleId: 'vehicle-1',
+        deliveryAddress: 'Near Mysuru Bus Stand',
+        creditTermDays: 15,
+        notes: 'Ring twice',
+      }),
+    );
+
+    await service.createOrder('tenant-1', 'user-1', { customerId: 'customer-1', lines, routeId: 'route-2', deliveryAddress: 'Shop 4, APMC yard' });
+    expect(orders.createWithClient).toHaveBeenLastCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ routeId: 'route-2', deliveryAddress: 'Shop 4, APMC yard' }),
+    );
+  });
+
+  it("createOrder: a credit term longer than the customer's usual terms needs customers:credit", async () => {
+    customers.getById.mockResolvedValue(baseCustomer); // 30 days
+    products.getById.mockResolvedValue(baseProduct);
+    orders.createWithClient.mockResolvedValue(baseOrder);
+    const dto = { customerId: 'customer-1', lines: [{ productId: 'product-1', quantity: 1, unitPrice: 50 }] };
+
+    await expect(service.createOrder('tenant-1', 'user-1', { ...dto, creditTermDays: 45 })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(orders.createWithClient).not.toHaveBeenCalled();
+    await service.createOrder('tenant-1', 'user-1', { ...dto, creditTermDays: 45 }, { mayExtendCredit: true });
+    await service.createOrder('tenant-1', 'user-1', { ...dto, creditTermDays: 7 });
+    expect(orders.createWithClient).toHaveBeenCalledTimes(2);
+  });
+
+  it('createOrder with confirm: stock that is not in yet still confirms — it is to come (driver app D0)', async () => {
+    customers.getById.mockResolvedValue(baseCustomer);
+    products.getById.mockResolvedValue(baseProduct);
+    orders.createWithClient.mockResolvedValue(baseOrder);
+    orders.findById.mockResolvedValueOnce(baseOrder).mockResolvedValue({ ...baseOrder, status: 'confirmed', version: 2 });
+    orders.findByIdWithClient.mockResolvedValue(baseOrder);
+    orders.computeTotalWithClient.mockResolvedValue(500);
+    orders.computeCustomerExposureWithClient.mockResolvedValue(0);
+    approvals.evaluate.mockResolvedValue({ required: false } as never);
+    stock.reserveForOrderLineWithClient.mockResolvedValue({ reserved: '0.000', toCome: '10.000' });
+    orders.confirmWithClient.mockResolvedValue({ ...baseOrder, status: 'confirmed', version: 2 });
+
+    const result = await service.createOrder('tenant-1', 'user-1', {
+      customerId: 'customer-1',
+      lines: [{ productId: 'product-1', quantity: 10, unitPrice: 50 }],
+      confirm: true,
+    });
+
+    expect(result.status).toBe('confirmed');
+    expect(result.confirmProblem).toBeUndefined();
+  });
+
   it('confirmOrder blocks when the order would exceed the customer credit limit', async () => {
     orders.findById.mockResolvedValue(baseOrder);
     orders.computeTotalWithClient.mockResolvedValue(500);
@@ -222,7 +322,7 @@ describe('OrdersService', () => {
     await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toThrow(
       /owed 400\.00, other open orders 200\.00, this order 500\.00/,
     );
-    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
+    expect(stock.reserveForOrderLineWithClient).not.toHaveBeenCalled();
   });
 
   it('confirmOrder refuses a customer on credit hold, whatever the limit', async () => {
@@ -247,15 +347,15 @@ describe('OrdersService', () => {
     customers.getById.mockResolvedValue(baseCustomer);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
     approvals.evaluate.mockResolvedValue({ required: false });
-    procurement.reserveLotsForOrderLineWithClient.mockResolvedValue([]);
+    stock.reserveForOrderLineWithClient.mockResolvedValue({ reserved: '10.000', toCome: '0.000' });
     orders.confirmWithClient.mockResolvedValue({ ...baseOrder, status: 'confirmed', version: 2 });
 
     const result = await service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.reserveLotsForOrderLineWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'user-1', {
+    expect(stock.reserveForOrderLineWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'user-1', {
       orderLineId: 'line-1',
       productId: 'product-1',
-      quantity: 10,
+      quantity: '10',
     });
     expect(result.status).toBe('confirmed');
   });
@@ -274,17 +374,17 @@ describe('OrdersService', () => {
 
     const result = await service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
+    expect(stock.reserveForOrderLineWithClient).not.toHaveBeenCalled();
     expect(result.status).toBe('placed');
     expect(result.approvalRequestId).toBe('req-1');
   });
 
-  it('confirmOrder reserves every line in one transaction: a later line that can’t be covered leaves nothing reserved (PA-03)', async () => {
+  it('confirmOrder reserves every line in one transaction: a later line that fails leaves nothing reserved (PA-03)', async () => {
     const twoLineOrder: OrderRecord = {
       ...baseOrder,
       lines: [
-        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10', unitPrice: '50' },
-        { id: 'line-2', orderId: 'order-1', productId: 'product-2', quantity: '5', unitPrice: '20' },
+        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10', unitPrice: '50', deliveredQuantity: null },
+        { id: 'line-2', orderId: 'order-1', productId: 'product-2', quantity: '5', unitPrice: '20', deliveredQuantity: null },
       ],
     };
     orders.findById.mockResolvedValue(twoLineOrder);
@@ -293,14 +393,16 @@ describe('OrdersService', () => {
     customers.getById.mockResolvedValue(baseCustomer);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
     approvals.evaluate.mockResolvedValue({ required: false });
-    procurement.reserveLotsForOrderLineWithClient.mockResolvedValueOnce([]).mockRejectedValueOnce(new ConflictException('short'));
+    stock.reserveForOrderLineWithClient
+      .mockResolvedValueOnce({ reserved: '10.000', toCome: '0.000' })
+      .mockRejectedValueOnce(new ConflictException('The stock changed while it was being taken — try again'));
 
     await expect(service.confirmOrder('tenant-1', 'user-1', 'order-1', { version: 1 })).rejects.toBeInstanceOf(
       ConflictException,
     );
     // The throw rolls the shared transaction back — no reservation to undo by hand.
-    expect(procurement.reserveLotsForOrderLineWithClient).toHaveBeenCalledTimes(2);
-    expect(procurement.releaseLotsForOrderLine).not.toHaveBeenCalled();
+    expect(stock.reserveForOrderLineWithClient).toHaveBeenCalledTimes(2);
+    expect(stock.releaseForOrderLine).not.toHaveBeenCalled();
     expect(orders.confirmWithClient).not.toHaveBeenCalled();
   });
 
@@ -309,7 +411,7 @@ describe('OrdersService', () => {
     orders.findById.mockResolvedValue(awaiting);
     orders.findByIdWithClient.mockResolvedValue(awaiting);
     approvals.getRequest.mockResolvedValue({ status: 'approved' } as never);
-    procurement.reserveLotsForOrderLineWithClient.mockResolvedValue([]);
+    stock.reserveForOrderLineWithClient.mockResolvedValue({ reserved: '10.000', toCome: '0.000' });
     orders.confirmWithClient.mockResolvedValue({ ...awaiting, status: 'confirmed' });
     orders.computeTotalWithClient.mockResolvedValue(500);
     orders.computeCustomerExposureWithClient.mockResolvedValue(0);
@@ -328,7 +430,7 @@ describe('OrdersService', () => {
     customers.getById.mockResolvedValue({ ...baseCustomer, creditHold: true, creditHoldReason: 'Overdue 60+ days' });
 
     await expect(service.finalizeConfirmation('tenant-1', 'user-1', 'order-1')).rejects.toBeInstanceOf(ConflictException);
-    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
+    expect(stock.reserveForOrderLineWithClient).not.toHaveBeenCalled();
   });
 
   it('finalizeConfirmation cancels the order once the approval request is rejected', async () => {
@@ -339,7 +441,7 @@ describe('OrdersService', () => {
 
     const result = await service.finalizeConfirmation('tenant-1', 'user-1', 'order-1');
 
-    expect(procurement.reserveLotsForOrderLineWithClient).not.toHaveBeenCalled();
+    expect(stock.reserveForOrderLineWithClient).not.toHaveBeenCalled();
     expect(result.status).toBe('cancelled');
   });
 
@@ -351,14 +453,14 @@ describe('OrdersService', () => {
     );
   });
 
-  it('cancelOrder releases every reserved lot when cancelling a confirmed order', async () => {
+  it('cancelOrder lets go of every reserved kilo when cancelling a confirmed order', async () => {
     const confirmedOrder: OrderRecord = { ...baseOrder, status: 'confirmed' };
     orders.findById.mockResolvedValue(confirmedOrder);
     orders.cancelWithClient.mockResolvedValue({ ...confirmedOrder, status: 'cancelled' });
 
     await service.cancelOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.releaseLotsForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', 'line-1');
+    expect(stock.releaseForOrderLine).toHaveBeenCalledWith('tenant-1', 'user-1', 'line-1');
   });
 
   it('cancelOrder does not attempt any release for an order that was never confirmed', async () => {
@@ -367,29 +469,37 @@ describe('OrdersService', () => {
 
     await service.cancelOrder('tenant-1', 'user-1', 'order-1', { version: 1 });
 
-    expect(procurement.releaseLotsForOrderLine).not.toHaveBeenCalled();
+    expect(stock.releaseForOrderLine).not.toHaveBeenCalled();
   });
 
-  it('markDelivered consumes lots and has Finance invoice the order, in one transaction', async () => {
+  it('markDelivered takes the delivered kilos out of stock and has Finance invoice the order, in one transaction', async () => {
     const confirmed: OrderRecord = {
       ...baseOrder,
       status: 'confirmed',
       lines: [
-        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10.000', unitPrice: '50.00' },
-        { id: 'line-2', orderId: 'order-1', productId: 'product-1', quantity: '4.000', unitPrice: '55.00' },
+        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10.000', unitPrice: '50.00', deliveredQuantity: null },
+        { id: 'line-2', orderId: 'order-1', productId: 'product-1', quantity: '4.000', unitPrice: '55.00', deliveredQuantity: null },
       ],
     };
     orders.findById.mockResolvedValue(confirmed);
     orders.findByIdWithClient.mockResolvedValue(confirmed);
     orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
     products.getById.mockResolvedValue(baseProduct);
-    procurement.consumeLotsForOrderLineWithClient.mockResolvedValueOnce('320.50').mockResolvedValueOnce('130.25');
+    stock.deliverForOrderLineWithClient.mockResolvedValueOnce('320.50').mockResolvedValueOnce('130.25');
 
     const result = await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
 
     expect(result.status).toBe('delivered');
-    expect(procurement.consumeLotsForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'line-1', '10.000');
-    expect(procurement.consumeLotsForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'line-2', '4.000');
+    expect(stock.deliverForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', {
+      orderLineId: 'line-1',
+      productId: 'product-1',
+      label: 'Tomato',
+      quantity: '10.000',
+      vehicleId: null,
+      tripId: null,
+    });
+    expect(stock.deliverForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ orderLineId: 'line-2', quantity: '4.000' }));
+    expect(orders.setDeliveredQuantityWithClient).toHaveBeenCalledWith(fakeClient, 'line-1', '10.000');
     expect(receivables.issueSaleInvoiceWithClient).toHaveBeenCalledWith(
       fakeClient,
       'tenant-1',
@@ -412,7 +522,7 @@ describe('OrdersService', () => {
     orders.findByIdWithClient.mockResolvedValue(confirmed);
     orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
     products.getById.mockResolvedValue(baseProduct);
-    procurement.consumeLotsForOrderLineWithClient.mockResolvedValue(null);
+    stock.deliverForOrderLineWithClient.mockResolvedValue(null);
 
     await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
 
@@ -422,5 +532,68 @@ describe('OrdersService', () => {
       'user-1',
       expect.objectContaining({ costOfGoods: null }),
     );
+  });
+
+  it('markDelivered takes what was delivered off the trip vehicle and invoices that, not what was ordered', async () => {
+    const confirmed: OrderRecord = {
+      ...baseOrder,
+      status: 'confirmed',
+      lines: [
+        { id: 'line-1', orderId: 'order-1', productId: 'product-1', quantity: '10.000', unitPrice: '50.00', deliveredQuantity: null },
+        { id: 'line-2', orderId: 'order-1', productId: 'product-2', quantity: '4.000', unitPrice: '55.00', deliveredQuantity: null },
+      ],
+    };
+    orders.findById.mockResolvedValue(confirmed);
+    orders.findByIdWithClient.mockResolvedValue(confirmed);
+    orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
+    products.getById.mockResolvedValue(baseProduct);
+    stock.deliverForOrderLineWithClient.mockResolvedValue('95.00');
+
+    await service.markDelivered('tenant-1', 'user-1', 'order-1', 1, new Map(), {
+      delivered: new Map([
+        ['line-1', '9.500'],
+        ['line-2', '0.000'],
+      ]),
+      vehicleId: 'vehicle-1',
+      tripId: 'trip-1',
+    });
+
+    expect(stock.deliverForOrderLineWithClient).toHaveBeenCalledTimes(1);
+    expect(stock.deliverForOrderLineWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ orderLineId: 'line-1', quantity: '9.500', vehicleId: 'vehicle-1', tripId: 'trip-1' }),
+    );
+    // A line nothing left for lets go of its stock and isn't invoiced.
+    expect(stock.releaseForOrderLineWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'line-2');
+    expect(orders.setDeliveredQuantityWithClient).toHaveBeenCalledWith(fakeClient, 'line-2', '0.000');
+    const invoice = receivables.issueSaleInvoiceWithClient.mock.calls[0][3];
+    expect(invoice.lines).toEqual([expect.objectContaining({ orderLineId: 'line-1', quantity: '9.500' })]);
+    expect(invoice.costOfGoods).toBe('95.00');
+  });
+
+  it('markDelivered refuses a delivery where nothing was delivered', async () => {
+    const confirmed: OrderRecord = { ...baseOrder, status: 'confirmed' };
+    orders.findById.mockResolvedValue(confirmed);
+    products.getById.mockResolvedValue(baseProduct);
+
+    await expect(
+      service.markDelivered('tenant-1', 'user-1', 'order-1', 1, new Map(), { delivered: new Map([['line-1', '0.000']]) }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(orders.deliverWithClient).not.toHaveBeenCalled();
+  });
+
+  it("markDelivered has the invoice fall due on the order's own credit term", async () => {
+    const confirmed: OrderRecord = { ...baseOrder, status: 'confirmed', creditTermDays: 7 };
+    orders.findById.mockResolvedValue(confirmed);
+    orders.findByIdWithClient.mockResolvedValue(confirmed);
+    orders.deliverWithClient.mockResolvedValue({ ...confirmed, status: 'delivered', version: 2 });
+    products.getById.mockResolvedValue(baseProduct);
+    stock.deliverForOrderLineWithClient.mockResolvedValue(null);
+
+    await service.markDelivered('tenant-1', 'user-1', 'order-1', 1);
+
+    expect(receivables.issueSaleInvoiceWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ creditTermDays: 7 }));
   });
 });

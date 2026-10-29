@@ -31,4 +31,18 @@ data class TripStopEntity(
     val collectAmount: String? = null,
     /** The stop's lines as JSON (List<StopItemResponse>): what's weighed or counted at this stop. */
     val itemsJson: String? = null,
+    /** Who's there and where: to call them, and to navigate to their map pin (or address). */
+    val partyPhone: String? = null,
+    val partyPlace: String? = null,
+    val partyAddress: String? = null,
+    val partyLatitude: Double? = null,
+    val partyLongitude: Double? = null,
+    /** When the driver reached it (D2: Start pickup). */
+    val arrivedAt: String? = null,
+    /** A completed farm stop, as JSON (FarmStopOutcomeResponse): from the server, or from this phone until it hears. */
+    val farmJson: String? = null,
+    /** A shop's QR token: the QR at the door must match it (D3). */
+    val partyQrToken: String? = null,
+    /** A completed delivery, as JSON (DeliveryOutcomeResponse): from the server, or from this phone until it hears. */
+    val deliveryJson: String? = null,
 )

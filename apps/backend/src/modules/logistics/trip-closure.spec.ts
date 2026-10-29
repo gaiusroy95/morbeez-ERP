@@ -73,4 +73,16 @@ describe('checklistOf', () => {
     expect(area(items, 'expenses').status).toBe('exception');
     expect(area(items, 'expenses').detail).toContain("of which ₹150.00 beyond the driver's authority");
   });
+  it('a vehicle count that is off at closing is a load exception; one that matches passes', () => {
+    const off = checklistOf(facts(), handover(), '1400.00', [
+      { productId: 'p1', product: 'Tomato', uom: 'kg', expected: '60.000', counted: '55.000' },
+    ]);
+    expect(area(off, 'load').status).toBe('exception');
+    expect(area(off, 'load').detail).toMatch(/Tomato on the vehicle: counted 55 kg, expected 60 kg \(5 kg short\)/);
+    const ok = checklistOf(facts(), handover(), '1400.00', [
+      { productId: 'p1', product: 'Tomato', uom: 'kg', expected: '60.000', counted: '60.000' },
+    ]);
+    expect(area(ok, 'load').status).toBe('pass');
+    expect(area(ok, 'load').detail).toMatch(/counted: as expected/);
+  });
 });

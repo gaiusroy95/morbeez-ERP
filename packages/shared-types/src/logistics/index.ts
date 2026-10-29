@@ -9,12 +9,23 @@ export type TripStatus = 'planned' | 'in_progress' | 'completed' | 'on_hold' | '
 
 export interface TripRecord {
   id: string;
+  /** "T-20261028-001": the day's running number. */
+  number: string;
+  routeId: string | null;
   vehicleId: string;
   driverEmployeeId: string;
+  packerEmployeeId: string | null;
+  loaderEmployeeId: string | null;
   status: TripStatus;
   plannedDate: IsoDate | null;
   advanceAmount: string;
   startedAt: IsoDateTime | null;
+  /** The odometer when the day started (driver app Start Day), and where the phone was. */
+  openingKm: string | null;
+  startLatitude: string | null;
+  startLongitude: string | null;
+  /** Start Trip in the driver app: when the delivery run set off. */
+  deliveryStartedAt: IsoDateTime | null;
   completedAt: IsoDateTime | null;
   submittedBy: string | null;
   /** Cash the driver said they're handing over. */
@@ -39,9 +50,58 @@ export interface TripStopRecord {
   completedAt: IsoDateTime | null;
   notes: string | null;
   /** Filled in when listing a trip's stops: who it's for, what it carries, what to collect. */
-  party?: { kind: 'customer' | 'farmer'; id: string; name: string; phone: string | null } | null;
+  party?: {
+    kind: 'customer' | 'farmer';
+    id: string;
+    name: string;
+    phone: string | null;
+    place: string | null;
+    /** For a delivery, the address it goes to. */
+    address: string | null;
+    latitude: string | null;
+    longitude: string | null;
+  } | null;
   items?: { productName: string; quantity: string; uom: string }[];
   collect?: { terms: 'cash' | 'credit'; amount: string } | null;
+  /** A completed farm stop: each product accepted or rejected, and its packing crew (driver app D2). */
+  farm?: FarmStopOutcome | null;
+  /** A completed delivery: its QR, what was delivered short and why, its crates (driver app D3). */
+  delivery?: DeliveryOutcome | null;
+}
+
+export type ShortfallReason = 'customer_took_less' | 'damaged' | 'not_enough_on_vehicle' | 'quality_issue' | 'other';
+
+export interface DeliveryOutcome {
+  recipientName: string;
+  qrStatus: 'scanned' | 'not_scanned' | null;
+  qrNote: string | null;
+  allUnloaded: boolean | null;
+  shortfalls: { orderLineId: string; productName: string; uom: string; ordered: string; delivered: string; reason: ShortfallReason; note: string | null }[];
+  crates: { dropped: number; collected: number };
+}
+
+export type FarmRejectReason = 'quality_issue' | 'quantity_short' | 'damaged' | 'farmer_not_ready' | 'other';
+
+export interface FarmStopLine {
+  productId: string;
+  productName: string;
+  uom: string;
+  outcome: 'accepted' | 'rejected';
+  acceptedQuantity: string;
+  rejectedQuantity: string;
+  measuredBy: 'weight' | 'bags';
+  sacks: number | null;
+  kgPerBag: string | null;
+  reason: FarmRejectReason | null;
+  note: string | null;
+}
+
+export interface FarmStopOutcome {
+  packer: { employeeId: string; name: string } | null;
+  loader: { employeeId: string; name: string } | null;
+  lines: FarmStopLine[];
+  /** The kilos loaded there: what the packer and loader are credited with. */
+  loadedKg: string;
 }
 
 export type ExpenseCategory = 'fuel' | 'toll' | 'labour' | 'other';
@@ -81,6 +141,8 @@ export interface TripReconciliationRecord {
   outcome: 'pass' | 'approved_exception';
   exceptionNote: string | null;
   checklist: ChecklistItem[] | null;
+  /** What was counted on the vehicle at closing; null when not counted. */
+  closingStock?: ClosingStockLine[] | null;
   reconciledAt: IsoDateTime;
 }
 
@@ -139,6 +201,12 @@ export interface CreateTripBody {
   driverEmployeeId: string;
   plannedDate?: IsoDate;
   advanceAmount?: number;
+  routeId?: string;
+  packerEmployeeId?: string;
+  loaderEmployeeId?: string;
+  /** Confirmed orders and scheduled pickups it carries; stops are made in the route's order. */
+  orderIds?: string[];
+  pickupIds?: string[];
 }
 
 export interface ReconcileTripBody {
@@ -147,9 +215,155 @@ export interface ReconcileTripBody {
   notes?: string;
   /** Required to close when anything checked is an exception. */
   exceptionNote?: string;
+  /** What was counted on the vehicle, product by product (left out: none). */
+  closingStock?: { productId: string; quantity: number }[];
 }
 
 export interface TripDecisionBody {
   version: number;
   note: string;
+}
+
+// ---- Trips list and planning (redesign Phase 4) ----
+
+export type TripsBoardDay = 'today' | 'tomorrow' | 'all';
+
+export interface TripCard {
+  id: string;
+  number: string;
+  status: TripStatus;
+  day: IsoDate;
+  /** Set off (in progress) or came back (submitted, closed), HH:MM. */
+  time: string | null;
+  routeName: string | null;
+  customers: number;
+  farmers: number;
+  kg: string;
+  vehicle: string;
+  driverName: string;
+  stops: number;
+  stopsDone: number;
+}
+
+export interface TripsBoard {
+  day: TripsBoardDay;
+  counts: { today: number; tomorrow: number; all: number };
+  total: number;
+  page: number;
+  pageSize: number;
+  items: TripCard[];
+}
+
+export interface PlanItem {
+  name: string;
+  quantity: string;
+  uom: string;
+}
+
+export interface PlanOrder {
+  id: string;
+  number: number;
+  status: 'placed' | 'confirmed';
+  awaitingApproval: boolean;
+  customerId: string;
+  customerName: string;
+  place: string | null;
+  deliveryTime: string | null;
+  plannedDriverId: string | null;
+  plannedVehicleId: string | null;
+  routePosition: number | null;
+  kg: string;
+  items: PlanItem[];
+  totalValue: string;
+}
+
+export interface PlanPickup {
+  pickupId: string;
+  purchaseOrderId: string;
+  poNumber: number;
+  farmerId: string;
+  farmerName: string;
+  place: string | null;
+  time: string | null;
+  plannedDriverId: string | null;
+  plannedVehicleId: string | null;
+  routePosition: number | null;
+  kg: string;
+  items: PlanItem[];
+}
+
+/** GET logistics/trips/plan: what a trip on a day along a route could carry. */
+export interface TripPlan {
+  date: IsoDate;
+  routeId: string | null;
+  orders: PlanOrder[];
+  otherOrders: PlanOrder[];
+  pickups: PlanPickup[];
+  otherPickups: PlanPickup[];
+  vehicle: { id: string; registrationNumber: string; capacityKg: string; stockKg: string } | null;
+}
+
+export interface QuantityRow {
+  productId: string;
+  product: string;
+  uom: string;
+  /** From the store onto the vehicle when the trip started. */
+  loaded: string;
+  /** Picked up at farms. */
+  procured: string;
+  delivered: string;
+  spotSold: string;
+  /** Back to the store at closing. */
+  returned: string;
+  /** Missing at closing, written off. */
+  writtenOff: string;
+  /** What the pending deliveries still ask for. */
+  toDeliver: string;
+  /** What should be on the vehicle: loaded + procured − delivered − spot sold. */
+  expected: string;
+  counted: string | null;
+  difference: string | null;
+}
+
+/** GET logistics/trips/:id/quantities. */
+export interface TripQuantities {
+  rows: QuantityRow[];
+  totalsKg: {
+    loaded: string;
+    procured: string;
+    delivered: string;
+    spotSold: string;
+    returned: string;
+    writtenOff: string;
+    toDeliver: string;
+    expected: string;
+    counted: string | null;
+  };
+  balanced: boolean | null;
+}
+
+/** GET logistics/trips/:id/vehicle-stock — what's on the trip's vehicle now. */
+export interface TripVehicleStock {
+  tripId: string;
+  vehicleId: string;
+  registrationNumber: string;
+  rows: {
+    productId: string;
+    product: string;
+    uom: string;
+    onVehicle: string;
+    reserved: string;
+    free: string;
+    toDeliver: string;
+    short: string;
+  }[];
+  totalsKg: { onVehicle: string; toDeliver: string; short: string };
+}
+
+export interface ClosingStockLine {
+  productId: string;
+  product: string;
+  uom: string;
+  expected: string;
+  counted: string;
 }

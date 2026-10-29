@@ -4,12 +4,23 @@ import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
 import { OrderLineRecord, OrderRecord, OrderStatus } from '../entities/customer-order.entity';
+import { nextDocumentNumber } from '../../../common/persistence/document-number';
+import { dateOnly } from '../../../common/persistence/date-only';
 
 interface OrderRow {
   id: string;
   tenant_id: string;
+  number: number;
   customer_id: string;
   status: OrderStatus;
+  delivery_date: string | Date | null;
+  delivery_time: string | null;
+  route_id: string | null;
+  planned_driver_id: string | null;
+  planned_vehicle_id: string | null;
+  delivery_address: string | null;
+  credit_term_days: number | null;
+  notes: string | null;
   approval_request_id: string | null;
   version: number;
   created_at: Date;
@@ -24,14 +35,24 @@ interface OrderLineRow {
   product_id: string;
   quantity: string;
   unit_price: string;
+  delivered_quantity: string | null;
 }
 
 function toRecord(row: OrderRow, lines?: OrderLineRow[]): OrderRecord {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    number: row.number,
     customerId: row.customer_id,
     status: row.status,
+    deliveryDate: dateOnly(row.delivery_date ?? null),
+    deliveryTime: row.delivery_time ? row.delivery_time.slice(0, 5) : null,
+    routeId: row.route_id ?? null,
+    plannedDriverId: row.planned_driver_id ?? null,
+    plannedVehicleId: row.planned_vehicle_id ?? null,
+    deliveryAddress: row.delivery_address ?? null,
+    creditTermDays: row.credit_term_days ?? null,
+    notes: row.notes ?? null,
     approvalRequestId: row.approval_request_id,
     version: row.version,
     createdAt: row.created_at,
@@ -49,6 +70,7 @@ function toLineRecord(row: OrderLineRow): OrderLineRecord {
     productId: row.product_id,
     quantity: row.quantity,
     unitPrice: row.unit_price,
+    deliveredQuantity: row.delivered_quantity ?? null,
   };
 }
 
@@ -113,13 +135,37 @@ export class OrdersRepository {
     fields: {
       customerId: string;
       lines: { productId: string; quantity: number; unitPrice: number }[];
+      deliveryDate?: string | null;
+      deliveryTime?: string | null;
+      routeId?: string | null;
+      plannedDriverId?: string | null;
+      plannedVehicleId?: string | null;
+      deliveryAddress?: string | null;
+      creditTermDays?: number | null;
+      notes?: string | null;
     },
   ): Promise<OrderRecord> {
+    const number = await nextDocumentNumber(client, tenantId, 'customer_order');
     const orderResult = await client.query<OrderRow>(
-      `INSERT INTO commerce.customer_order (tenant_id, customer_id, created_by)
-       VALUES ($1, $2, $3)
+      `INSERT INTO commerce.customer_order
+         (tenant_id, customer_id, created_by, number, delivery_date, delivery_time, route_id,
+          planned_driver_id, planned_vehicle_id, delivery_address, credit_term_days, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [tenantId, fields.customerId, createdBy],
+      [
+        tenantId,
+        fields.customerId,
+        createdBy,
+        number,
+        fields.deliveryDate ?? null,
+        fields.deliveryTime ?? null,
+        fields.routeId ?? null,
+        fields.plannedDriverId ?? null,
+        fields.plannedVehicleId ?? null,
+        fields.deliveryAddress ?? null,
+        fields.creditTermDays ?? null,
+        fields.notes ?? null,
+      ],
     );
     const order = orderResult.rows[0];
 
@@ -224,6 +270,11 @@ export class OrdersRepository {
     );
     if (result.rowCount === 0) throw new OptimisticLockException('Order', id);
     return toRecord(result.rows[0]);
+  }
+
+  /** What left with the delivery, line by line. */
+  async setDeliveredQuantityWithClient(client: PoolClient, orderLineId: string, quantity: string): Promise<void> {
+    await client.query('UPDATE commerce.customer_order_line SET delivered_quantity = $2 WHERE id = $1', [orderLineId, quantity]);
   }
 
   /**

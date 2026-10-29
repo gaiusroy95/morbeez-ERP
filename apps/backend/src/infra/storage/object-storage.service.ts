@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { Env } from '../../config/env.validation';
@@ -36,5 +36,24 @@ export class ObjectStorageService {
     const absolute = path.join(this.config.get('UPLOADS_DIR', { infer: true }), ...key.split('/'));
     await fs.mkdir(path.dirname(absolute), { recursive: true });
     await fs.writeFile(absolute, body);
+  }
+
+  /** The file's bytes, or null if it isn't there (local disk is wiped on some hosts' redeploys). */
+  async get(key: string): Promise<Buffer | null> {
+    if (this.s3 && this.bucket) {
+      try {
+        const out = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+        return out.Body ? Buffer.from(await out.Body.transformToByteArray()) : null;
+      } catch (err) {
+        if ((err as { name?: string }).name === 'NoSuchKey') return null;
+        throw err;
+      }
+    }
+    try {
+      return await fs.readFile(path.join(this.config.get('UPLOADS_DIR', { infer: true }), ...key.split('/')));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw err;
+    }
   }
 }

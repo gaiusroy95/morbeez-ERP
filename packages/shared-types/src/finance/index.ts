@@ -254,3 +254,34 @@ export interface InvoiceDispute {
   resolution: string | null;
   version: number;
 }
+
+/** GET /finance/collections — the owner's Collections (redesign V1.1, screen 14). */
+export type CollectionsView = 'today' | 'pending' | 'all';
+
+export interface CollectionCard {
+  /** A payment received, or a customer whose money has fallen due and isn't in. */
+  kind: 'payment' | 'due';
+  id: string;
+  customerId: string;
+  customerName: string;
+  place: string | null;
+  /** Collected, or due now. */
+  amount: string;
+  receivedAt: IsoDateTime | null;
+  method: string | null;
+  dueDate: string | null;
+  overdueDays: number | null;
+  status: 'paid' | 'partial' | 'pending';
+  /** What the customer owes now. */
+  balance: string;
+}
+
+export interface CollectionsBoard {
+  view: CollectionsView;
+  counts: { today: number; pending: number; all: number };
+  totals: { collectedToday: string; dueNow: string };
+  items: CollectionCard[];
+  total: number;
+  page: number;
+  pageSize: number;
+}

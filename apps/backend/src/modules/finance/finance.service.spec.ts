@@ -1,4 +1,4 @@
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { FinanceService, PAYABLE_OVERDUE_DAYS } from './finance.service';
@@ -6,6 +6,7 @@ import { FinanceRepository, ReceivableRow, ResolvedRange, TrialBalanceRowDb } fr
 import { ReceivablesService } from './receivables.service';
 import { CustomersService } from '../customers/customers.service';
 import { DatabaseService } from '../../infra/database/database.service';
+import { CollectionsRepository } from './repositories/collections.repository';
 
 const fakeClient = {} as PoolClient;
 
@@ -48,6 +49,7 @@ const account = (code: string, root: TrialBalanceRowDb['root_type'], debit: stri
 
 describe('FinanceService', () => {
   let service: FinanceService;
+  let moduleRef: TestingModule;
   let repo: jest.Mocked<FinanceRepository>;
   let receivables: jest.Mocked<ReceivablesService>;
   let customers: jest.Mocked<CustomersService>;
@@ -77,11 +79,19 @@ describe('FinanceService', () => {
         },
         { provide: ReceivablesService, useValue: { customerBalanceWithClient: jest.fn() } },
         { provide: CustomersService, useValue: { getById: jest.fn() } },
+        {
+          provide: CollectionsRepository,
+          useValue: {
+            countsWithClient: jest.fn().mockResolvedValue({ today: 2, pending: 3, all: 9, collected_today: '450.00', due_now: '1200.00' }),
+            itemsWithClient: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: DatabaseService, useValue: { withTenant: jest.fn((_t, work) => work(fakeClient)) } },
       ],
     }).compile();
 
     service = module.get(FinanceService);
+    moduleRef = module;
     repo = module.get(FinanceRepository);
     receivables = module.get(ReceivablesService);
     customers = module.get(CustomersService);
@@ -221,6 +231,16 @@ describe('FinanceService', () => {
 
     expect(tb.balanced).toBe(true);
     expect(tb.checks[1]).toEqual({ name: 'Accounts payable — farmers', ledger: '1900.00', subledger: '1850.00', agrees: false });
+  });
+
+  it('getCollections: the counts on every tab, the page asked for, and the total for its tab', async () => {
+    const board = await service.getCollections('tenant-1', 'pending', 'sagar', 2, 25);
+    const collections = moduleRef.get(CollectionsRepository) as jest.Mocked<CollectionsRepository>;
+    expect(collections.countsWithClient).toHaveBeenCalledWith(fakeClient, 'sagar');
+    expect(collections.itemsWithClient).toHaveBeenCalledWith(fakeClient, 'pending', 'sagar', 25, 25);
+    expect(board).toEqual(
+      expect.objectContaining({ view: 'pending', counts: { today: 2, pending: 3, all: 9 }, totals: { collectedToday: '450.00', dueNow: '1200.00' }, total: 3, page: 2 }),
+    );
   });
 
   it('throws NotFound when the tenant row is missing', async () => {

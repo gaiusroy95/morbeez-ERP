@@ -3,9 +3,11 @@ import { Test } from '@nestjs/testing';
 import { PoolClient } from 'pg';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ProcurementService } from './procurement.service';
+import { ProcurementBoardRepository } from './repositories/procurement-board.repository';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
 import { LotsRepository } from './repositories/lots.repository';
+import { LotStockRepository } from './repositories/lot-stock.repository';
 import { FarmersService } from '../farmers/farmers.service';
 import { ProductsService } from '../products/products.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
@@ -23,14 +25,22 @@ const basePo: PurchaseOrderRecord = {
   id: 'po-1',
   tenantId: 'tenant-1',
   farmerId: 'farmer-1',
+  number: 1,
   status: 'placed',
+  pickupDate: null,
+  pickupTime: null,
+  plannedDriverId: null,
+  plannedVehicleId: null,
+  agentId: null,
+  commissionPerKg: null,
+  notes: null,
   expectedDeliveryDate: null,
   approvalRequestId: null,
   version: 1,
   createdAt: new Date(),
   updatedAt: new Date(),
   createdBy: 'user-1',
-  lines: [{ id: 'line-1', purchaseOrderId: 'po-1', productId: 'product-1', expectedQuantity: '100', indicativePrice: '10' }],
+  lines: [{ id: 'line-1', purchaseOrderId: 'po-1', productId: 'product-1', expectedQuantity: '100', indicativePrice: '10', bags: null, kgPerBag: null }],
 };
 
 const baseLot: LotRecord = {
@@ -47,8 +57,8 @@ const baseLot: LotRecord = {
   rejectionReason: null,
   unitCost: null,
   status: 'received_ungraded',
-  reservedForOrderLineId: null,
   currentQuantity: null,
+  reservedQuantity: '0',
   currentLocationId: null,
   receivedAt: new Date(),
   gradedAt: null,
@@ -63,6 +73,7 @@ describe('ProcurementService', () => {
   let service: ProcurementService;
   let purchaseOrders: jest.Mocked<PurchaseOrdersRepository>;
   let lots: jest.Mocked<LotsRepository>;
+  let stock: jest.Mocked<LotStockRepository>;
   let payables: jest.Mocked<PayablesService>;
   let lotsPaid: LotsPaidListener;
   let farmers: jest.Mocked<FarmersService>;
@@ -74,6 +85,7 @@ describe('ProcurementService', () => {
     const module = await Test.createTestingModule({
       providers: [
         ProcurementService,
+        { provide: ProcurementBoardRepository, useValue: {} },
         {
           provide: PurchaseOrdersRepository,
           useValue: {
@@ -126,7 +138,7 @@ describe('ProcurementService', () => {
             lotPaymentStatusWithClient: jest.fn().mockResolvedValue([]),
           },
         },
-        { provide: FarmersService, useValue: { getById: jest.fn() } },
+        { provide: FarmersService, useValue: { getById: jest.fn().mockResolvedValue({ status: 'active' }) } },
         { provide: ProductsService, useValue: { getById: jest.fn() } },
         { provide: VehiclesService, useValue: { getById: jest.fn() } },
         { provide: WorkforceService, useValue: { getById: jest.fn() } },
@@ -140,12 +152,21 @@ describe('ProcurementService', () => {
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
         { provide: AlertsRepository, useValue: { raiseWithClient: jest.fn() } },
+        {
+          provide: LotStockRepository,
+          useValue: {
+            createWithClient: jest.fn().mockResolvedValue('balance-1'),
+            vehicleLocationWithClient: jest.fn().mockResolvedValue('vehicle-location-1'),
+            insertMovementWithClient: jest.fn().mockResolvedValue({ id: 'movement-1', createdAt: new Date() }),
+          },
+        },
       ],
     }).compile();
 
     service = module.get(ProcurementService);
     purchaseOrders = module.get(PurchaseOrdersRepository);
     lots = module.get(LotsRepository);
+    stock = module.get(LotStockRepository);
     payables = module.get(PayablesService);
     module.get(ProcurementService).onModuleInit();
     farmers = module.get(FarmersService);
@@ -355,6 +376,126 @@ describe('ProcurementService', () => {
       unitCost: '9.50',
       gradedAt,
     });
+  });
+
+  it('gradeLot puts the accepted kilos in the store', async () => {
+    lots.findByIdWithClient.mockResolvedValue(baseLot);
+    lots.gradeWithClient.mockResolvedValue({
+      ...baseLot,
+      acceptedQuantity: '95.000',
+      rejectedQuantity: '5.000',
+      currentQuantity: '95.000',
+      unitCost: '9.50',
+      status: 'available',
+      gradedAt: new Date(),
+      version: 2,
+    });
+    lots.countUngradedWithClient.mockResolvedValue(1);
+
+    await service.gradeLot('tenant-1', 'user-1', 'lot-1', { version: 1, acceptedQuantity: 95, rejectedQuantity: 5, unitCost: 9.5 });
+
+    expect(stock.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', {
+      lotId: 'lot-1',
+      productId: 'product-1',
+      locationId: null,
+      quantity: '95.000',
+    });
+  });
+
+  it('acceptAtFarm grades at the purchase order rate, loads the vehicle and owes the farmer', async () => {
+    const confirmedPo = { ...basePo, status: 'confirmed' as const };
+    const gradedAt = new Date();
+    purchaseOrders.findById.mockResolvedValue(confirmedPo);
+    purchaseOrders.findByIdWithClient.mockResolvedValue(confirmedPo);
+    purchaseOrders.markReceivedWithClient.mockResolvedValue({ ...confirmedPo, status: 'received', version: 2 });
+    lots.createWithClient.mockResolvedValue({ ...baseLot, receivedQuantity: '1000.000' });
+    const graded = {
+      ...baseLot,
+      receivedQuantity: '1000.000',
+      acceptedQuantity: '985.000',
+      rejectedQuantity: '15.000',
+      currentQuantity: '985.000',
+      unitCost: '10.00',
+      status: 'available' as const,
+      gradedAt,
+      version: 2,
+    };
+    lots.gradeWithClient.mockResolvedValue(graded);
+    lots.findByIdWithClient.mockResolvedValue(graded);
+    lots.countUngradedWithClient.mockResolvedValue(0);
+
+    const out = await service.acceptAtFarm('tenant-1', 'user-1', 'po-1', {
+      pickupId: 'pickup-1',
+      tripId: 'trip-1',
+      vehicleId: 'vehicle-1',
+      lines: [{ productId: 'product-1', acceptedQuantity: 985, rejectedQuantity: 15, rejectionReason: 'damaged' }],
+    });
+
+    expect(out).toHaveLength(1);
+    expect(lots.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ pickupId: 'pickup-1', receivedQuantity: 1000 }));
+    expect(lots.gradeWithClient).toHaveBeenCalledWith(fakeClient, 'lot-1', 1, 'user-1', {
+      acceptedQuantity: 985,
+      rejectedQuantity: 15,
+      grade: null,
+      rejectionReason: 'damaged',
+      unitCost: 10,
+    });
+    expect(stock.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', {
+      lotId: 'lot-1',
+      productId: 'product-1',
+      locationId: 'vehicle-location-1',
+      quantity: '985.000',
+    });
+    expect(stock.insertMovementWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ type: 'picked_up', quantity: '985.000', toLocationId: 'vehicle-location-1', tripId: 'trip-1' }),
+    );
+    expect(payables.accrueLotPayableWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', {
+      lotId: 'lot-1',
+      farmerId: 'farmer-1',
+      acceptedQuantity: '985.000',
+      unitCost: '10.00',
+      gradedAt,
+    });
+    expect(purchaseOrders.markReceivedWithClient).toHaveBeenCalledWith(fakeClient, 'po-1', 1);
+  });
+
+  it('acceptAtFarm leaves a wholly rejected product at the farm and owes nothing for it', async () => {
+    const confirmedPo = { ...basePo, status: 'confirmed' as const };
+    purchaseOrders.findById.mockResolvedValue(confirmedPo);
+    purchaseOrders.findByIdWithClient.mockResolvedValue(confirmedPo);
+    purchaseOrders.markReceivedWithClient.mockResolvedValue({ ...confirmedPo, status: 'received', version: 2 });
+    lots.createWithClient.mockResolvedValue(baseLot);
+    const rejected = { ...baseLot, acceptedQuantity: '0', rejectedQuantity: '100', currentQuantity: '0', status: 'rejected' as const, gradedAt: new Date(), version: 2 };
+    lots.gradeWithClient.mockResolvedValue(rejected);
+    lots.findByIdWithClient.mockResolvedValue(rejected);
+    lots.countUngradedWithClient.mockResolvedValue(0);
+
+    await service.acceptAtFarm('tenant-1', 'user-1', 'po-1', {
+      pickupId: 'pickup-1',
+      tripId: 'trip-1',
+      vehicleId: 'vehicle-1',
+      lines: [{ productId: 'product-1', acceptedQuantity: 0, rejectedQuantity: 100, rejectionReason: 'quality' }],
+    });
+
+    expect(lots.gradeWithClient).toHaveBeenCalledWith(fakeClient, 'lot-1', 1, 'user-1', expect.objectContaining({ unitCost: null }));
+    expect(stock.createWithClient).not.toHaveBeenCalled();
+    expect(payables.accrueLotPayableWithClient).not.toHaveBeenCalled();
+  });
+
+  it('acceptAtFarm refuses a product that is not on the purchase order', async () => {
+    purchaseOrders.findById.mockResolvedValue({ ...basePo, status: 'confirmed' });
+
+    await expect(
+      service.acceptAtFarm('tenant-1', 'user-1', 'po-1', {
+        pickupId: 'pickup-1',
+        tripId: 'trip-1',
+        vehicleId: 'vehicle-1',
+        lines: [{ productId: 'not-on-the-order', acceptedQuantity: 5, rejectedQuantity: 0, rejectionReason: null }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('gradeLot accrues nothing for a fully rejected lot', async () => {

@@ -2,17 +2,20 @@
 
 import { useEffect } from 'react';
 import type { ProductRecord } from '@morbeez/shared-types';
-import { formatMoney } from '@/lib/format';
+import { formatMoney, formatQuantity } from '@/lib/format';
 import { firstError, parseMoney, parseQuantity, type Parsed } from '@/lib/parse';
 import { useT } from '@/lib/i18n';
+import { SearchSelect } from './SearchSelect';
 
 export interface LineDraft {
   key: number;
   productId: string;
   quantity: string;
   price: string;
-  /** Eggs: the quantity is in trays ('pack') or single eggs ('base'). */
-  unit?: 'base' | 'pack';
+  /** Eggs: trays ('pack') or single eggs ('base'). By-weight produce: kg ('base') or bags ('bag'). */
+  unit?: 'base' | 'pack' | 'bag';
+  /** Bought by the bag: kg in one bag. */
+  kgPerBag?: string;
   /** The price was filled in from a suggestion, not typed. */
   suggested?: boolean;
 }
@@ -52,6 +55,8 @@ export function LinesEditor({
   priceLabel,
   priceOptional,
   hints,
+  onAddProduct,
+  bags,
 }: {
   lines: LineDraft[];
   onChange: (lines: LineDraft[]) => void;
@@ -60,6 +65,10 @@ export function LinesEditor({
   priceLabel: string;
   priceOptional: boolean;
   hints?: Map<string, PriceHint>;
+  /** Offers "Create new product" in each line's list; the page opens QuickAddProduct beside its form. */
+  onAddProduct?: (lineKey: number, typedName: string) => void;
+  /** Offer "Bag" beside "kg" for produce bought by the bag (purchase orders). */
+  bags?: boolean;
 }) {
   const t = useT();
   const byId = new Map(products.map((p) => [p.id, p]));
@@ -84,7 +93,7 @@ export function LinesEditor({
   // Display-only estimate; the backend computes the real total.
   const estimate = lines.reduce((sum, line) => {
     const p = byId.get(line.productId);
-    const quantity = Number(line.quantity.replace(/,/g, '')) * (p?.kind === 'egg' && line.unit === 'pack' ? p.packSize ?? 1 : 1);
+    const quantity = Number(line.quantity.replace(/,/g, '')) * perUnitOf(p, line);
     const price = Number((line.price.trim() || hints?.get(line.productId)?.price || '0').replace(/,/g, ''));
     return Number.isFinite(quantity * price) ? sum + quantity * price : sum;
   }, 0);
@@ -103,26 +112,25 @@ export function LinesEditor({
         const n = index + 1;
         return (
           <div className="line-row" key={line.key}>
-            <select
+            <SearchSelect
+              className="line-product"
               aria-label={`Line ${n} product`}
               value={line.productId}
-              onChange={(event) => {
-                const p = byId.get(event.target.value);
-                const h = hints?.get(event.target.value);
+              placeholder={t('Choose a product…')}
+              searchPlaceholder={t('Search products…')}
+              options={products.map((p) => ({ value: p.id, label: p.name, sub: p.category }))}
+              createLabel={onAddProduct ? t('Create new product') : undefined}
+              onCreate={onAddProduct ? (typed) => onAddProduct(line.key, typed) : undefined}
+              onChange={(productId) => {
+                const p = byId.get(productId);
+                const h = hints?.get(productId);
                 update(line.key, {
-                  productId: event.target.value,
+                  productId,
                   unit: p?.kind === 'egg' ? 'pack' : 'base',
                   ...(line.price === '' || line.suggested ? { price: h?.price ?? '', suggested: !!h?.price } : {}),
                 });
               }}
-            >
-              <option value="">{t('Choose a product…')}</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
             <span className="line-qty">
               <input
                 aria-label={`Line ${n} quantity in ${unitLabel(product, line.unit)}`}
@@ -141,7 +149,34 @@ export function LinesEditor({
                   <option value="base">{t('eggs')}</option>
                 </select>
               )}
+              {bags && product && product.kind !== 'egg' && product.baseUom === 'kg' && (
+                <select
+                  aria-label={`Line ${n} counted in`}
+                  value={line.unit === 'bag' ? 'bag' : 'base'}
+                  onChange={(event) => update(line.key, { unit: event.target.value as 'base' | 'bag' })}
+                >
+                  <option value="base">kg</option>
+                  <option value="bag">{t('Bag')}</option>
+                </select>
+              )}
             </span>
+            {line.unit === 'bag' && (
+              <span className="line-bag">
+                <input
+                  aria-label={`Line ${n} kg per bag`}
+                  inputMode="decimal"
+                  placeholder={t('kg / bag')}
+                  value={line.kgPerBag ?? ''}
+                  onChange={(event) => update(line.key, { kgPerBag: event.target.value })}
+                />
+                <span className="line-hint">
+                  {t('kg / bag')}
+                  {Number(line.quantity) > 0 && Number(line.kgPerBag) > 0
+                    ? ` = ${formatQuantity(String(Number(line.quantity) * Number(line.kgPerBag)))} kg (${t('auto calculated')})`
+                    : ''}
+                </span>
+              </span>
+            )}
             <span className="line-price">
               <input
                 aria-label={`Line ${n} ${priceLabel.toLowerCase()}${product ? ` per ${product.baseUom}` : ''}`}
@@ -184,11 +219,28 @@ export function LinesEditor({
   );
 }
 
+/** Puts a product just added (QuickAddProduct) on the line that asked for it. */
+export function withProduct(lines: LineDraft[], lineKey: number, product: ProductRecord): LineDraft[] {
+  return lines.map((line) =>
+    line.key === lineKey ? { ...line, productId: product.id, unit: product.kind === 'egg' ? 'pack' : 'base' } : line,
+  );
+}
+
 export interface ParsedLine {
   productId: string;
-  /** In the product's base unit: eggs entered in trays are converted to pieces. */
+  /** In the product's base unit: eggs entered in trays are converted to pieces, bags to kg. */
   quantity: number;
   price: number | undefined;
+  /** Bought by the bag: how many, and kg in each. */
+  bags?: number;
+  kgPerBag?: number;
+}
+
+/** What one counted unit is worth in the product's base unit. */
+function perUnitOf(product: ProductRecord | undefined, line: LineDraft): number {
+  if (product?.kind === 'egg' && (line.unit ?? 'pack') === 'pack') return product.packSize ?? 1;
+  if (line.unit === 'bag') return Number((line.kgPerBag ?? '').replace(/,/g, '')) || 0;
+  return 1;
 }
 
 /** Validates every line; the first problem is reported by line number. */
@@ -209,10 +261,22 @@ export function parseLines(lines: LineDraft[], priceOptional: boolean, products:
     const error = firstError([quantity, price]);
     if (error) return { ok: false, error };
     const product = byId.get(line.productId);
-    const perUnit = product?.kind === 'egg' && (line.unit ?? 'pack') === 'pack' ? product.packSize ?? 1 : 1;
+    const counted = (quantity as { value: number }).value;
+    if (line.unit === 'bag') {
+      const kg = parseQuantity(line.kgPerBag ?? '', `the kg per bag on line ${n}`);
+      if (!kg.ok) return kg;
+      parsed.push({
+        productId: line.productId,
+        quantity: Math.round(counted * kg.value * 1000) / 1000,
+        price: (price as { value: number | undefined }).value,
+        bags: counted,
+        kgPerBag: kg.value,
+      });
+      continue;
+    }
     parsed.push({
       productId: line.productId,
-      quantity: (quantity as { value: number }).value * perUnit,
+      quantity: counted * perUnitOf(product, line),
       price: (price as { value: number | undefined }).value,
     });
   }

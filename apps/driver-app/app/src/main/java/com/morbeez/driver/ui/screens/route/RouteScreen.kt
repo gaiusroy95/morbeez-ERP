@@ -73,8 +73,9 @@ import com.morbeez.driver.ui.theme.Fresh
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RouteScreen(
-    onOpenStop: (tripId: String, stopId: String) -> Unit,
+    onOpenStop: (tripId: String, stopId: String, isPickup: Boolean) -> Unit,
     onOpenExpenses: (tripId: String) -> Unit,
+    onBack: (() -> Unit)? = null,
     viewModel: RouteViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -88,6 +89,7 @@ fun RouteScreen(
         CarbonHeader(
             title = stringResource(R.string.route_title),
             eyebrow = trip?.plannedDate ?: stringResource(R.string.field_execution),
+            onBack = onBack,
             trailing = {
                 LanguagePill(onDark = true)
                 Spacer(Modifier.width(8.dp))
@@ -147,7 +149,7 @@ fun RouteScreen(
                     isNext = stop.id == next?.id,
                     isFirst = index == 0,
                     isLast = index == stops.lastIndex,
-                    onClick = { onOpenStop(trip.id, stop.id) },
+                    onClick = { onOpenStop(trip.id, stop.id, stop.stopType == "pickup") },
                 )
             }
         }
@@ -157,7 +159,7 @@ fun RouteScreen(
                 if (next != null) {
                     PrimaryAction(
                         text = stringResource(R.string.next_stop, next.counterpartyName),
-                        onClick = { onOpenStop(trip.id, next.id) },
+                        onClick = { onOpenStop(trip.id, next.id, next.stopType == "pickup") },
                         glyph = Glyph.Arrow,
                     )
                     Spacer(Modifier.height(10.dp))

@@ -8,7 +8,7 @@ import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { useUiStore } from '@/lib/stores/ui-store';
 import { useAccess } from '@/lib/hooks/use-access';
 import { displayLogin } from '@/lib/phone';
-import { NAV } from './nav';
+import { BOTTOM_TABS, NAV, QUICK_CREATE } from './nav';
 import { AlertBell } from './AlertBell';
 import { LanguageSwitch } from './LanguageSwitch';
 import { useI18n, useT } from '@/lib/i18n';
@@ -54,12 +54,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
   const navOpen = useUiStore((s) => s.navOpen);
   const setNavOpen = useUiStore((s) => s.setNavOpen);
+  const [creating, setCreating] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const t = useT();
   const { lang } = useI18n();
+  const allowed = (permission?: string) => !permission || !session || hasPermission(session, permission);
 
-  // Close the mobile drawer whenever the route changes.
-  useEffect(() => setNavOpen(false), [pathname, setNavOpen]);
+  // Close the drawer and the create sheet whenever the route changes.
+  useEffect(() => {
+    setNavOpen(false);
+    setCreating(false);
+  }, [pathname, setNavOpen]);
 
   async function signOut() {
     setSigningOut(true);
@@ -67,10 +72,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.location.assign('/login');
   }
 
-  // Where you are, for the top bar: "Trading / Orders".
+  // The page's name, for the top bar.
   const here = NAV.flatMap((g) => g.items.map((item) => ({ group: g.label, item }))).find(({ item }) =>
     pathname.startsWith(item.href),
   );
+  const isHome = pathname.startsWith('/dashboard');
+  const quick = QUICK_CREATE.filter((item) => allowed(item.permission));
 
   return (
     <div className="shell">
@@ -78,11 +85,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-head">
           <Link href="/dashboard" className="brand">
             <span className="brand-mark" aria-hidden="true">
-              <Icon name="leaf" size={16} />
+              <Icon name="leaf" size={18} />
             </span>
             <span>
-              Morbeez
-              <span className="brand-sub">{t('Control tower')}</span>
+              MORBEEZ
+              <span className="brand-sub">{session ? displayLogin(session.login) : t('Control tower')}</span>
             </span>
           </Link>
           <button type="button" className="icon-button sidebar-close" onClick={() => setNavOpen(false)} aria-label={t('Close')}>
@@ -93,9 +100,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="nav-scroll">
           {NAV.map((group) => {
             // Until the session loads, show everything rather than flash an empty menu.
-            const items = group.items.filter(
-              (item) => !item.permission || !session || hasPermission(session, item.permission),
-            );
+            const items = group.items.filter((item) => allowed(item.permission));
             if (items.length === 0) return null;
             return (
               <div key={group.label} className="nav-group">
@@ -117,17 +122,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="sidebar-foot">
-          <Link href="/account" className="me" title={t('Your account')}>
-            <span className="avatar" aria-hidden="true">
-              <Initials login={session?.login} />
-            </span>
-            <span className="me-text">
-              <span className="me-name">{session ? displayLogin(session.login) : t('Your account')}</span>
-              <span className="me-role">{t('Signed in')}</span>
-            </span>
+          <Link href="/account" className="foot-link">
+            <Icon name="user" size={16} />
+            {t('Profile')}
           </Link>
-          <button type="button" className="icon-button" onClick={signOut} disabled={signingOut} aria-label={t('Sign out')} title={t('Sign out')}>
-            <Icon name="logout" />
+          <span className="foot-link foot-lang">
+            <Icon name="globe" size={16} />
+            <LanguageSwitch />
+          </span>
+          <button type="button" className="foot-link foot-logout" onClick={signOut} disabled={signingOut}>
+            <Icon name="logout" size={16} />
+            {signingOut ? t('Signing out…') : t('Logout')}
           </button>
         </div>
       </nav>
@@ -144,18 +149,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Icon name="menu" />
           </button>
-          {here && (
-            <div className="crumbs">
-              <span className="crumb-group">{t(here.group)}</span>
-              <Icon name="chevron" size={14} className="crumb-sep" />
-              <span className="crumb-page">{t(here.item.label)}</span>
-            </div>
+          {isHome ? (
+            <Link href="/dashboard" className="topbar-brand">
+              <span className="brand-mark" aria-hidden="true">
+                <Icon name="leaf" size={16} />
+              </span>
+              <span>
+                MORBEEZ
+                <span className="topbar-brand-sub">{t('Owner')}</span>
+              </span>
+            </Link>
+          ) : (
+            here && <h2 className="topbar-title">{t(here.item.label)}</h2>
           )}
           <div className="topbar-spacer" />
           <span className="topbar-date">
             {new Date().toLocaleDateString(`${lang}-IN`, { weekday: 'short', day: 'numeric', month: 'short' })}
           </span>
-          <LanguageSwitch />
+          <span className="topbar-lang">
+            <LanguageSwitch />
+          </span>
           {hasPermission(session, 'dashboard:read') && <AlertBell />}
           {session && (
             // topbar-email: present once the session has loaded (the e2e suites wait on it).
@@ -172,6 +185,64 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Phones only (CSS): Home · Operations · (+) · Finance · More. */}
+      <nav className="bottom-nav" aria-label={t('Quick links')}>
+        {BOTTOM_TABS.map((tab) => {
+          if (tab.kind === 'create') {
+            if (quick.length === 0) return null;
+            return (
+              <button
+                key="create"
+                type="button"
+                className="bottom-nav-fab"
+                aria-label={t('Create')}
+                aria-expanded={creating}
+                onClick={() => setCreating(!creating)}
+              >
+                <Icon name="plus" size={26} />
+              </button>
+            );
+          }
+          if (tab.kind === 'more') {
+            return (
+              <button key="more" type="button" className="bottom-nav-link" aria-expanded={navOpen} onClick={() => setNavOpen(true)}>
+                <Icon name="menu" size={22} />
+                <span>{t('More')}</span>
+              </button>
+            );
+          }
+          if (!allowed(tab.permission)) return null;
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              className="bottom-nav-link"
+              aria-current={pathname.startsWith(tab.href) ? 'page' : undefined}
+            >
+              <Icon name={tab.icon} size={22} />
+              <span>{t(tab.label)}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {creating && (
+        <>
+          <div className="sheet-scrim" onClick={() => setCreating(false)} aria-hidden="true" />
+          <div className="create-sheet" role="dialog" aria-label={t('Create')}>
+            <div className="create-sheet-title">{t('Create')}</div>
+            {quick.map((item) => (
+              <Link key={item.href} href={item.href} className="create-sheet-item" onClick={() => setCreating(false)}>
+                <span className="create-sheet-icon" aria-hidden="true">
+                  <Icon name={item.icon} size={20} />
+                </span>
+                {t(item.label)}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { compareMoney, normalizeMoney, subtractMoney, sumMoney } from '../../common/money';
 import { ChecklistItem } from './entities/trip-reconciliation.entity';
 import { TripReviewFacts } from './repositories/trip-reconciliations.repository';
+import { ClosingStockLine } from './entities/trip-planning.entity';
 
 /**
  * What the driver should hand over (pilot baseline, money handover):
@@ -59,7 +60,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * [cashReceived] is what the owner counted; until they've counted, the
  * driver's declared handover stands in for it.
  */
-export function checklistOf(facts: TripReviewFacts, handover: HandoverSummary, cashReceived: string | null): ChecklistItem[] {
+export function checklistOf(
+  facts: TripReviewFacts,
+  handover: HandoverSummary,
+  cashReceived: string | null,
+  closingStock: ClosingStockLine[] | null = null,
+): ChecklistItem[] {
   const pickups = facts.stops.filter((s) => s.type === 'pickup');
   const deliveries = facts.stops.filter((s) => s.type === 'delivery');
   const items: ChecklistItem[] = [];
@@ -85,24 +91,27 @@ export function checklistOf(facts: TripReviewFacts, handover: HandoverSummary, c
       : { area: 'deliveries', status: 'exception', detail: `No proof of delivery: ${noProof.map((s) => s.name).join(', ')}.` },
   );
 
-  // Load: what the vehicle carried, product by product — and any shrinkage
-  // or breakage beyond what the owner accepts.
+  // Load: what the vehicle carried, product by product — any shrinkage or
+  // breakage beyond what the owner accepts, and, when the vehicle was
+  // counted at closing, any product not as it should be.
   const carried =
     facts.load.length === 0
       ? 'Nothing was carried.'
       : facts.load.map((l) => `${l.product}: picked up ${trimQty(l.pickedUp)} ${l.uom}, delivered ${trimQty(l.delivered)} ${l.uom}`).join('; ') + '.';
   const losses = facts.lossExceptions ?? [];
+  const offCount = (closingStock ?? []).filter((c) => Math.abs(Number(c.counted) - Number(c.expected)) >= 0.0005);
+  const problems = [
+    ...losses.map((x) => `${x.kind === 'weighment' ? 'Shrinkage' : 'Breakage'} ${x.lossPct}% on ${x.product} at ${x.customer} (accepted: ${x.tolerancePct}%)`),
+    ...offCount.map((c) => {
+      const diff = Number(c.counted) - Number(c.expected);
+      return `${c.product} on the vehicle: counted ${trimQty(c.counted)} ${c.uom}, expected ${trimQty(c.expected)} ${c.uom} (${trimQty(Math.abs(diff).toFixed(3))} ${c.uom} ${diff < 0 ? 'short' : 'over'})`;
+    }),
+  ];
+  const counted = closingStock === null ? '' : offCount.length === 0 ? ' Vehicle closing stock counted: as expected.' : '';
   items.push(
-    losses.length === 0
-      ? { area: 'load', status: 'pass', detail: carried }
-      : {
-          area: 'load',
-          status: 'exception',
-          detail:
-            losses
-              .map((x) => `${x.kind === 'weighment' ? 'Shrinkage' : 'Breakage'} ${x.lossPct}% on ${x.product} at ${x.customer} (accepted: ${x.tolerancePct}%)`)
-              .join('; ') + `. ${carried}`,
-        },
+    problems.length === 0
+      ? { area: 'load', status: 'pass', detail: carried + counted }
+      : { area: 'load', status: 'exception', detail: `${problems.join('; ')}. ${carried}` },
   );
 
   // Returns & shortages: goods that came back, and why.

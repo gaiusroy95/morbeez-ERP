@@ -1,11 +1,31 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { PayrollService } from './payroll.service';
+import { LoginLink, MAX_DOCUMENT_BYTES, UploadedDocument, WorkerAccessService } from './worker-access.service';
+import { AddWorkerDto, LoginLinkDto, UploadWorkerDocumentDto } from './dto/worker-access.dto';
 import { GST_STATES } from '../../common/india';
 import {
   AdvanceRecord,
@@ -16,6 +36,7 @@ import {
   PayrollSettings,
   SettlementRecord,
   WorkerDetail,
+  WorkerDocument,
   WorkerRow,
 } from './entities/payroll.entity';
 import {
@@ -47,7 +68,74 @@ import {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('workforce')
 export class PayrollController {
-  constructor(private readonly payroll: PayrollService) {}
+  constructor(
+    private readonly payroll: PayrollService,
+    private readonly access: WorkerAccessService,
+  ) {}
+
+  // ---- Adding a worker, their documents, their login (client feedback, Oct 2026) ----
+
+  /** A worker with their phone and address, in one step. */
+  @Post('workers')
+  @RequirePermissions('workforce:write')
+  addWorker(@CurrentUser() user: AuthContext, @Body() dto: AddWorkerDto): Promise<WorkerDetail> {
+    return this.access.addWorker(user.tenantId, user.userId, dto);
+  }
+
+  @Post('workers/:id/documents')
+  @RequirePermissions('workforce:write')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_BYTES } }))
+  addDocument(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UploadWorkerDocumentDto,
+    @UploadedFile() file?: UploadedDocument,
+  ): Promise<WorkerDocument> {
+    if (!file) throw new BadRequestException('No file attached');
+    return this.access.addDocument(user.tenantId, user.userId, id, dto.kind, dto.label ?? null, file);
+  }
+
+  /** The document itself, to view in the browser. */
+  @Get('workers/:id/documents/:documentId/file')
+  @RequirePermissions('workforce:read')
+  async documentFile(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const file = await this.access.documentFile(user.tenantId, id, documentId);
+    res.setHeader('content-type', file.contentType);
+    res.setHeader('cache-control', 'private, no-store');
+    res.send(file.body);
+  }
+
+  @Post('workers/:id/documents/:documentId/remove')
+  @HttpCode(200)
+  @RequirePermissions('workforce:write')
+  removeDocument(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ): Promise<WorkerDetail> {
+    return this.access.removeDocument(user.tenantId, user.userId, id, documentId);
+  }
+
+  /**
+   * A link for the worker to choose their password — making their login
+   * first if they have none. The owner sends it (WhatsApp, SMS).
+   */
+  @Post('workers/:id/login-link')
+  @HttpCode(200)
+  @RequirePermissions('users:write')
+  loginLink(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LoginLinkDto,
+  ): Promise<LoginLink> {
+    return this.access.loginLink(user.tenantId, user.userId, id, dto.phone ?? null);
+  }
 
   /** States and union territories by their 2-digit code — for work locations and minimum wages. */
   @Get('states')

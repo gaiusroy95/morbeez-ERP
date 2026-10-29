@@ -12,6 +12,8 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { UpdateCreditTermsDto } from './dto/update-credit-terms.dto';
 import { CustomerRecord } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
+import { CustomersBoardQueryDto } from './dto/customers-board.dto';
+import { CustomerProfile, CustomersBoard } from './entities/customer-insights.entity';
 
 @ApiTags('customers')
 @ApiBearerAuth()
@@ -27,6 +29,27 @@ export class CustomersController {
     @Query() query: PaginationQueryDto,
   ): Promise<PaginatedResult<CustomerRecord>> {
     return this.customersService.list(user.tenantId, query.page ?? 1, query.pageSize ?? 25);
+  }
+
+  /** The Customers list (redesign V1.1): filters, route, search; money for finance:read. */
+  @Get('board')
+  @RequirePermissions('customers:read')
+  board(@CurrentUser() user: AuthContext, @Query() query: CustomersBoardQueryDto): Promise<CustomersBoard> {
+    return this.customersService.board(
+      user.tenantId,
+      { filter: query.filter ?? 'all', routeId: query.routeId ?? null, q: query.q ?? null, page: query.page ?? 1, pageSize: query.pageSize ?? 100 },
+      user.permissions.includes('finance:read'),
+    );
+  }
+
+  /** Customer Profile: orders with orders:read, money with finance:read. */
+  @Get(':id/profile')
+  @RequirePermissions('customers:read')
+  profile(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<CustomerProfile> {
+    return this.customersService.profile(user.tenantId, id, {
+      money: user.permissions.includes('finance:read'),
+      orders: user.permissions.includes('orders:read'),
+    });
   }
 
   @Get(':id')
@@ -68,6 +91,13 @@ export class CustomersController {
   @RequirePermissions('customers:write')
   archive(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<CustomerRecord> {
     return this.customersService.archive(user.tenantId, user.userId, id);
+  }
+
+  /** A new delivery QR for the shop (driver app D3). */
+  @Post(':id/qr')
+  @RequirePermissions('customers:write')
+  newQr(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<CustomerRecord> {
+    return this.customersService.newQr(user.tenantId, user.userId, id);
   }
 
   @Post(':id/restore')

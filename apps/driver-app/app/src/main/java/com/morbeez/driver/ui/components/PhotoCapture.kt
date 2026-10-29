@@ -59,6 +59,17 @@ fun PhotoCaptureButton(
         }
     }
 
+    PhotoButtonLook(label, captured, modifier) {
+        val file = createCaptureFile(context)
+        pendingFile = file
+        val uri = FileProvider.getUriForFile(context, "com.morbeez.driver.fileprovider", file)
+        launcher.launch(uri)
+    }
+}
+
+/** How the photo button looks, without the camera (the screenshot tests draw it). */
+@Composable
+fun PhotoButtonLook(label: String, captured: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
     Row(
         modifier
@@ -66,12 +77,7 @@ fun PhotoCaptureButton(
             .clip(shape)
             .background(if (captured) Fresh.primaryTint else Fresh.surface)
             .border(1.dp, if (captured) Fresh.primary else Fresh.borderStrong, shape)
-            .clickable(role = Role.Button) {
-                val file = createCaptureFile(context)
-                pendingFile = file
-                val uri = FileProvider.getUriForFile(context, "com.morbeez.driver.fileprovider", file)
-                launcher.launch(uri)
-            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -11,6 +11,12 @@ export interface CustomerRecord {
   tenantId: string;
   name: string;
   contact: CustomerContact;
+  /** The village or town shown under the name. */
+  place: string | null;
+  /** Where orders are delivered unless an order says otherwise. */
+  address: string | null;
+  /** The route the customer is usually delivered on. */
+  routeId: string | null;
   /** What statements, reminders and WhatsApp messages go out in; tax invoices stay English. */
   preferredLanguage: string;
   creditLimit: string; // numeric comes back from pg as a string — never coerce to JS number for money (Constitution III.2)
@@ -24,6 +30,10 @@ export interface CustomerRecord {
   financeChargeGraceDays: number;
   creditHold: boolean;
   creditHoldReason: string | null;
+  /** The spot sales' walk-in buyer, who pays on the spot and never owes. */
+  isWalkIn: boolean;
+  /** Printed as a QR (MORBEEZ:C:<token>) for the shop; the driver scans it at the door (driver app D3). */
+  qrToken: string;
   status: CustomerStatus;
   version: number;
   createdAt: Date;

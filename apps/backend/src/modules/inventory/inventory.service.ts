@@ -11,6 +11,11 @@ import { InventoryMovementsRepository } from './repositories/inventory-movements
 import { LocationRecord, LocationType } from './entities/location.entity';
 import { InventoryMovementRecord, StockSummary } from './entities/inventory-movement.entity';
 import { LotRecord, ProductStockRow } from '../procurement/entities/lot.entity';
+import { LotStockService } from '../procurement/lot-stock.service';
+import { VehicleStockRow } from '../procurement/repositories/lot-stock.repository';
+import { VehicleBoardRepository } from './repositories/vehicle-board.repository';
+import { VehicleBoard } from './entities/vehicle-board.entity';
+import { vehicleBoardOf } from './vehicle-board';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
@@ -31,6 +36,8 @@ export class InventoryService {
     private readonly procurement: ProcurementService,
     private readonly audit: AuditService,
     private readonly ledger: LedgerService,
+    private readonly lotStock: LotStockService,
+    private readonly board: VehicleBoardRepository,
   ) {}
 
   // ---- Locations ----
@@ -134,10 +141,10 @@ export class InventoryService {
 
   /**
    * available = physical - reserved (Inventory Engine's core formula).
-   * physical counts every graded, still-in-stock lot (status 'available'
-   * or 'reserved') at its current_quantity — a lot that's still
-   * 'received_ungraded' isn't sellable stock yet, and a 'rejected' one
-   * never was.
+   * physical counts every graded lot still in stock at its current_quantity,
+   * wherever its kilos are; reserved is what's held for orders. A lot
+   * that's still 'received_ungraded' isn't sellable stock yet, and a
+   * 'rejected' one never was.
    */
   async getStockSummary(tenantId: string, productId: string): Promise<StockSummary> {
     await this.products.getById(tenantId, productId);
@@ -146,13 +153,9 @@ export class InventoryService {
     let physical = 0;
     let reserved = 0;
     for (const lot of lots) {
-      const quantity = Number(lot.currentQuantity ?? 0);
-      if (lot.status === 'available') {
-        physical += quantity;
-      } else if (lot.status === 'reserved') {
-        physical += quantity;
-        reserved += quantity;
-      }
+      if (lot.status !== 'available') continue;
+      physical += Number(lot.currentQuantity ?? 0);
+      reserved += Number(lot.reservedQuantity);
     }
 
     return {
@@ -166,6 +169,17 @@ export class InventoryService {
   /** Stock for every product at once — the Inventory overview, one query rather than one per product. */
   getStockOverview(tenantId: string): Promise<ProductStockRow[]> {
     return this.procurement.stockByProduct(tenantId);
+  }
+
+  getVehicleStock(tenantId: string, vehicleId: string | null): Promise<VehicleStockRow[]> {
+    return this.lotStock.vehicleStock(tenantId, vehicleId);
+  }
+
+  /** The owner's Vehicle Stock (redesign V1.1): every vehicle with something aboard or on the road. */
+  getVehicleBoard(tenantId: string): Promise<VehicleBoard> {
+    return this.db.withTenant(tenantId, async (client) =>
+      vehicleBoardOf(await this.board.vehiclesWithClient(client), await this.board.productsWithClient(client)),
+    );
   }
 
   async listLotsForProduct(tenantId: string, productId: string): Promise<LotRecord[]> {
@@ -249,22 +263,23 @@ export class InventoryService {
     if (before.currentQuantity === null || Number(before.currentQuantity) <= 0) {
       throw new BadRequestException('Nothing left in this lot to transfer');
     }
-    const fromLocationId = before.currentLocationId;
 
-    const after = await this.procurement.transferLot(tenantId, actorUserId, lotId, dto.version, dto.toLocationId);
+    const { lot, moves } = await this.procurement.transferLot(tenantId, actorUserId, lotId, dto.version, dto.toLocationId);
 
-    await this.db.withTenant(tenantId, (client) =>
-      this.movements.createWithClient(client, tenantId, actorUserId, {
-        lotId: after.id,
-        productId: after.productId,
-        movementType: 'transferred',
-        quantity: Number(after.currentQuantity ?? 0),
-        fromLocationId,
-        toLocationId: dto.toLocationId,
-      }),
-    );
+    await this.db.withTenant(tenantId, async (client) => {
+      for (const move of moves) {
+        await this.movements.createWithClient(client, tenantId, actorUserId, {
+          lotId: lot.id,
+          productId: lot.productId,
+          movementType: 'transferred',
+          quantity: Number(move.quantity),
+          fromLocationId: move.fromLocationId,
+          toLocationId: dto.toLocationId,
+        });
+      }
+    });
 
-    return after;
+    return lot;
   }
 
   // ---- Movement history ----

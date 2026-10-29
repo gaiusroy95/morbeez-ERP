@@ -3,6 +3,8 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsUUID,
+  MaxLength,
   IsNumber,
   IsOptional,
   IsString,
@@ -43,4 +45,21 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsIn(LANGUAGES)
   preferredLanguage?: string;
+
+  @ApiPropertyOptional({ description: 'Village or town shown under the name', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  place?: string | null;
+
+  @ApiPropertyOptional({ description: 'Default delivery address', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  address?: string | null;
+
+  @ApiPropertyOptional({ description: 'The route this customer is usually delivered on', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  routeId?: string | null;
 }

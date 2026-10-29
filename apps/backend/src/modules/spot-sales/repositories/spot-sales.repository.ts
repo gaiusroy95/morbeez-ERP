@@ -192,13 +192,24 @@ export class SpotSalesRepository {
     return r.rows[0] ?? null;
   }
 
-  /** Available lots sitting at any of the vehicle's stock locations. */
-  async vehicleLots(client: PoolClient, vehicleId: string): Promise<{ lot_id: string; product_id: string; quantity: string; unit_cost: string; received_at: string; location_id: string; version: number }[]> {
+  /**
+   * The free kilos at any of the vehicle's stock locations, part by part
+   * (stock.lot_balance) — kilos held for the trip's deliveries aren't for
+   * sale (driver app D0).
+   */
+  async vehicleLots(
+    client: PoolClient,
+    vehicleId: string,
+  ): Promise<{ lot_id: string; balance_id: string; product_id: string; quantity: string; unit_cost: string; received_at: string; location_id: string; version: number }[]> {
     const r = await client.query(
-      `SELECT l.id AS lot_id, l.product_id, l.current_quantity::text AS quantity, l.unit_cost::text AS unit_cost,
-              l.received_at::text AS received_at, l.current_location_id AS location_id, l.version
-       FROM commerce.lot l JOIN stock.location loc ON loc.id = l.current_location_id
-       WHERE loc.vehicle_id = $1 AND loc.type = 'vehicle' AND l.status = 'available' AND l.current_quantity > 0 AND l.unit_cost IS NOT NULL`,
+      `SELECT l.id AS lot_id, b.id AS balance_id, b.product_id, (b.quantity - b.reserved_quantity)::text AS quantity,
+              l.unit_cost::text AS unit_cost, l.received_at::text AS received_at, b.location_id, l.version
+       FROM stock.lot_balance b
+       JOIN commerce.lot l ON l.id = b.lot_id
+       JOIN stock.location loc ON loc.id = b.location_id
+       WHERE loc.vehicle_id = $1 AND loc.type = 'vehicle' AND l.status = 'available' AND b.quantity > b.reserved_quantity
+         AND l.unit_cost IS NOT NULL
+       ORDER BY l.received_at, b.created_at`,
       [vehicleId],
     );
     return r.rows;
@@ -214,27 +225,6 @@ export class SpotSalesRepository {
       [vehicleId, exceptSaleId],
     );
     return new Map(r.rows.map((x) => [x.product_id as string, x.held as string]));
-  }
-
-  /** Draws a lot down; false if it no longer holds that much (moved or sold meanwhile). */
-  async drawLot(client: PoolClient, lotId: string, quantity: string): Promise<boolean> {
-    const r = await client.query(
-      `UPDATE commerce.lot SET current_quantity = current_quantity - $2::numeric, version = version + 1, updated_at = now()
-       WHERE id = $1 AND status = 'available' AND current_quantity >= $2::numeric`,
-      [lotId, quantity],
-    );
-    return (r.rowCount ?? 0) === 1;
-  }
-
-  async insertStockMovement(
-    client: PoolClient,
-    m: { tenantId: string; lotId: string; productId: string; quantity: string; locationId: string; reason: string; userId: string },
-  ): Promise<void> {
-    await client.query(
-      `INSERT INTO stock.inventory_movement (tenant_id, lot_id, product_id, movement_type, quantity, reason, from_location_id, created_by)
-       VALUES ($1, $2, $3, 'spot_sold', $4, $5, $6, $7)`,
-      [m.tenantId, m.lotId, m.productId, m.quantity, m.reason, m.locationId, m.userId],
-    );
   }
 
   // ---- Sales ----

@@ -10,6 +10,8 @@ import { ProcurementService } from '../procurement/procurement.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { LedgerService } from '../finance/ledger.service';
+import { LotStockService } from '../procurement/lot-stock.service';
+import { VehicleBoardRepository } from './repositories/vehicle-board.repository';
 import { LocationRecord } from './entities/location.entity';
 import { LotRecord } from '../procurement/entities/lot.entity';
 import { ProductRecord } from '../products/entities/product.entity';
@@ -77,8 +79,8 @@ function makeLot(overrides: Partial<LotRecord>): LotRecord {
     rejectionReason: null,
     unitCost: '10',
     status: 'available',
-    reservedForOrderLineId: null,
     currentQuantity: '100',
+    reservedQuantity: '0.000',
     currentLocationId: null,
     receivedAt: new Date(),
     gradedAt: new Date(),
@@ -135,6 +137,8 @@ describe('InventoryService', () => {
             transferLot: jest.fn(),
           },
         },
+        { provide: LotStockService, useValue: { vehicleStock: jest.fn() } },
+        { provide: VehicleBoardRepository, useValue: { vehiclesWithClient: jest.fn(), productsWithClient: jest.fn() } },
         {
           provide: DatabaseService,
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
@@ -184,19 +188,20 @@ describe('InventoryService', () => {
     );
   });
 
-  it('getStockSummary computes physical, reserved, and available from mixed lot statuses', async () => {
+  it('getStockSummary counts kilos in stock, and those held for orders, by the kilo', async () => {
     products.getById.mockResolvedValue(baseProduct);
     procurement.listLotsForProduct.mockResolvedValue([
       makeLot({ id: 'lot-1', status: 'available', currentQuantity: '40' }),
-      makeLot({ id: 'lot-2', status: 'reserved', currentQuantity: '30' }),
+      makeLot({ id: 'lot-2', status: 'available', currentQuantity: '30', reservedQuantity: '25' }),
       makeLot({ id: 'lot-3', status: 'rejected', currentQuantity: '0' }),
+      makeLot({ id: 'lot-4', status: 'delivered', currentQuantity: '0' }),
     ]);
 
     const summary = await service.getStockSummary('tenant-1', 'product-1');
 
     expect(summary.physical).toBe('70.000');
-    expect(summary.reserved).toBe('30.000');
-    expect(summary.available).toBe('40.000');
+    expect(summary.reserved).toBe('25.000');
+    expect(summary.available).toBe('45.000');
   });
 
   it('recordShrinkage delegates to Procurement and writes a movement entry', async () => {
@@ -274,26 +279,33 @@ describe('InventoryService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('transferLot records a movement with the previous and new location', async () => {
+  it('transferLot records a movement for each place the kilos came from', async () => {
     locations.findById.mockResolvedValue(baseLocation);
-    procurement.getLot.mockResolvedValue(makeLot({ currentLocationId: 'old-location', currentQuantity: '50' }));
-    procurement.transferLot.mockResolvedValue(
-      makeLot({ currentLocationId: 'location-1', currentQuantity: '50', version: 2 }),
-    );
+    procurement.getLot.mockResolvedValue(makeLot({ currentLocationId: null, currentQuantity: '50' }));
+    procurement.transferLot.mockResolvedValue({
+      lot: makeLot({ currentLocationId: 'location-1', currentQuantity: '50', version: 2 }),
+      moves: [
+        { fromLocationId: 'old-location', quantity: '30.000' },
+        { fromLocationId: null, quantity: '20.000' },
+      ],
+    });
 
-    await service.transferLot('tenant-1', 'user-1', 'lot-1', { version: 1, toLocationId: 'location-1' });
+    const lot = await service.transferLot('tenant-1', 'user-1', 'lot-1', { version: 1, toLocationId: 'location-1' });
 
+    expect(lot.currentLocationId).toBe('location-1');
     expect(procurement.transferLot).toHaveBeenCalledWith('tenant-1', 'user-1', 'lot-1', 1, 'location-1');
+    expect(movements.createWithClient).toHaveBeenCalledTimes(2);
     expect(movements.createWithClient).toHaveBeenCalledWith(
       fakeClient,
       'tenant-1',
       'user-1',
-      expect.objectContaining({
-        movementType: 'transferred',
-        fromLocationId: 'old-location',
-        toLocationId: 'location-1',
-        quantity: 50,
-      }),
+      expect.objectContaining({ movementType: 'transferred', fromLocationId: 'old-location', toLocationId: 'location-1', quantity: 30 }),
+    );
+    expect(movements.createWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      expect.objectContaining({ movementType: 'transferred', fromLocationId: null, toLocationId: 'location-1', quantity: 20 }),
     );
   });
 });

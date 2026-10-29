@@ -23,6 +23,17 @@ interface TripStopDao {
     @Query("UPDATE trip_stops SET status = :status, pendingSync = :pendingSync WHERE id = :stopId")
     suspend fun updateStatus(stopId: String, status: String, pendingSync: Boolean)
 
+    @Query("UPDATE trip_stops SET arrivedAt = :arrivedAt WHERE id = :stopId AND arrivedAt IS NULL")
+    suspend fun markArrived(stopId: String, arrivedAt: String)
+
+    /** Done on this phone: shown as completed, with what was loaded, before the server has heard. */
+    @Query("UPDATE trip_stops SET status = 'completed', pendingSync = 1, farmJson = :farmJson WHERE id = :stopId")
+    suspend fun markFarmCompleted(stopId: String, farmJson: String)
+
+    /** Delivered on this phone (D3): shown as completed, with what left the vehicle, before the server has heard. */
+    @Query("UPDATE trip_stops SET status = 'completed', pendingSync = 1, deliveryJson = :deliveryJson WHERE id = :stopId")
+    suspend fun markDeliveryCompleted(stopId: String, deliveryJson: String)
+
     @Query("DELETE FROM trip_stops WHERE tripId = :tripId")
     suspend fun clearForTrip(tripId: String)
 

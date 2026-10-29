@@ -3,6 +3,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { FarmersModule } from '../farmers/farmers.module';
 import { TaxRulesModule } from '../tax-rules/tax-rules.module';
 import { FinanceController } from './finance.controller';
+import { CollectionsRepository } from './repositories/collections.repository';
 import { DisputesController } from './disputes.controller';
 import { DisputesService } from './disputes.service';
 import { FinanceService } from './finance.service';
@@ -43,6 +44,7 @@ import { FinanceCostsRepository } from './repositories/finance-costs.repository'
     ReceivablesRepository,
     PayablesRepository,
     FinanceCostsRepository,
+    CollectionsRepository,
   ],
   exports: [ReceivablesService, PayablesService, LedgerService],
 })

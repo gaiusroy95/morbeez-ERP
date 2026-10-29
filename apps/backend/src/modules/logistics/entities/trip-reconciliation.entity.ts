@@ -1,3 +1,5 @@
+import { ClosingStockLine } from './trip-planning.entity';
+
 // The owner's closure of a trip: its cash float settled, posted to the
 // ledger when recorded (LedgerService.postTripReconciliationWithClient), and
 // what was checked. variance = expected handover − cashReturned, where
@@ -36,6 +38,8 @@ export interface TripReconciliationRecord {
   outcome: ClosureOutcome;
   exceptionNote: string | null;
   checklist: ChecklistItem[] | null;
+  /** What was counted on the vehicle at closing; null when it wasn't counted. */
+  closingStock: ClosingStockLine[] | null;
   notes: string | null;
   reconciledBy: string;
   reconciledAt: Date;

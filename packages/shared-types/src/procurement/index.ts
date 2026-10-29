@@ -10,12 +10,24 @@ export interface PurchaseOrderLineRecord {
   productId: string;
   expectedQuantity: string;
   indicativePrice: string;
+  /** Entered by the bag: expectedQuantity = bags × kgPerBag. */
+  bags: string | null;
+  kgPerBag: string | null;
 }
 
 export interface PurchaseOrderRecord {
   id: string;
   farmerId: string;
+  /** Shown as P-00123 (formatPoNumber). */
+  number: number;
   status: PurchaseOrderStatus;
+  pickupDate: IsoDate | null;
+  pickupTime: string | null;
+  plannedDriverId: string | null;
+  plannedVehicleId: string | null;
+  agentId: string | null;
+  commissionPerKg: string | null;
+  notes: string | null;
   expectedDeliveryDate: IsoDate | null;
   approvalRequestId: string | null;
   version: number;
@@ -25,7 +37,7 @@ export interface PurchaseOrderRecord {
   expectedValue?: string; // list rows only
 }
 
-export type LotStatus = 'received_ungraded' | 'available' | 'reserved' | 'delivered' | 'rejected';
+export type LotStatus = 'received_ungraded' | 'available' | 'delivered' | 'rejected';
 
 export interface LotRecord {
   id: string;
@@ -40,8 +52,10 @@ export interface LotRecord {
   rejectionReason: string | null;
   unitCost: string | null;
   status: LotStatus;
-  reservedForOrderLineId: string | null;
   currentQuantity: string | null;
+  /** Kilos of it held for orders. */
+  reservedQuantity: string;
+  /** Its place when all of it is in one warehouse or vehicle; null in the store or split. */
   currentLocationId: string | null;
   receivedAt: IsoDateTime;
   gradedAt: IsoDateTime | null;
@@ -64,7 +78,54 @@ export interface PickupRecord {
 // Request bodies.
 export interface CreatePurchaseOrderBody {
   farmerId: string;
-  lines: { productId: string; expectedQuantity: number; indicativePrice: number }[];
+  lines: { productId: string; expectedQuantity: number; indicativePrice: number; bags?: number; kgPerBag?: number }[];
+  pickupDate?: IsoDate;
+  pickupTime?: string;
+  driverEmployeeId?: string;
+  vehicleId?: string;
+  agentId?: string;
+  commissionPerKg?: number;
+  notes?: string;
+  /** Confirm straight away and schedule the pickup ("Save Procurement"). */
+  confirm?: boolean;
+}
+
+// ---- The owner's Procurement list (redesign V1.1) ----
+
+export type ProcurementBoardDay = 'today' | 'tomorrow' | 'all';
+export type ProcurementStage = 'pending' | 'awaiting_approval' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface ProcurementCard {
+  id: string;
+  number: number;
+  status: PurchaseOrderStatus;
+  stage: ProcurementStage;
+  day: IsoDate;
+  pickupTime: string | null;
+  farmerName: string;
+  farmerPlace: string | null;
+  driverName: string | null;
+  vehicle: string | null;
+  products: { name: string; quantity: string; uom: string; bags: string | null; kgPerBag: string | null }[];
+  expectedValue: string;
+}
+
+export interface ProcurementBoard {
+  day: ProcurementBoardDay;
+  counts: { today: number; tomorrow: number; all: number };
+  total: number;
+  page: number;
+  pageSize: number;
+  items: ProcurementCard[];
+}
+
+/** A middleman who brings produce for a commission. */
+export interface AgentRecord {
+  id: string;
+  name: string;
+  phone: string | null;
+  defaultCommissionPerKg: string;
+  status: 'active' | 'archived';
 }
 
 export interface ReceiveGoodsBody {

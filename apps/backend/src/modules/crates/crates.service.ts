@@ -709,23 +709,49 @@ export class CratesService {
    */
   recordStopCounts(tenantId: string, userId: string, tripId: string, stopId: string, dto: StopCountsDto): Promise<TripCrates> {
     return this.db.withTenant(tenantId, async (client) => {
-      const trip = await this.repo.trip(client, tripId);
-      if (!trip) throw new NotFoundException('Trip not found');
-      if (trip.status === 'cancelled') throw new ConflictException('This trip was cancelled');
-      const stop = (await this.repo.tripStops(client, tripId)).find((s) => s.id === stopId);
-      if (!stop) throw new NotFoundException('Stop not found on this trip');
-      const collected = dto.lines.filter((l) => l.collected > 0).map((l) => ({ crateTypeId: l.crateTypeId, quantity: l.collected }));
-      const dropped = dto.lines.filter((l) => l.dropped > 0).map((l) => ({ crateTypeId: l.crateTypeId, quantity: l.dropped }));
-      if (!collected.length && !dropped.length) throw new BadRequestException('No crates to record');
-      await this.repo.lock(client);
-      const party: Side = { kind: stop.party_kind as string, id: stop.party_id as string };
-      const vehicle: Side = { kind: 'vehicle', id: trip.vehicle_id as string };
-      const base = { occurredAt: new Date(), tripId, tripStopId: stopId, reference: null, notes: clean(dto.notes) };
-      const batchId = randomUUID();
-      if (collected.length) await this.move(client, tenantId, userId, { ...base, batchId, kind: 'collected', from: party, to: vehicle, lines: collected });
-      if (dropped.length) await this.move(client, tenantId, userId, { ...base, batchId, kind: 'delivered', from: vehicle, to: party, lines: dropped });
-      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'crate_movement', entityId: batchId, after: { tripId, stopId, collected, dropped } });
+      await this.recordStopCountsWithClient(client, tenantId, userId, tripId, stopId, dto);
       return this.tripCrates(client, tripId);
     });
+  }
+
+  /**
+   * Why these counts wouldn't go through, or null when they would: every
+   * type known, the party holding what's taken back, the vehicle holding
+   * what's left (after what it took back). Logistics asks first, so a
+   * delivery is never refused over its crates (driver app D3).
+   */
+  async stopCountsProblemWithClient(client: PoolClient, tripId: string, stopId: string, dto: StopCountsDto): Promise<string | null> {
+    const trip = await this.repo.trip(client, tripId);
+    const stop = trip ? (await this.repo.tripStops(client, tripId)).find((s) => s.id === stopId) : undefined;
+    if (!trip || !stop) return 'Stop not found on this trip';
+    for (const l of dto.lines) {
+      const type = await this.repo.findType(client, l.crateTypeId);
+      if (!type) return 'Crate type not found';
+      const partyHas = await this.repo.balanceOf(client, stop.party_kind as string, stop.party_id as string, l.crateTypeId);
+      if (l.collected > partyHas) return `${(await this.repo.holderName(client, stop.party_kind as HolderKind, stop.party_id as string)) ?? 'The customer'} holds only ${partyHas} ${type.code}, not ${l.collected}`;
+      const vehicleHas = await this.repo.balanceOf(client, 'vehicle', trip.vehicle_id as string, l.crateTypeId);
+      if (l.dropped > vehicleHas + l.collected) return `The vehicle holds only ${vehicleHas + l.collected} ${type.code}, not ${l.dropped}`;
+    }
+    return null;
+  }
+
+  /** The same, inside the caller's transaction: Logistics completing a delivery with its crates (driver app D3). */
+  async recordStopCountsWithClient(client: PoolClient, tenantId: string, userId: string, tripId: string, stopId: string, dto: StopCountsDto): Promise<void> {
+    const trip = await this.repo.trip(client, tripId);
+    if (!trip) throw new NotFoundException('Trip not found');
+    if (trip.status === 'cancelled') throw new ConflictException('This trip was cancelled');
+    const stop = (await this.repo.tripStops(client, tripId)).find((s) => s.id === stopId);
+    if (!stop) throw new NotFoundException('Stop not found on this trip');
+    const collected = dto.lines.filter((l) => l.collected > 0).map((l) => ({ crateTypeId: l.crateTypeId, quantity: l.collected }));
+    const dropped = dto.lines.filter((l) => l.dropped > 0).map((l) => ({ crateTypeId: l.crateTypeId, quantity: l.dropped }));
+    if (!collected.length && !dropped.length) throw new BadRequestException('No crates to record');
+    await this.repo.lock(client);
+    const party: Side = { kind: stop.party_kind as string, id: stop.party_id as string };
+    const vehicle: Side = { kind: 'vehicle', id: trip.vehicle_id as string };
+    const base = { occurredAt: new Date(), tripId, tripStopId: stopId, reference: null, notes: clean(dto.notes) };
+    const batchId = randomUUID();
+    if (collected.length) await this.move(client, tenantId, userId, { ...base, batchId, kind: 'collected', from: party, to: vehicle, lines: collected });
+    if (dropped.length) await this.move(client, tenantId, userId, { ...base, batchId, kind: 'delivered', from: vehicle, to: party, lines: dropped });
+    await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'crate_movement', entityId: batchId, after: { tripId, stopId, collected, dropped } });
   }
 }

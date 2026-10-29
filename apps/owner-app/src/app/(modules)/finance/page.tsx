@@ -16,6 +16,11 @@ import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { daysSince, formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
 import { sumMoney } from '@/lib/decimal';
 import { Disputes } from '@/components/finance/Disputes';
+import Link from 'next/link';
+import { Icon, type IconName } from '@/components/ui/Icon';
+import { RangeSelect } from '@/components/redesign/Range';
+import { useFinanceSummary, type Range } from '@/lib/hooks/use-money-stock';
+import { useT } from '@/lib/i18n';
 
 type Section = 'receivables' | 'disputes' | 'payables' | 'cash' | 'trips';
 
@@ -514,18 +519,94 @@ function TripCash() {
   );
 }
 
+// ---- The hub (client design V1.1, screen 15) ----
+
+const HUB_LINKS: { href: string; icon: IconName; label: string; tone?: 'bad' | 'info' }[] = [
+  { href: '/finance#receivables', icon: 'wallet', label: 'Receivables' },
+  { href: '/finance#payables', icon: 'users', label: 'Payables', tone: 'bad' },
+  { href: '/finance#cash', icon: 'rupee', label: 'Cash & Expenses', tone: 'bad' },
+  { href: '/accounting#ledger', icon: 'book', label: 'Ledger & Transactions', tone: 'info' },
+  { href: '/workforce#settlements', icon: 'badge', label: 'Workforce Settlements', tone: 'info' },
+];
+
+/**
+ * Finance: what customers owe, what's owed to farmers and the cash in hand
+ * and bank — as they stand now — and the period's expenses (every cost but
+ * the goods sold, from the ledger). Each tile and row opens its detail.
+ */
+function FinanceHub({ onOpen }: { onOpen: (section: Section) => void }) {
+  const t = useT();
+  // A report on this page (#receivables) opens in place: Next changes only
+  // the address's hash for these links, which doesn't fire hashchange.
+  const open = (href: string) => (event: React.MouseEvent) => {
+    const hash = href.startsWith('/finance#') ? href.slice('/finance#'.length) : null;
+    if (hash && SECTIONS.some((s) => s.value === hash)) {
+      event.preventDefault();
+      onOpen(hash as Section);
+    }
+  };
+  const [range, setRange] = useState<Range>({ name: 'month' });
+  const { data, error, isPending, refetch } = useFinanceSummary(range);
+  const money = (v: string) => formatMoney(v, data?.range.currency ?? 'INR');
+  const tiles: { href: string; icon: IconName; label: string; value: string | undefined; tone?: 'bad' | 'info' }[] = [
+    { href: '/finance#receivables', icon: 'wallet', label: 'Receivables', value: data?.receivables },
+    { href: '/finance#payables', icon: 'wallet', label: 'Payables', value: data?.payables, tone: 'bad' },
+    { href: '/finance#cash', icon: 'rupee', label: 'Cash Balance', value: data?.cashBalance, tone: 'info' },
+    { href: '/accounting#pnl', icon: 'receipt', label: 'Expenses', value: data?.expenses },
+  ];
+  return (
+    <div className="stack" style={{ maxWidth: 760 }}>
+      <h1 className="page-title visually-hidden">{t('Finance')}</h1>
+      <RangeSelect range={range} onChange={setRange} shown={data?.range} />
+      {error ? (
+        <div className="panel">
+          <ErrorState error={error} onRetry={() => refetch()} />
+        </div>
+      ) : isPending && range.name !== 'custom' ? (
+        <SkeletonLines lines={2} height={64} />
+      ) : (
+        <div className="money-tiles" data-updating={!data || undefined}>
+          {tiles.map((tile) => (
+            <Link key={tile.label} href={tile.href} className="money-tile" onClick={open(tile.href)}>
+              <span className="money-tile-icon" data-tone={tile.tone} aria-hidden="true">
+                <Icon name={tile.icon} size={20} />
+              </span>
+              <span>
+                <span className="money-tile-label">{t(tile.label)}</span>
+                <span className="money-tile-value">{tile.value === undefined ? '—' : money(tile.value)}</span>
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+      <nav className="link-rows" aria-label={t('Finance')}>
+        {HUB_LINKS.map((l) => (
+          <Link key={l.href} href={l.href} className="link-row" onClick={open(l.href)}>
+            <span className="link-row-icon" data-tone={l.tone} aria-hidden="true">
+              <Icon name={l.icon} size={18} />
+            </span>
+            <span className="link-row-label">{t(l.label)}</span>
+            <Icon name="chevron" size={18} />
+          </Link>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
 // ---- Page ----
 
 export default function FinancePage() {
   const { data: session } = useSession();
-  const [section, setSection] = useState<Section>('receivables');
+  const t = useT();
+  // No section in the address: the hub. A section (#receivables, from the
+  // hub, the dashboard's tiles and alerts) opens that report.
+  const [section, setSection] = useState<Section | null>(null);
 
-  // Deep links from the dashboard's alerts (/finance#payables), including a
-  // hash change while this page is already open.
   useEffect(() => {
     const fromHash = () => {
       const hash = window.location.hash.slice(1);
-      if (SECTIONS.some((s) => s.value === hash)) setSection(hash as Section);
+      setSection(SECTIONS.some((s) => s.value === hash) ? (hash as Section) : null);
     };
     fromHash();
     window.addEventListener('hashchange', fromHash);
@@ -556,8 +637,23 @@ export default function FinancePage() {
     );
   }
 
+  // From the hub, a report is a step forward: Back returns to the hub.
+  if (section === null) {
+    return (
+      <FinanceHub
+        onOpen={(value) => {
+          setSection(value);
+          window.history.pushState(null, '', `#${value}`);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="stack">
+      <Link href="/finance" className="back-link" onClick={() => setSection(null)}>
+        ‹ {t('Finance')}
+      </Link>
       {header}
       <FilterTabs label="Finance section" options={SECTIONS} value={section} onChange={(v) => v !== 'all' && choose(v)} />
       {section === 'receivables' && <Receivables />}

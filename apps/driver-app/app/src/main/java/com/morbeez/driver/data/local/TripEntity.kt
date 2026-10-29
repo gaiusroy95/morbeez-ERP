@@ -25,4 +25,11 @@ data class TripEntity(
     val cashDeclared: String? = null,
     /** Delegation level on this trip (1–4); 0 = waiting for the owner's approval; null = not known yet. */
     val authorityLevel: Int? = null,
+    /** "T-20261028-001". */
+    val number: String? = null,
+    /** Start Day: the odometer when the trip set off, and when. */
+    val openingKm: String? = null,
+    val startedAt: String? = null,
+    /** Start Trip (D3): when the delivery run set off. */
+    val deliveryStartedAt: String? = null,
 )

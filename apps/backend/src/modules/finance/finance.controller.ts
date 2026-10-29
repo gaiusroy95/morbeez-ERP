@@ -30,6 +30,8 @@ import { RecordFinanceCostDto } from './dto/record-finance-cost.dto';
 import { ReversePaymentDto } from './dto/reverse-payment.dto';
 import { AsOfQueryDto, RunFinanceChargesDto } from './dto/run-finance-charges.dto';
 import { CustomerScopedQueryDto, FarmerScopedQueryDto, ListInvoicesQueryDto } from './dto/finance-list-query.dto';
+import { CollectionsQueryDto } from './dto/collections-query.dto';
+import { CollectionsBoard } from './entities/collections.entity';
 
 // Reads under finance:read; money in (finance:collect), money out
 // (finance:pay), and adjustments (finance:manage) under separate
@@ -54,6 +56,13 @@ export class FinanceController {
   @RequirePermissions('finance:read')
   getReceivables(@CurrentUser() user: AuthContext): Promise<ReceivablesReport> {
     return this.financeService.getReceivables(user.tenantId);
+  }
+
+  /** The owner's Collections: today's payments, what's due and not in, or every payment. */
+  @Get('collections')
+  @RequirePermissions('finance:read')
+  getCollections(@CurrentUser() user: AuthContext, @Query() query: CollectionsQueryDto): Promise<CollectionsBoard> {
+    return this.financeService.getCollections(user.tenantId, query.view ?? 'today', query.q?.trim() || null, query.page ?? 1, query.pageSize ?? 50);
   }
 
   @Get('payables')

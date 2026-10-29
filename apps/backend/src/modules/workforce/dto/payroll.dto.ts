@@ -40,6 +40,7 @@ export class WorkerProfileDto {
   @ApiPropertyOptional() @IsOptional() @Matches(ISO_DATE, DATE) joinedOn?: string | null;
   @ApiPropertyOptional() @IsOptional() @Matches(ISO_DATE, DATE) leftOn?: string | null;
   @ApiPropertyOptional() @IsOptional() @Matches(/^[0-9+ -]{6,20}$/, { message: 'phone looks wrong' }) phone?: string | null;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) address?: string | null;
 }
 
 export class PayRateDto {

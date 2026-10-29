@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -11,6 +11,8 @@ import { FarmersService } from './farmers.service';
 import { CreateFarmerDto } from './dto/create-farmer.dto';
 import { UpdateFarmerDto } from './dto/update-farmer.dto';
 import { FarmerRecord } from './entities/farmer.entity';
+import { FarmersBoardQueryDto } from './dto/farmers-board.dto';
+import { FarmerProfile, FarmersBoard } from './entities/farmer-insights.entity';
 
 @ApiTags('farmers')
 @ApiBearerAuth()
@@ -26,6 +28,27 @@ export class FarmersController {
     @Query() query: PaginationQueryDto,
   ): Promise<PaginatedResult<FarmerRecord>> {
     return this.farmersService.list(user.tenantId, query.page ?? 1, query.pageSize ?? 25);
+  }
+
+  /** The Farmers list (redesign V1.1): filters, by village or town, search; money for finance:read. */
+  @Get('board')
+  @RequirePermissions('farmers:read')
+  board(@CurrentUser() user: AuthContext, @Query() query: FarmersBoardQueryDto): Promise<FarmersBoard> {
+    return this.farmersService.board(
+      user.tenantId,
+      { filter: query.filter ?? 'all', place: query.place ?? null, q: query.q ?? null, page: query.page ?? 1, pageSize: query.pageSize ?? 100 },
+      user.permissions.includes('finance:read'),
+    );
+  }
+
+  /** Farmer profile: purchases with procurement:read, money with finance:read. */
+  @Get(':id/profile')
+  @RequirePermissions('farmers:read')
+  profile(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<FarmerProfile> {
+    return this.farmersService.profile(user.tenantId, id, {
+      money: user.permissions.includes('finance:read'),
+      purchases: user.permissions.includes('procurement:read'),
+    });
   }
 
   @Get(':id')

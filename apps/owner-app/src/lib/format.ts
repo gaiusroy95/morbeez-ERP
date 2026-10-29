@@ -124,3 +124,21 @@ export function formatAmount(value: string): string {
   const text = amountFormatter.format(Math.abs(n));
   return n < 0 ? `(${text})` : text;
 }
+
+/** Today's date in the business's timezone, as YYYY-MM-DD. */
+export function todayIn(timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+/** 24h "14:30" → "02:30 PM", as the list cards show it. */
+export function clock(time: string | null): string | null {
+  if (!time) return null;
+  const [h, m] = time.split(':').map(Number);
+  return `${String(h % 12 || 12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** An instant's time of day in the business's timezone, as the cards show it ("08:30 AM"). */
+export function timeOf(iso: string | null, timeZone: string): string | null {
+  if (!iso) return null;
+  return clock(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso)));
+}

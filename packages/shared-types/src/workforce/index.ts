@@ -39,6 +39,7 @@ export interface WorkerRow {
   joinedOn: string | null;
   leftOn: string | null;
   phone: string | null;
+  address: string | null;
   profileVersion: number; // 0 = no profile saved yet
   currentRate: PayRate | null;
   advanceOutstanding: string;
@@ -46,6 +47,40 @@ export interface WorkerRow {
 
 export interface WorkerDetail extends WorkerRow {
   rates: PayRate[];
+  documents: WorkerDocument[];
+  /** The number they sign in with, when they have a login. */
+  login: string | null;
+}
+
+export type WorkerDocumentKind = 'aadhaar' | 'driving_licence' | 'pan' | 'photo' | 'other';
+
+/** An ID or licence scan kept with the worker; the file is at workforce/workers/:id/documents/:docId/file. */
+export interface WorkerDocument {
+  id: string;
+  kind: WorkerDocumentKind;
+  label: string | null;
+  contentType: string;
+  sizeBytes: number;
+  fileName: string | null;
+  uploadedAt: IsoDateTime;
+}
+
+/** POST workforce/workers: a worker with their contact details in one step. */
+export interface AddWorkerBody {
+  name: string;
+  roleType: string;
+  phone?: string | null;
+  address?: string | null;
+}
+
+/** A one-time link for a worker to choose their password (POST workforce/workers/:id/login-link). */
+export interface LoginLink {
+  link: string;
+  expiresAt: IsoDateTime;
+  /** The number they sign in with. */
+  login: string;
+  /** A login was created just now (false: a new link for an existing login). */
+  created: boolean;
 }
 
 export interface AssignmentRecord {
@@ -159,4 +194,5 @@ export interface WorkerProfileBody {
   joinedOn?: string | null;
   leftOn?: string | null;
   phone?: string | null;
+  address?: string | null;
 }

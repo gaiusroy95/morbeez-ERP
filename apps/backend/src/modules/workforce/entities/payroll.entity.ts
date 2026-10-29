@@ -39,6 +39,7 @@ export interface WorkerRow {
   joinedOn: string | null;
   leftOn: string | null;
   phone: string | null;
+  address: string | null;
   profileVersion: number; // 0 = no profile saved yet
   currentRate: PayRate | null;
   advanceOutstanding: string;
@@ -46,6 +47,22 @@ export interface WorkerRow {
 
 export interface WorkerDetail extends WorkerRow {
   rates: PayRate[];
+  documents: WorkerDocument[];
+  /** The login's number, when the worker has one. */
+  login: string | null;
+}
+
+export type WorkerDocumentKind = 'aadhaar' | 'driving_licence' | 'pan' | 'photo' | 'other';
+
+/** An ID or licence scan kept with the worker; the file is fetched separately. */
+export interface WorkerDocument {
+  id: string;
+  kind: WorkerDocumentKind;
+  label: string | null;
+  contentType: string;
+  sizeBytes: number;
+  fileName: string | null;
+  uploadedAt: string;
 }
 
 export interface AssignmentRecord {

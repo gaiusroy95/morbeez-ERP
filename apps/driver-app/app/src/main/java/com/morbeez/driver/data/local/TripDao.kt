@@ -19,6 +19,17 @@ interface TripDao {
     @Query("UPDATE trips SET status = 'completed', cashDeclared = :cashDeclared WHERE id = :tripId")
     suspend fun markSubmitted(tripId: String, cashDeclared: String?)
 
+    /** Started on this phone (Start Day), before the server has heard: on the road straight away. */
+    @Query("UPDATE trips SET status = 'in_progress', openingKm = :openingKm, startedAt = :startedAt WHERE id = :tripId AND status = 'planned'")
+    suspend fun markStarted(tripId: String, openingKm: String, startedAt: String)
+
+    /** Start Trip on this phone (D3): the deliveries unlock at once. */
+    @Query("UPDATE trips SET deliveryStartedAt = :at WHERE id = :tripId AND deliveryStartedAt IS NULL")
+    suspend fun markDeliveriesStarted(tripId: String, at: String)
+
+    @Query("UPDATE trips SET openingKm = :openingKm WHERE id = :tripId")
+    suspend fun setOpeningKm(tripId: String, openingKm: String)
+
     @Query("SELECT * FROM trips WHERE id = :tripId")
     suspend fun findById(tripId: String): TripEntity?
 

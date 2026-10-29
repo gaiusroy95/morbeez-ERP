@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
+import { PasswordSetupRepository } from './repositories/password-setup.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
 import { PasswordService } from './security/password.service';
 import { TokenService } from './security/token.service';
@@ -41,6 +42,7 @@ import { AlertsModule } from '../alerts/alerts.module';
     UsersRepository,
     RolesRepository,
     AuthSessionsRepository,
+    PasswordSetupRepository,
     PasswordService,
     TokenService,
     JwtStrategy,

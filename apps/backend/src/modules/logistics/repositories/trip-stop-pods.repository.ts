@@ -39,14 +39,22 @@ export class TripStopPodsRepository {
   async createWithClient(
     client: PoolClient,
     capturedBy: string,
-    fields: { tripStopId: string; recipientName: string; signatureData: string | null },
+    fields: {
+      tripStopId: string;
+      recipientName: string;
+      signatureData: string | null;
+      /** The delivery checklist (driver app D3); left out from the owner app. */
+      qrStatus?: 'scanned' | 'not_scanned' | null;
+      qrNote?: string | null;
+      allUnloaded?: boolean | null;
+    },
   ): Promise<TripStopPodRecord> {
     try {
       const result = await client.query<TripStopPodRow>(
-        `INSERT INTO fulfilment.trip_stop_pod (trip_stop_id, recipient_name, signature_data, captured_by)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO fulfilment.trip_stop_pod (trip_stop_id, recipient_name, signature_data, captured_by, qr_status, qr_note, all_unloaded)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [fields.tripStopId, fields.recipientName, fields.signatureData, capturedBy],
+        [fields.tripStopId, fields.recipientName, fields.signatureData, capturedBy, fields.qrStatus ?? null, fields.qrNote ?? null, fields.allUnloaded ?? null],
       );
       return toRecord(result.rows[0]);
     } catch (err) {

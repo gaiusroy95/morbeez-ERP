@@ -4,12 +4,22 @@ import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
 import { PurchaseOrderLineRecord, PurchaseOrderRecord, PurchaseOrderStatus } from '../entities/purchase-order.entity';
+import { nextDocumentNumber } from '../../../common/persistence/document-number';
+import { dateOnly } from '../../../common/persistence/date-only';
 
 interface PurchaseOrderRow {
   id: string;
   tenant_id: string;
   farmer_id: string;
+  number: number;
   status: PurchaseOrderStatus;
+  pickup_date: string | Date | null;
+  pickup_time: string | null;
+  planned_driver_id: string | null;
+  planned_vehicle_id: string | null;
+  agent_id: string | null;
+  commission_per_kg: string | null;
+  notes: string | null;
   expected_delivery_date: string | null;
   approval_request_id: string | null;
   version: number;
@@ -25,6 +35,8 @@ interface PurchaseOrderLineRow {
   product_id: string;
   expected_quantity: string;
   indicative_price: string;
+  bags: string | null;
+  kg_per_bag: string | null;
 }
 
 function toRecord(row: PurchaseOrderRow, lines?: PurchaseOrderLineRow[]): PurchaseOrderRecord {
@@ -32,7 +44,15 @@ function toRecord(row: PurchaseOrderRow, lines?: PurchaseOrderLineRow[]): Purcha
     id: row.id,
     tenantId: row.tenant_id,
     farmerId: row.farmer_id,
+    number: row.number,
     status: row.status,
+    pickupDate: dateOnly(row.pickup_date),
+    pickupTime: row.pickup_time ? row.pickup_time.slice(0, 5) : null,
+    plannedDriverId: row.planned_driver_id,
+    plannedVehicleId: row.planned_vehicle_id,
+    agentId: row.agent_id,
+    commissionPerKg: row.commission_per_kg,
+    notes: row.notes,
     expectedDeliveryDate: row.expected_delivery_date,
     approvalRequestId: row.approval_request_id,
     version: row.version,
@@ -51,6 +71,8 @@ function toLineRecord(row: PurchaseOrderLineRow): PurchaseOrderLineRecord {
     productId: row.product_id,
     expectedQuantity: row.expected_quantity,
     indicativePrice: row.indicative_price,
+    bags: row.bags,
+    kgPerBag: row.kg_per_bag,
   };
 }
 
@@ -117,24 +139,46 @@ export class PurchaseOrdersRepository {
     createdBy: string,
     fields: {
       farmerId: string;
-      lines: { productId: string; expectedQuantity: number; indicativePrice: number }[];
+      lines: { productId: string; expectedQuantity: number; indicativePrice: number; bags?: number; kgPerBag?: number }[];
+      pickupDate?: string | null;
+      pickupTime?: string | null;
+      plannedDriverId?: string | null;
+      plannedVehicleId?: string | null;
+      agentId?: string | null;
+      commissionPerKg?: number | null;
+      notes?: string | null;
     },
   ): Promise<PurchaseOrderRecord> {
+    const number = await nextDocumentNumber(client, tenantId, 'purchase_order');
     const poResult = await client.query<PurchaseOrderRow>(
-      `INSERT INTO commerce.purchase_order (tenant_id, farmer_id, created_by)
-       VALUES ($1, $2, $3)
+      `INSERT INTO commerce.purchase_order
+         (tenant_id, farmer_id, created_by, number, pickup_date, expected_delivery_date,
+          planned_driver_id, planned_vehicle_id, agent_id, commission_per_kg, notes, pickup_time)
+       VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [tenantId, fields.farmerId, createdBy],
+      [
+        tenantId,
+        fields.farmerId,
+        createdBy,
+        number,
+        fields.pickupDate ?? null,
+        fields.plannedDriverId ?? null,
+        fields.plannedVehicleId ?? null,
+        fields.agentId ?? null,
+        fields.agentId ? (fields.commissionPerKg ?? null) : null,
+        fields.notes ?? null,
+        fields.pickupTime ?? null,
+      ],
     );
     const po = poResult.rows[0];
 
     const lineRows: PurchaseOrderLineRow[] = [];
     for (const line of fields.lines) {
       const lineResult = await client.query<PurchaseOrderLineRow>(
-        `INSERT INTO commerce.purchase_order_line (purchase_order_id, product_id, expected_quantity, indicative_price)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO commerce.purchase_order_line (purchase_order_id, product_id, expected_quantity, indicative_price, bags, kg_per_bag)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [po.id, line.productId, line.expectedQuantity, line.indicativePrice],
+        [po.id, line.productId, line.expectedQuantity, line.indicativePrice, line.bags ?? null, line.kgPerBag ?? null],
       );
       lineRows.push(lineResult.rows[0]);
     }

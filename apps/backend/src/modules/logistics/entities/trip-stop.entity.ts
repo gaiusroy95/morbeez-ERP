@@ -2,6 +2,9 @@
 // (Procurement's own commerce.pickup, already scheduled with a
 // purchase order and farmer) or a customer delivery (a confirmed
 // commerce.customer_order) — never both, never neither.
+import { FarmStopOutcome } from './farm-stop.entity';
+import { DeliveryOutcome } from './delivery-stop.entity';
+
 export type StopType = 'pickup' | 'delivery';
 export type StopStatus = 'pending' | 'completed' | 'skipped';
 
@@ -27,6 +30,10 @@ export interface TripStopRecord {
   items?: StopItem[];
   /** For a delivery: what to collect there — the order's value from a cash customer, or nothing on credit. */
   collect?: StopCollect | null;
+  /** A completed farm stop: each product accepted or rejected, and its packing crew (driver app D2). */
+  farm?: FarmStopOutcome | null;
+  /** A completed delivery: its QR, what was delivered short and why, its crates (driver app D3). */
+  delivery?: DeliveryOutcome | null;
 }
 
 export interface StopCollect {
@@ -40,6 +47,14 @@ export interface StopParty {
   id: string;
   name: string;
   phone: string | null;
+  /** The village or town; for a delivery, the address it goes to. */
+  place: string | null;
+  address: string | null;
+  /** Its map pin, when the owner has set one — for Navigate and the distance to it. */
+  latitude: string | null;
+  longitude: string | null;
+  /** A customer's QR token: the driver app checks the QR at the door against it (D3). */
+  qrToken?: string | null;
 }
 
 export interface StopItem {

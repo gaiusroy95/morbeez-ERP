@@ -18,8 +18,8 @@ interface LotRow {
   rejection_reason: string | null;
   unit_cost: string | null;
   status: LotStatus;
-  reserved_for_order_line_id: string | null;
   current_quantity: string | null;
+  reserved_quantity: string;
   current_location_id: string | null;
   received_at: Date;
   graded_at: Date | null;
@@ -45,8 +45,8 @@ function toRecord(row: LotRow): LotRecord {
     rejectionReason: row.rejection_reason,
     unitCost: row.unit_cost,
     status: row.status,
-    reservedForOrderLineId: row.reserved_for_order_line_id,
     currentQuantity: row.current_quantity,
+    reservedQuantity: row.reserved_quantity,
     currentLocationId: row.current_location_id,
     receivedAt: row.received_at,
     gradedAt: row.graded_at,
@@ -58,6 +58,13 @@ function toRecord(row: LotRow): LotRecord {
   };
 }
 
+// Where a lot is (its one place, or null when it's in the store or split
+// across places) and how much of it is held for orders — from its balances.
+const LOT_COLUMNS = `l.*,
+  (SELECT CASE WHEN count(DISTINCT b.location_id) = 1 AND bool_and(b.location_id IS NOT NULL) THEN (array_agg(b.location_id))[1] END
+     FROM stock.lot_balance b WHERE b.lot_id = l.id AND b.quantity > 0) AS current_location_id,
+  (SELECT COALESCE(SUM(b.reserved_quantity), 0)::numeric(12,3)::text FROM stock.lot_balance b WHERE b.lot_id = l.id) AS reserved_quantity`;
+
 @Injectable()
 export class LotsRepository {
   constructor(private readonly db: DatabaseService) {}
@@ -68,7 +75,7 @@ export class LotsRepository {
 
   async listByPurchaseOrderWithClient(client: PoolClient, purchaseOrderId: string): Promise<LotRecord[]> {
     const result = await client.query<LotRow>(
-      'SELECT * FROM commerce.lot WHERE purchase_order_id = $1 ORDER BY received_at',
+      `SELECT ${LOT_COLUMNS} FROM commerce.lot l WHERE l.purchase_order_id = $1 ORDER BY l.received_at`,
       [purchaseOrderId],
     );
     return result.rows.map(toRecord);
@@ -79,8 +86,18 @@ export class LotsRepository {
   }
 
   async findByIdWithClient(client: PoolClient, id: string): Promise<LotRecord | null> {
-    const result = await client.query<LotRow>('SELECT * FROM commerce.lot WHERE id = $1', [id]);
+    const result = await client.query<LotRow>(`SELECT ${LOT_COLUMNS} FROM commerce.lot l WHERE l.id = $1`, [id]);
     return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  /** The lot at the version the caller read, locked for the rest of the transaction. */
+  async lockWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<LotRecord> {
+    const result = await client.query<LotRow>(
+      `SELECT ${LOT_COLUMNS} FROM commerce.lot l WHERE l.id = $1 AND l.version = $2 FOR UPDATE OF l`,
+      [id, expectedVersion],
+    );
+    if (!result.rows[0]) throw new OptimisticLockException('Lot', id);
+    return toRecord(result.rows[0]);
   }
 
   async createWithClient(
@@ -96,10 +113,10 @@ export class LotsRepository {
     },
   ): Promise<LotRecord> {
     const result = await client.query<LotRow>(
-      `INSERT INTO commerce.lot
+      `INSERT INTO commerce.lot AS l
          (tenant_id, purchase_order_id, farmer_id, product_id, pickup_id, received_quantity, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
+       RETURNING ${LOT_COLUMNS}`,
       [
         tenantId,
         fields.purchaseOrderId,
@@ -133,9 +150,10 @@ export class LotsRepository {
   ): Promise<LotRecord> {
     const status: LotStatus = fields.acceptedQuantity > 0 ? 'available' : 'rejected';
     // current_quantity — the Inventory Engine's running balance — starts
-    // at whatever was accepted, including 0 for a fully rejected lot.
+    // at whatever was accepted, including 0 for a fully rejected lot. The
+    // caller puts the accepted kilos in a place (stock.lot_balance).
     const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET
+      `UPDATE commerce.lot AS l SET
          accepted_quantity = $3,
          rejected_quantity = $4,
          grade = $5,
@@ -148,7 +166,7 @@ export class LotsRepository {
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2 AND status = 'received_ungraded'
-       RETURNING *`,
+       RETURNING ${LOT_COLUMNS}`,
       [
         id,
         expectedVersion,
@@ -174,133 +192,32 @@ export class LotsRepository {
   }
 
   /**
-   * quantity x the quantity-weighted unit cost of the costed lots reserved
-   * for the line, rounded to the paisa: the same basis the dashboard's
-   * profit figures use. null when no reserved lot has a cost.
+   * After a quality write-off: a lot it emptied is 'rejected', the same
+   * terminal state grading-time rejection produces. Shrinkage leaves an
+   * empty lot 'available' — it isn't a quality verdict.
    */
-  async lineCostWithClient(client: PoolClient, orderLineId: string, quantity: string): Promise<string | null> {
-    const result = await client.query<{ cost: string | null }>(
-      `SELECT ROUND($2::numeric * SUM(current_quantity * unit_cost) / NULLIF(SUM(current_quantity), 0), 2)::text AS cost
-       FROM commerce.lot
-       WHERE reserved_for_order_line_id = $1 AND unit_cost IS NOT NULL`,
-      [orderLineId, quantity],
+  async markEmptyAsWithClient(client: PoolClient, id: string, status: LotStatus): Promise<void> {
+    await client.query(
+      `UPDATE commerce.lot SET status = $2, updated_at = now() WHERE id = $1 AND status = 'available' AND current_quantity <= 0`,
+      [id, status],
     );
-    return result.rows[0]?.cost ?? null;
   }
 
+  /** A change to where a lot's kilos are is a change to the lot: its version moves on. */
+  async touchWithClient(client: PoolClient, id: string): Promise<LotRecord> {
+    const result = await client.query<LotRow>(
+      `UPDATE commerce.lot AS l SET version = version + 1, updated_at = now() WHERE id = $1 RETURNING ${LOT_COLUMNS}`,
+      [id],
+    );
+    return toRecord(result.rows[0]);
+  }
 
   /**
-   * Locks every available lot for this product, oldest received_at first
-   * (FEFO), so that reserveWithClient — called immediately after, in the
-   * same transaction — can claim whole lots against this exact snapshot
-   * without a second caller racing in between. FOR UPDATE means a
-   * concurrent reservation attempt against the same product blocks here
-   * until this transaction commits or rolls back, then re-reads current
-   * (post-commit) rows — never stale ones.
+   * One row per product that has ever had a lot — the whole stock picture
+   * in one query. Kilos are counted where they are (stock.lot_balance):
+   * physical is everything, on vehicles included; reserved is what's held
+   * for orders; available is the rest.
    */
-  /**
-   * Locks just enough available lots of a product to cover `quantity`,
-   * oldest first (Performance Audit PA-03). It used to lock every available
-   * lot of the product, so each order for tomatoes waited on the one before
-   * it. Lots another order is holding are skipped, not waited on; only if
-   * what's left can't cover the quantity does it wait for those, so a
-   * busy moment never turns into a false "insufficient stock".
-   */
-  async lockForQuantityWithClient(
-    client: PoolClient,
-    tenantId: string,
-    productId: string,
-    quantity: number,
-  ): Promise<LotRecord[]> {
-    const taken: LotRecord[] = [];
-    let covered = 0;
-    const next = async (skipLocked: boolean) => {
-      const result = await client.query<LotRow>(
-        `SELECT * FROM commerce.lot
-         WHERE tenant_id = $1 AND product_id = $2 AND status = 'available' AND current_quantity > 0
-           AND NOT (id = ANY($3::uuid[]))
-         ORDER BY received_at ASC, id
-         LIMIT ${BATCH}
-         FOR UPDATE ${skipLocked ? 'SKIP LOCKED' : ''}`,
-        [tenantId, productId, taken.map((l) => l.id)],
-      );
-      return result.rows.map(toRecord);
-    };
-    for (const skipLocked of [true, false]) {
-      for (;;) {
-        const batch = await next(skipLocked);
-        for (const lot of batch) {
-          if (covered >= quantity) break;
-          taken.push(lot);
-          covered += Number(lot.currentQuantity ?? 0);
-        }
-        if (covered >= quantity || batch.length < BATCH) break;
-      }
-      if (covered >= quantity) break;
-    }
-    return taken;
-  }
-
-  async reserveWithClient(
-    client: PoolClient,
-    id: string,
-    expectedVersion: number,
-    orderLineId: string,
-  ): Promise<LotRecord> {
-    const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET
-         status = 'reserved',
-         reserved_for_order_line_id = $3,
-         version = version + 1,
-         updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'available'
-       RETURNING *`,
-      [id, expectedVersion, orderLineId],
-    );
-    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
-    return toRecord(result.rows[0]);
-  }
-
-  listReservedForOrderLine(tenantId: string, orderLineId: string): Promise<LotRecord[]> {
-    return this.db.withTenant(tenantId, (client) => this.listReservedForOrderLineWithClient(client, orderLineId));
-  }
-
-  async listReservedForOrderLineWithClient(client: PoolClient, orderLineId: string): Promise<LotRecord[]> {
-    const result = await client.query<LotRow>(
-      `SELECT * FROM commerce.lot WHERE reserved_for_order_line_id = $1`,
-      [orderLineId],
-    );
-    return result.rows.map(toRecord);
-  }
-
-  async releaseWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<LotRecord> {
-    const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET
-         status = 'available',
-         reserved_for_order_line_id = NULL,
-         version = version + 1,
-         updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'reserved'
-       RETURNING *`,
-      [id, expectedVersion],
-    );
-    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
-    return toRecord(result.rows[0]);
-  }
-
-  /** reserved -> delivered once the order the lot was reserved for reaches the customer. */
-  async consumeWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<LotRecord> {
-    const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET status = 'delivered', version = version + 1, updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'reserved'
-       RETURNING *`,
-      [id, expectedVersion],
-    );
-    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
-    return toRecord(result.rows[0]);
-  }
-
-  /** One row per product that has ever had a lot — the whole stock picture in one query. */
   stockByProduct(tenantId: string): Promise<ProductStockRow[]> {
     return this.db.withTenant(tenantId, async (client) => {
       const result = await client.query<{
@@ -308,29 +225,51 @@ export class LotsRepository {
         available: string;
         reserved: string;
         physical: string;
+        on_vehicles: string;
         value_at_cost: string;
         available_lots: number;
         ungraded_lots: number;
         ungraded_quantity: string;
         oldest_available_received_at: Date | null;
       }>(
-        `SELECT product_id,
-                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status = 'available'), 0), 3)::text AS available,
-                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status = 'reserved'), 0), 3)::text AS reserved,
-                ROUND(COALESCE(SUM(current_quantity) FILTER (WHERE status IN ('available', 'reserved')), 0), 3)::text AS physical,
-                ROUND(COALESCE(SUM(current_quantity * unit_cost) FILTER (WHERE status IN ('available', 'reserved')), 0), 2)::text AS value_at_cost,
-                (count(*) FILTER (WHERE status = 'available' AND current_quantity > 0))::int AS available_lots,
-                (count(*) FILTER (WHERE status = 'received_ungraded'))::int AS ungraded_lots,
-                ROUND(COALESCE(SUM(received_quantity) FILTER (WHERE status = 'received_ungraded'), 0), 3)::text AS ungraded_quantity,
-                min(received_at) FILTER (WHERE status = 'available' AND current_quantity > 0) AS oldest_available_received_at
-         FROM commerce.lot
-         GROUP BY product_id`,
+        `WITH placed AS (
+           SELECT b.product_id,
+                  SUM(b.quantity - b.reserved_quantity) AS available,
+                  SUM(b.reserved_quantity) AS reserved,
+                  SUM(b.quantity) AS physical,
+                  SUM(b.quantity) FILTER (WHERE loc.id IS NOT NULL) AS on_vehicles,
+                  SUM(b.quantity * l.unit_cost) AS value_at_cost,
+                  count(DISTINCT b.lot_id) FILTER (WHERE b.quantity > b.reserved_quantity) AS available_lots,
+                  min(l.received_at) FILTER (WHERE b.quantity > b.reserved_quantity) AS oldest
+           FROM stock.lot_balance b
+           JOIN commerce.lot l ON l.id = b.lot_id
+           LEFT JOIN stock.location loc ON loc.id = b.location_id AND loc.type = 'vehicle'
+           WHERE b.quantity > 0 AND l.status = 'available'
+           GROUP BY b.product_id
+         ), ungraded AS (
+           SELECT product_id, count(*)::int AS lots, SUM(received_quantity) AS quantity
+           FROM commerce.lot WHERE status = 'received_ungraded' GROUP BY product_id
+         )
+         SELECT p.product_id,
+                ROUND(COALESCE(pl.available, 0), 3)::text AS available,
+                ROUND(COALESCE(pl.reserved, 0), 3)::text AS reserved,
+                ROUND(COALESCE(pl.physical, 0), 3)::text AS physical,
+                ROUND(COALESCE(pl.on_vehicles, 0), 3)::text AS on_vehicles,
+                ROUND(COALESCE(pl.value_at_cost, 0), 2)::text AS value_at_cost,
+                COALESCE(pl.available_lots, 0)::int AS available_lots,
+                COALESCE(u.lots, 0)::int AS ungraded_lots,
+                ROUND(COALESCE(u.quantity, 0), 3)::text AS ungraded_quantity,
+                pl.oldest AS oldest_available_received_at
+         FROM (SELECT DISTINCT product_id FROM commerce.lot) p
+         LEFT JOIN placed pl ON pl.product_id = p.product_id
+         LEFT JOIN ungraded u ON u.product_id = p.product_id`,
       );
       return result.rows.map((row) => ({
         productId: row.product_id,
         available: row.available,
         reserved: row.reserved,
         physical: row.physical,
+        onVehicles: row.on_vehicles,
         valueAtCost: row.value_at_cost,
         availableLots: row.available_lots,
         ungradedLots: row.ungraded_lots,
@@ -347,59 +286,11 @@ export class LotsRepository {
 
   async listForProductWithClient(client: PoolClient, tenantId: string, productId: string): Promise<LotRecord[]> {
     const result = await client.query<LotRow>(
-      `SELECT * FROM commerce.lot WHERE tenant_id = $1 AND product_id = $2 AND graded_at IS NOT NULL
-       ORDER BY received_at ASC`,
+      `SELECT ${LOT_COLUMNS} FROM commerce.lot l WHERE l.tenant_id = $1 AND l.product_id = $2 AND l.graded_at IS NOT NULL
+       ORDER BY l.received_at ASC`,
       [tenantId, productId],
     );
     return result.rows.map(toRecord);
-  }
-
-  /**
-   * Draws down current_quantity by `quantity` — shrinkage and a
-   * post-acceptance rejection are the same mechanical update, just
-   * recorded under a different reason by the caller (ProcurementService);
-   * `terminalStatus` is what the lot becomes if this draws it to exactly
-   * zero (unchanged — 'available' — for shrinkage; 'rejected' for a
-   * quality rejection).
-   */
-  async drawDownWithClient(
-    client: PoolClient,
-    id: string,
-    expectedVersion: number,
-    quantity: number,
-    terminalStatus: LotStatus,
-  ): Promise<LotRecord> {
-    const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET
-         current_quantity = current_quantity - $3,
-         status = CASE WHEN current_quantity - $3 <= 0 THEN $4 ELSE status END,
-         version = version + 1,
-         updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'available' AND current_quantity >= $3
-       RETURNING *`,
-      [id, expectedVersion, quantity, terminalStatus],
-    );
-    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
-    return toRecord(result.rows[0]);
-  }
-
-  async transferWithClient(
-    client: PoolClient,
-    id: string,
-    expectedVersion: number,
-    toLocationId: string,
-  ): Promise<LotRecord> {
-    const result = await client.query<LotRow>(
-      `UPDATE commerce.lot SET
-         current_location_id = $3,
-         version = version + 1,
-         updated_at = now()
-       WHERE id = $1 AND version = $2 AND status = 'available'
-       RETURNING *`,
-      [id, expectedVersion, toLocationId],
-    );
-    if (result.rowCount === 0) throw new OptimisticLockException('Lot', id);
-    return toRecord(result.rows[0]);
   }
 
   /** An egg lot's breakage at grading against the owner's tolerance; null for anything but eggs. */
@@ -421,7 +312,3 @@ export class LotsRepository {
     return result.rows[0] ?? null;
   }
 }
-
-// Every row a lock batch returns stays locked until commit, so keep
-// batches small: most order lines are covered by the first lot or two.
-const BATCH = 5;

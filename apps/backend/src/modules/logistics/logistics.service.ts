@@ -9,6 +9,7 @@ import { FleetService } from '../vehicles/fleet.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { PayrollService } from '../workforce/payroll.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { LotStockService } from '../procurement/lot-stock.service';
 import { OrdersService } from '../orders/orders.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerService } from '../finance/ledger.service';
@@ -33,6 +34,7 @@ import { CustomerCollectionRecord } from './entities/customer-collection.entity'
 import { clampPageSize, PaginatedResult } from '../../common/persistence/pagination';
 import { once } from '../../common/idempotency';
 import { moneyFromNumber, subtractMoney, sumMoney, toCents } from '../../common/money';
+import { fromMilli, toMilli } from '../../common/quantity';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
@@ -50,7 +52,21 @@ import { Authority } from './delegation';
 import { AlertsRepository } from '../alerts/alerts.repository';
 import { DeliveryLineFacts, DeliveryMeasuresRepository } from './repositories/delivery-measures.repository';
 import { LineMeasure, measureLine } from './measures';
-import { FarmWeightDto } from './dto/complete-pickup-stop.dto';
+import { CompletePickupStopDto } from './dto/complete-pickup-stop.dto';
+import { FarmStopsRepository } from './repositories/farm-stops.repository';
+import { farmLinesOf, loadedKgOf, rejectionTextOf } from './farm-stop';
+import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
+import { qrMatches, shortfallsOf, shortfallTextOf } from './delivery-stop';
+import { CratesService } from '../crates/crates.service';
+import { RoutesService } from '../routes/routes.service';
+import { TripPlanningRepository } from './repositories/trip-planning.repository';
+import { ClosingStockLine, DriverDay, TripPlan, TripQuantities, TripsBoard, TripsBoardDay, TripVehicleStock } from './entities/trip-planning.entity';
+import { StartTripDto } from './dto/start-trip.dto';
+import { addDays } from '../../common/period';
+import { formatOrderNumber, nextTripNumber } from '../../common/persistence/document-number';
+import { ClosingStockDto } from './dto/reconcile-trip.dto';
+import { OrderRecord } from '../orders/entities/customer-order.entity';
+import { PickupRecord } from '../procurement/entities/pickup.entity';
 
 const TRIP_ENTITY = 'trip';
 const STOP_ENTITY = 'trip_stop';
@@ -88,9 +104,111 @@ export class LogisticsService {
     private readonly delegation: DelegationService,
     private readonly alerts: AlertsRepository,
     private readonly measures: DeliveryMeasuresRepository,
+    private readonly routes: RoutesService,
+    private readonly planning: TripPlanningRepository,
+    private readonly lotStock: LotStockService,
+    private readonly farmStops: FarmStopsRepository,
+    private readonly deliveries: DeliveryStopsRepository,
+    private readonly crates: CratesService,
   ) {}
 
+  // ---- The owner's Trips list and planning (redesign Phase 4) ----
+
+  getBoard(tenantId: string, day: TripsBoardDay, q: string | null, page: number, pageSize: number): Promise<TripsBoard> {
+    return this.db.withTenant(tenantId, (client) => this.planning.board(client, day, q, page, pageSize));
+  }
+
+  /** What a trip on [date] along [routeId] could carry, and the chosen vehicle's capacity and stock. */
+  getPlan(tenantId: string, date: string, routeId: string | null, vehicleId: string | null): Promise<TripPlan> {
+    return this.db.withTenant(tenantId, (client) => this.planning.plan(client, date, routeId, vehicleId));
+  }
+
+  /** The trip's quantities product by product — and, once closed, what was counted on the vehicle. */
+  async getQuantities(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string): Promise<TripQuantities> {
+    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    return this.db.withTenant(tenantId, async (client) => {
+      const rows = await this.planning.quantitiesWithClient(client, tripId);
+      const closed = await this.reconciliations.findByTripWithClient(client, tripId);
+      return quantitiesOf(rows, closed?.closingStock ?? null);
+    });
+  }
+
+  /**
+   * What's on the trip's vehicle now (driver app D0) — for the driver and
+   * the owner — against what its pending deliveries still need.
+   */
+  async getVehicleStock(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string): Promise<TripVehicleStock> {
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    const registration = (await this.vehicles.getById(tenantId, trip.vehicleId)).registrationNumber;
+    return this.db.withTenant(tenantId, async (client) => {
+      const vehicle = await this.lotStock.vehicleStockWithClient(client, trip.vehicleId);
+      const planned = await this.planning.quantitiesWithClient(client, tripId);
+      const products = new Map<string, { product: string; uom: string }>();
+      for (const r of [...vehicle, ...planned]) products.set(r.productId, { product: r.product, uom: r.uom });
+      const rows = [...products].map(([productId, p]) => {
+        const v = vehicle.find((r) => r.productId === productId);
+        const on = toMilli(v?.onVehicle ?? '0');
+        const reserved = toMilli(v?.reserved ?? '0');
+        const toDeliver = toMilli(planned.find((r) => r.productId === productId)?.toDeliver ?? '0');
+        return {
+          productId,
+          product: p.product,
+          uom: p.uom,
+          onVehicle: fromMilli(on),
+          reserved: fromMilli(reserved),
+          free: fromMilli(on - reserved),
+          toDeliver: fromMilli(toDeliver),
+          short: fromMilli(toDeliver > on ? toDeliver - on : 0n),
+        };
+      }).sort((a, b) => a.product.localeCompare(b.product));
+      const kg = (pick: (r: (typeof rows)[number]) => string) =>
+        fromMilli(rows.filter((r) => r.uom === 'kg').reduce((n, r) => n + toMilli(pick(r)), 0n));
+      return {
+        tripId,
+        vehicleId: trip.vehicleId,
+        registrationNumber: registration,
+        rows,
+        totalsKg: { onVehicle: kg((r) => r.onVehicle), toDeliver: kg((r) => r.toDeliver), short: kg((r) => r.short) },
+      };
+    });
+  }
+
   // ---- Trips ----
+
+  /**
+   * The driver's day (driver app V1, D1): today's trip — the one on the
+   * road, else the one the owner planned for today (the client's answer 2:
+   * the owner plans first) — its vehicle and route, the vehicle's last
+   * odometer reading, this week's unpaid earnings, and what's on the vehicle.
+   */
+  async getDriverDay(tenantId: string, actorUserId: string): Promise<DriverDay> {
+    const employeeId = await this.workforce.getEmployeeIdForUser(tenantId, actorUserId);
+    const today = await this.db.withTenant(tenantId, (client) => this.planning.todayWithClient(client));
+    const weekFrom = mondayOf(today);
+    const empty: DriverDay = { today, driver: null, trip: null, vehicle: null, routeName: null, lastOdometerKm: null, weekFrom, earnedThisWeek: null, vehicleStock: null, crew: [], crateTypes: [] };
+    if (!employeeId) return empty;
+    const crew = await this.db.withTenant(tenantId, (client) => this.farmStops.crewOptionsWithClient(client));
+    const crateTypes = (await this.crates.listTypes(tenantId)).filter((c) => c.isActive).map((c) => ({ id: c.id, code: c.code, name: c.name }));
+    const driver = await this.workforce.getById(tenantId, employeeId);
+    const tripId = await this.db.withTenant(tenantId, (client) => this.planning.dayTripOfDriverWithClient(client, employeeId, today));
+    const earnedThisWeek = await this.payroll.earnedSoFar(tenantId, employeeId, weekFrom, today);
+    const base = { ...empty, driver: { employeeId, name: driver.name }, earnedThisWeek, crew, crateTypes };
+    if (!tripId) return base;
+
+    const trip = await this.findTripOrThrow(tenantId, tripId);
+    const vehicle = await this.vehicles.getById(tenantId, trip.vehicleId);
+    const routeName = trip.routeId ? (await this.routes.get(tenantId, trip.routeId)).name : null;
+    const lastOdometerKm = await this.db.withTenant(tenantId, (client) => this.planning.lastOdometerWithClient(client, trip.vehicleId, trip.id));
+    const vehicleStock = await this.getVehicleStock(tenantId, actorUserId, false, trip.id);
+    return {
+      ...base,
+      trip,
+      vehicle: { id: vehicle.id, registrationNumber: vehicle.registrationNumber },
+      routeName,
+      lastOdometerKm,
+      vehicleStock,
+    };
+  }
 
   /** Dispatch-only — every driver's trips, tenant-wide. */
   listTrips(
@@ -156,7 +274,14 @@ export class LogisticsService {
     }
   }
 
-  /** Dispatch-only: creates a trip for any vehicle/driver in the tenant. */
+  /**
+   * Dispatch-only: creates a trip for any vehicle/driver in the tenant —
+   * numbered for its day (T-20261028-001). Planned by route ("Create
+   * Trip"), it can carry its crew and its orders and pickups from the
+   * start: only confirmed orders and scheduled pickups not already on
+   * another trip, made into stops in the route's visiting order (anyone
+   * not on the route after, pickups before deliveries).
+   */
   async createTrip(tenantId: string, actorUserId: string, dto: CreateTripDto): Promise<TripRecord> {
     const vehicle = await this.vehicles.getById(tenantId, dto.vehicleId);
     if (vehicle.status !== 'active') {
@@ -169,16 +294,74 @@ export class LogisticsService {
     if (driver.roleType !== 'driver') {
       throw new BadRequestException('The assigned employee is not a driver');
     }
+    if (dto.routeId) await this.routes.assertUsable(tenantId, dto.routeId);
+    for (const [role, id] of [['packer', dto.packerEmployeeId], ['loader', dto.loaderEmployeeId]] as const) {
+      if (!id) continue;
+      if (id === dto.driverEmployeeId) throw new BadRequestException(`The driver can't also be the ${role}`);
+      const worker = await this.workforce.getById(tenantId, id);
+      if (worker.status !== 'active') throw new ConflictException(`The ${role} is not active`);
+    }
+    const orders: OrderRecord[] = [];
+    for (const id of [...new Set(dto.orderIds ?? [])]) {
+      const order = await this.orders.getOrder(tenantId, id);
+      if (order.status !== 'confirmed') {
+        throw new ConflictException(`${formatOrderNumber(order.number)} is not confirmed (status: ${order.status}) — only confirmed orders can go on a trip`);
+      }
+      orders.push(order);
+    }
+    const pickups: PickupRecord[] = [];
+    for (const id of [...new Set(dto.pickupIds ?? [])]) {
+      const pickup = await this.procurement.getPickup(tenantId, id);
+      if (pickup.status !== 'scheduled') throw new ConflictException(`Pickup is not scheduled (status: ${pickup.status})`);
+      pickups.push(pickup);
+    }
 
     return this.db.withTenant(tenantId, async (client) => {
       // An expired insurance, PUC, fitness or permit keeps it off the road.
       await this.fleet.assertRoadworthyWithClient(client, dto.vehicleId);
+      for (const order of orders) {
+        const on = await this.planning.activeTripOfOrderWithClient(client, order.id);
+        if (on) throw new ConflictException(`${formatOrderNumber(order.number)} is already on trip ${on}`);
+      }
+      for (const pickup of pickups) {
+        const on = await this.planning.activeTripOfPickupWithClient(client, pickup.id);
+        if (on) throw new ConflictException(`That pickup is already on trip ${on}`);
+      }
+      const day = dto.plannedDate?.slice(0, 10) ?? (await this.planning.todayWithClient(client));
       const trip = await this.trips.createWithClient(client, tenantId, actorUserId, {
+        number: await nextTripNumber(client, tenantId, day),
+        routeId: dto.routeId ?? null,
         vehicleId: dto.vehicleId,
         driverEmployeeId: dto.driverEmployeeId,
+        packerEmployeeId: dto.packerEmployeeId ?? null,
+        loaderEmployeeId: dto.loaderEmployeeId ?? null,
         plannedDate: dto.plannedDate ?? null,
         advanceAmount: dto.advanceAmount ?? 0,
       });
+      const positions = dto.routeId ? await this.planning.routePositionsWithClient(client, dto.routeId) : new Map<string, number>();
+      const at = (party: string) => positions.get(party) ?? Number.MAX_SAFE_INTEGER;
+      const planned = [
+        ...pickups.map((p) => ({ type: 'pickup' as const, id: p.id, party: p.farmerId, first: 0 })),
+        ...orders.map((o) => ({ type: 'delivery' as const, id: o.id, party: o.customerId, first: 1 })),
+      ].sort((a, b) => at(a.party) - at(b.party) || a.first - b.first);
+      for (const [i, p] of planned.entries()) {
+        const stop = await this.stops.createWithClient(client, {
+          tripId: trip.id,
+          sequenceNumber: i + 1,
+          stopType: p.type,
+          pickupId: p.type === 'pickup' ? p.id : null,
+          orderId: p.type === 'delivery' ? p.id : null,
+          notes: null,
+        });
+        await this.audit.record(client, {
+          tenantId,
+          actorUserId,
+          action: 'create',
+          entityType: STOP_ENTITY,
+          entityId: stop.id,
+          after: stop as unknown as Record<string, unknown>,
+        });
+      }
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -191,12 +374,17 @@ export class LogisticsService {
     });
   }
 
+  /**
+   * Sets off. From the driver app's Start Day (D1) it records the vehicle's
+   * odometer — never below its last reading — and where the phone was. A
+   * driver starts the trip planned for today, not one planned for later.
+   */
   async startTrip(
     tenantId: string,
     actorUserId: string,
     callerIsDispatcher: boolean,
     id: string,
-    dto: VersionDto,
+    dto: StartTripDto,
   ): Promise<TripRecord> {
     const before = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, id);
     // Setting off needs authority for this trip — standing, or the owner's approval.
@@ -209,8 +397,34 @@ export class LogisticsService {
       }
       // Checked again on departure: a document can lapse between planning and leaving.
       await this.fleet.assertRoadworthyWithClient(client, before.vehicleId);
-
-      const after = await this.trips.startWithClient(client, id, dto.version);
+      if (!callerIsDispatcher && before.plannedDate && before.plannedDate > (await this.planning.todayWithClient(client))) {
+        throw new ConflictException(`This trip is planned for ${before.plannedDate} — start it on the day`);
+      }
+      if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
+        throw new BadRequestException('Give both latitude and longitude, or neither');
+      }
+      if (dto.openingKm !== undefined) {
+        const last = await this.planning.lastOdometerWithClient(client, before.vehicleId, id);
+        if (last !== null && dto.openingKm < Number(last)) {
+          throw new BadRequestException(`Opening KM ${dto.openingKm} is below the vehicle's last reading, ${Number(last)} km`);
+        }
+      }
+      const after = await this.trips.startWithClient(client, id, dto.version, {
+        openingKm: dto.openingKm ?? null,
+        latitude: dto.latitude ?? null,
+        longitude: dto.longitude ?? null,
+        accuracyMeters: dto.accuracyMeters ?? null,
+      });
+      // Whatever an earlier trip left aboard goes on with this one; what's
+      // reserved in the store for its deliveries is loaded onto the vehicle.
+      await this.lotStock.carryOverWithClient(client, tenantId, actorUserId, { id, vehicleId: after.vehicleId });
+      await this.lotStock.loadOrderLinesWithClient(
+        client,
+        tenantId,
+        actorUserId,
+        { id, vehicleId: after.vehicleId },
+        await this.planning.pendingDeliveryLineIdsWithClient(client, id),
+      );
       // The driver leaves with the advance now — it moves to "Cash with drivers".
       await this.ledger.postTripAdvanceWithClient(client, tenantId, actorUserId, {
         id,
@@ -275,8 +489,8 @@ export class LogisticsService {
   /**
    * A cancelled trip's stops are left exactly as they were — any pickup or
    * order they pointed at stays scheduled/confirmed, ready to be attached
-   * to a new trip's route. Cancelling here never reaches into Procurement
-   * or Orders.
+   * to a new trip's route. Cancelling never touches Orders; the only stock
+   * it moves is a vehicle's, back to the store, when the trip was on the road.
    */
   async cancelTrip(
     tenantId: string,
@@ -289,6 +503,11 @@ export class LogisticsService {
 
     return this.db.withTenant(tenantId, async (client) => {
       const after = await this.trips.cancelWithClient(client, id, dto.version);
+      // A trip called off on the road brings what's aboard back to the store,
+      // as it stands — unless a later trip has the vehicle now.
+      if (before.status === 'in_progress' && !(await this.planning.laterTripOnVehicleWithClient(client, id))) {
+        await this.lotStock.returnFromVehicleWithClient(client, tenantId, actorUserId, { id, vehicleId: after.vehicleId }, null, null);
+      }
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -314,11 +533,15 @@ export class LogisticsService {
     return this.db.withTenant(tenantId, async (client) => {
       const stops = await this.stops.listByTripWithClient(client, tripId);
       const details = await this.stops.detailsForTripWithClient(client, tripId);
+      const farms = await this.farmStops.outcomesForTripWithClient(client, tripId);
+      const delivered = await this.deliveries.outcomesForTripWithClient(client, tripId);
       return stops.map((s) => ({
         ...s,
         party: details.get(s.id)?.party ?? null,
         items: details.get(s.id)?.items ?? [],
         collect: details.get(s.id)?.collect ?? null,
+        farm: farms.get(s.id) ?? null,
+        delivery: delivered.get(s.id) ?? null,
       }));
     });
   }
@@ -341,6 +564,8 @@ export class LogisticsService {
     }
 
     return this.db.withTenant(tenantId, async (client) => {
+      const on = await this.planning.activeTripOfPickupWithClient(client, dto.pickupId);
+      if (on) throw new ConflictException(`That pickup is already on trip ${on}`);
       const sequenceNumber = dto.sequenceNumber ?? (await this.stops.nextSequenceNumberWithClient(client, tripId));
       const stop = await this.stops.createWithClient(client, {
         tripId,
@@ -380,6 +605,8 @@ export class LogisticsService {
     }
 
     return this.db.withTenant(tenantId, async (client) => {
+      const on = await this.planning.activeTripOfOrderWithClient(client, dto.orderId);
+      if (on) throw new ConflictException(`${formatOrderNumber(order.number)} is already on trip ${on}`);
       const sequenceNumber = dto.sequenceNumber ?? (await this.stops.nextSequenceNumberWithClient(client, tripId));
       const stop = await this.stops.createWithClient(client, {
         tripId,
@@ -439,6 +666,12 @@ export class LogisticsService {
    * with this trip's own vehicle and driver — the caller never repeats
    * them (Constitution I.3-I.4: Procurement's public completePickup, never
    * its repository).
+   *
+   * The farmer stop (driver app D2): with [dto.lines], every product of
+   * the purchase order is accepted (weighed or counted in bags, loaded) or
+   * rejected with a reason — checked before anything is received; the
+   * lines and the packing crew are kept with the stop, the crew is credited
+   * with the kilos loaded, and the owner hears of any rejection.
    */
   async completePickupStop(
     tenantId: string,
@@ -446,7 +679,7 @@ export class LogisticsService {
     callerIsDispatcher: boolean,
     tripId: string,
     stopId: string,
-    weights: FarmWeightDto[] = [],
+    dto: CompletePickupStopDto = {},
   ): Promise<TripStopRecord> {
     const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
     if (trip.status !== 'in_progress') {
@@ -459,22 +692,116 @@ export class LogisticsService {
     if (stop.status !== 'pending') throw new ConflictException(`Stop is already ${stop.status}`);
 
     const pickup = await this.procurement.getPickup(tenantId, stop.pickupId as string);
+    const farm = dto.lines ? await this.farmStopOf(tenantId, pickup.purchaseOrderId, dto) : null;
     await this.procurement.completePickup(tenantId, actorUserId, pickup.id, {
       version: pickup.version,
       vehicleId: trip.vehicleId,
       driverEmployeeId: trip.driverEmployeeId,
     });
     // The farm weighment (client Q&A, live chicken): the net weight entered
-    // at the farm receives the goods — it's the purchase weight, what the
-    // farmer is settled on. Entered as weighed; no tare arithmetic here.
-    if (weights.length > 0) {
-      await this.procurement.receiveGoods(tenantId, actorUserId, pickup.purchaseOrderId, {
-        pickupId: pickup.id,
-        lines: weights.map((w) => ({ productId: w.productId, receivedQuantity: w.netQuantity })),
+    // at the farm is what's accepted — the purchase weight the farmer is
+    // settled on, at the owner's rate on the purchase order — and it goes
+    // onto the vehicle (driver app D0). Entered as weighed; no tare
+    // arithmetic here. What was rejected stays at the farm.
+    const weighed = farm
+      ? farm.lines.map((l) => ({
+          productId: l.productId,
+          acceptedQuantity: Number(l.acceptedQuantity),
+          rejectedQuantity: Number(l.rejectedQuantity),
+          rejectionReason: l.reason ? rejectionTextOf(l.reason, l.note) : null,
+        }))
+      : (dto.weights ?? []).map((w) => ({
+          productId: w.productId,
+          acceptedQuantity: w.netQuantity,
+          rejectedQuantity: w.rejectedQuantity ?? 0,
+          rejectionReason: w.rejectionReason?.trim() || null,
+        }));
+    const lots = weighed.length > 0
+      ? await this.procurement.acceptAtFarm(tenantId, actorUserId, pickup.purchaseOrderId, {
+          pickupId: pickup.id,
+          tripId,
+          vehicleId: trip.vehicleId,
+          lines: weighed,
+        })
+      : [];
+
+    if (farm) {
+      const lotOf = new Map(lots.filter((l) => Number(l.acceptedQuantity ?? 0) > 0).map((l) => [l.productId, l.id]));
+      await this.db.withTenant(tenantId, async (client) => {
+        await this.farmStops.insertLinesWithClient(
+          client,
+          tenantId,
+          actorUserId,
+          stopId,
+          farm.lines.map((l) => ({ ...l, lotId: l.outcome === 'accepted' ? lotOf.get(l.productId) ?? null : null })),
+        );
+        await this.farmStops.setCrewWithClient(client, stopId, farm.packerId, farm.loaderId);
+        await this.payroll.recordLoadingWorkWithClient(client, tenantId, actorUserId, {
+          tripNumber: trip.number,
+          workDate: await this.planning.todayWithClient(client),
+          place: farm.farmer,
+          kg: farm.loadedKg,
+          packerId: farm.packerId,
+          loaderId: farm.loaderId,
+        });
+        const refused = farm.lines.filter((l) => l.outcome === 'rejected');
+        if (refused.length > 0) {
+          const name = (id: string) => farm.products.find((p) => p.productId === id)?.name ?? 'A product';
+          await this.alerts.raiseWithClient(client, tenantId, {
+            kind: 'procurement_issue',
+            severity: 'warning',
+            title: `Rejected at ${farm.farmer}: ${refused.map((l) => name(l.productId)).join(', ')}`,
+            detail: refused.map((l) => `${name(l.productId)} — ${rejectionTextOf(l.reason ?? 'other', l.note)}.`).join(' '),
+            tripId,
+            dedupeKey: `farm-rejected:${stopId}`,
+          });
+        }
       });
     }
 
     return this.finishStop(tenantId, actorUserId, stopId, 'completed');
+  }
+
+  /** The farm stop's lines checked against its purchase order, and its crew against the business's workers. */
+  private farmStopOf(tenantId: string, purchaseOrderId: string, dto: CompletePickupStopDto) {
+    return this.db.withTenant(tenantId, async (client) => {
+      const products = await this.farmStops.poProductsWithClient(client, purchaseOrderId);
+      const lines = farmLinesOf(dto.lines ?? [], products);
+      const crewIds = [dto.packerEmployeeId, dto.loaderEmployeeId].filter((id): id is string => !!id);
+      const workers = await this.farmStops.activeWorkersWithClient(client, crewIds);
+      if (crewIds.some((id) => !workers.has(id))) {
+        throw new BadRequestException("The packer and loader must be the business's own active workers");
+      }
+      return {
+        lines,
+        products,
+        loadedKg: loadedKgOf(lines, products),
+        packerId: dto.packerEmployeeId ?? null,
+        loaderId: dto.loaderEmployeeId ?? null,
+        farmer: await this.farmStops.farmerNameWithClient(client, purchaseOrderId),
+      };
+    });
+  }
+
+  /** Start Trip (driver app D3): the delivery run set off, after the farms — recorded once. */
+  async startDeliveries(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string): Promise<TripRecord> {
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    if (trip.status !== 'in_progress') {
+      throw new ConflictException('The trip must be on the road to start its deliveries');
+    }
+    if (trip.deliveryStartedAt) return trip;
+    return this.db.withTenant(tenantId, async (client) => (await this.trips.startDeliveriesWithClient(client, tripId)) ?? trip);
+  }
+
+  /** The driver reached the stop (driver app D2: Start pickup) — recorded once; a stop already done is returned as it is. */
+  async arriveAtStop(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string, stopId: string): Promise<TripStopRecord> {
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    if (trip.status !== 'in_progress') {
+      throw new ConflictException('The trip must be in progress to reach a stop');
+    }
+    const stop = await this.getStopOnTrip(tenantId, tripId, stopId);
+    if (stop.status !== 'pending') return stop;
+    return this.db.withTenant(tenantId, async (client) => (await this.stops.arriveWithClient(client, stopId)) ?? stop);
   }
 
   /**
@@ -511,14 +838,31 @@ export class LogisticsService {
       }
     }
 
+    // The delivery checklist (driver app D3; client spec §11–§14): everything
+    // delivered unloaded; the customer's own QR, or why there wasn't one (a
+    // missing QR doesn't stop it — the client's answer 5); every line
+    // delivered short with its reason. Checked before anything is recorded.
+    const checklist = dto.allUnloaded !== undefined;
+    if (dto.allUnloaded === false) throw new BadRequestException('Unload everything delivered before completing the stop');
     const order = await this.orders.getOrder(tenantId, stop.orderId as string);
-    const measured = await this.measureDelivery(tenantId, stopId, order.id, dto);
+    const delivered = deliveredOf(order, dto);
+    const facts = await this.db.withTenant(tenantId, (client) => this.deliveries.factsWithClient(client, order.id));
+    if (dto.qrToken !== undefined && !qrMatches(dto.qrToken, facts.qrToken)) {
+      throw new BadRequestException(`This QR isn't ${facts.customerName}'s. Scan the QR at this shop, or record it as not scanned.`);
+    }
+    const shortfalls = shortfallsOf(facts.lines, delivered, dto.lines ?? [], checklist);
+    const crates = (dto.crates ?? []).filter((c) => c.dropped > 0 || c.collected > 0);
+    const crateProblem = crates.length
+      ? await this.db.withTenant(tenantId, (client) => this.crates.stopCountsProblemWithClient(client, tripId, stopId, { lines: crates }))
+      : null;
+    const measured = await this.measureDelivery(tenantId, stopId, order.id, dto, delivered);
     await this.orders.markDelivered(
       tenantId,
       actorUserId,
       order.id,
       order.version,
       new Map(measured.map((m) => [m.line.orderLineId, m.measure.settled])),
+      { delivered, vehicleId: trip.vehicleId, tripId },
     );
 
     await this.db.withTenant(tenantId, async (client) => {
@@ -526,7 +870,38 @@ export class LogisticsService {
         tripStopId: stopId,
         recipientName: dto.recipientName,
         signatureData: dto.signatureData ?? null,
+        qrStatus: dto.qrToken !== undefined ? 'scanned' : dto.qrNote?.trim() ? 'not_scanned' : null,
+        qrNote: dto.qrToken !== undefined ? null : dto.qrNote?.trim() || null,
+        allUnloaded: dto.allUnloaded ?? null,
       });
+      await this.deliveries.insertShortfallsWithClient(client, tenantId, actorUserId, stopId, shortfalls);
+      if (shortfalls.length > 0) {
+        const name = (id: string) => facts.lines.find((l) => l.id === id)?.productName ?? 'A product';
+        await this.alerts.raiseWithClient(client, tenantId, {
+          kind: 'customer_rejection',
+          severity: 'warning',
+          title: `Delivered short to ${facts.customerName}: ${shortfalls.map((s) => name(s.orderLineId)).join(', ')}`,
+          detail: shortfalls
+            .map((s) => `${name(s.orderLineId)}: ${Number(s.delivered)} of ${Number(s.ordered)} — ${shortfallTextOf(s.reason)}${s.note ? ` (${s.note})` : ''}.`)
+            .join(' ') + ' The invoice follows what was delivered.',
+          tripId,
+          dedupeKey: `delivery-short:${stopId}`,
+        });
+      }
+      // Crates are recorded when they add up; otherwise the delivery still
+      // stands and the owner sorts the crates out from the driver's count.
+      if (crates.length > 0 && !crateProblem) {
+        await this.crates.recordStopCountsWithClient(client, tenantId, actorUserId, tripId, stopId, { lines: crates });
+      } else if (crates.length > 0) {
+        await this.alerts.raiseWithClient(client, tenantId, {
+          kind: 'inventory_mismatch',
+          severity: 'warning',
+          title: `Crates at ${facts.customerName} not recorded`,
+          detail: `The driver counted ${crates.map((c) => `${c.dropped} left, ${c.collected} taken back`).join('; ')} — ${crateProblem}. Record them in Crates.`,
+          tripId,
+          dedupeKey: `delivery-crates:${stopId}`,
+        });
+      }
       for (const { line, measure } of measured) {
         await this.measures.insertWithClient(client, tenantId, actorUserId, {
           tripStopId: stopId,
@@ -565,15 +940,18 @@ export class LogisticsService {
     stopId: string,
     orderId: string,
     dto: CompleteDeliveryDto,
+    delivered: Map<string, string>,
   ): Promise<{ line: DeliveryLineFacts; measure: LineMeasure }[]> {
-    const entries = dto.lines ?? [];
+    const entries = (dto.lines ?? []).filter((e) => e.customerWeight !== undefined || e.brokenQuantity !== undefined);
     if (entries.length === 0) return [];
     return this.db.withTenant(tenantId, async (client) => {
       const facts = new Map((await this.measures.lineFactsWithClient(client, orderId)).map((l) => [l.orderLineId, l]));
       const out: { line: DeliveryLineFacts; measure: LineMeasure }[] = [];
       for (const entry of entries) {
-        const line = facts.get(entry.orderLineId);
-        if (!line) throw new BadRequestException('That line is not on this delivery');
+        const found = facts.get(entry.orderLineId);
+        if (!found) throw new BadRequestException('That line is not on this delivery');
+        // Measured against what actually left, when that differs from the order.
+        const line = { ...found, quantity: delivered.get(found.orderLineId) ?? found.quantity };
         if (entry.customerWeight !== undefined) {
           if (line.kind !== 'live_bird') throw new BadRequestException(`${line.productName} isn't sold by live weight`);
           if (line.weighmentPhoto === 'required' && (await this.photos.countByStopAndTypeWithClient(client, stopId, 'weighment')) === 0) {
@@ -691,10 +1069,19 @@ export class LogisticsService {
     stopId: string,
     photoType: PhotoType,
     file: UploadedPhoto,
+    productId: string | null = null,
   ): Promise<TripStopPhotoRecord> {
     const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
     await this.delegation.assertCan(tenantId, callerIsDispatcher, trip, 'deliver');
-    await this.getStopOnTrip(tenantId, tripId, stopId);
+    const stop = await this.getStopOnTrip(tenantId, tripId, stopId);
+    if (productId) {
+      // Only a farm stop's photo names a product — one of its purchase order's.
+      const pickup = stop.stopType === 'pickup' ? await this.procurement.getPickup(tenantId, stop.pickupId as string) : null;
+      const products = pickup ? await this.db.withTenant(tenantId, (client) => this.farmStops.poProductsWithClient(client, pickup.purchaseOrderId)) : [];
+      if (!products.some((p) => p.productId === productId)) {
+        throw new BadRequestException("That product isn't picked up at this stop");
+      }
+    }
 
     if (!VALID_PHOTO_CONTENT_TYPES.includes(file.mimetype)) {
       throw new BadRequestException(`Unsupported image type: ${file.mimetype}`);
@@ -708,6 +1095,7 @@ export class LogisticsService {
       this.photos.createWithClient(client, actorUserId, {
         tripStopId: stopId,
         photoType,
+        productId,
         storageKey: relativeKey,
         contentType: file.mimetype,
         sizeBytes: file.size,
@@ -1132,7 +1520,22 @@ export class LogisticsService {
       const handover = await this.handoverWithClient(client, trip);
       const facts: TripReviewFacts = await this.reconciliations.reviewFactsWithClient(client, tripId);
       const received = moneyFromNumber(dto.cashReturned);
-      const checklist: ChecklistItem[] = checklistOf(facts, handover, received);
+      // The count is checked against what's on the vehicle now (driver app
+      // D0), for every product the trip moved and anything else aboard —
+      // unless a later trip has set off with the vehicle since: what was
+      // aboard went on with that one, so this count is checked against this
+      // trip's own figures and nothing moves.
+      const laterTrip = await this.planning.laterTripOnVehicleWithClient(client, tripId);
+      const moved = await this.planning.quantitiesWithClient(client, tripId);
+      const onVehicle = laterTrip ? [] : await this.lotStock.vehicleStockWithClient(client, trip.vehicleId);
+      const aboard = laterTrip
+        ? moved
+        : [
+            ...moved.filter((m) => !onVehicle.some((v) => v.productId === m.productId)).map((m) => ({ ...m, expected: '0.000' })),
+            ...onVehicle.map((v) => ({ productId: v.productId, product: v.product, uom: v.uom, expected: v.onVehicle })),
+          ].sort((a, b) => a.product.localeCompare(b.product));
+      const closingStock = dto.closingStock ? closingStockOf(aboard, dto.closingStock) : null;
+      const checklist: ChecklistItem[] = checklistOf(facts, handover, received, closingStock);
       const exceptions = checklist.filter((c) => c.status === 'exception');
       const exceptionNote = dto.exceptionNote?.trim() || null;
       if (exceptions.length > 0 && !exceptionNote) {
@@ -1158,6 +1561,7 @@ export class LogisticsService {
         outcome: exceptions.length > 0 ? 'approved_exception' : 'pass',
         exceptionNote: exceptions.length > 0 ? exceptionNote : null,
         checklist,
+        closingStock,
       });
       await this.ledger.postTripReconciliationWithClient(client, tenantId, actorUserId, {
         id: reconciliation.id,
@@ -1169,6 +1573,20 @@ export class LogisticsService {
         cashReturned: reconciliation.cashReturned,
         occurredAt: reconciliation.reconciledAt,
       });
+
+      // What's on the vehicle goes back to the owner (the client's answer 3):
+      // the count's shortfall is written off at cost with the owner's reason,
+      // the rest returns to the store.
+      if (!laterTrip) {
+        await this.lotStock.returnFromVehicleWithClient(
+          client,
+          tenantId,
+          actorUserId,
+          { id: tripId, vehicleId: trip.vehicleId },
+          closingStock ? new Map(closingStock.map((c) => [c.productId, c.counted])) : null,
+          exceptionNote ?? dto.notes?.trim() ?? null,
+        );
+      }
 
       const after = await this.trips.markReconciledWithClient(client, tripId, dto.version);
       await this.audit.record(client, {
@@ -1202,4 +1620,76 @@ function sameExpense(prior: TripExpenseRecord, dto: RecordExpenseDto): boolean {
 
 function sameCollection(prior: CustomerCollectionRecord, dto: RecordCollectionDto): boolean {
   return prior.method === dto.method && toCents(prior.amount) === toCents(String(dto.amount));
+}
+
+/** The Monday of [day]'s week (YYYY-MM-DD) — pay settles weekly (the client's answer 8). */
+export function mondayOf(day: string): string {
+  const weekday = new Date(`${day}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  return addDays(day, -((weekday + 6) % 7));
+}
+
+/**
+ * What left with a delivery, line by line (driver app D0): the quantity the
+ * driver entered for a line, else what was ordered.
+ */
+export function deliveredOf(order: OrderRecord, dto: CompleteDeliveryDto): Map<string, string> {
+  const lines = new Map((order.lines ?? []).map((l) => [l.id, l]));
+  const out = new Map<string, string>();
+  for (const entry of dto.lines ?? []) {
+    if (entry.deliveredQuantity === undefined) continue;
+    if (!lines.has(entry.orderLineId)) throw new BadRequestException('That line is not on this delivery');
+    out.set(entry.orderLineId, entry.deliveredQuantity.toFixed(3));
+  }
+  return out;
+}
+
+/**
+ * The count at closing against what should be on the vehicle: every
+ * product the trip moved, and any counted that it didn't. A product the
+ * count leaves out was counted as none.
+ */
+export function closingStockOf(rows: { productId: string; product: string; uom: string; expected: string }[], counted: ClosingStockDto[]): ClosingStockLine[] {
+  const byProduct = new Map(counted.map((c) => [c.productId, c.quantity]));
+  const lines: ClosingStockLine[] = rows.map((r) => ({
+    productId: r.productId,
+    product: r.product,
+    uom: r.uom,
+    expected: r.expected,
+    counted: (byProduct.get(r.productId) ?? 0).toFixed(3),
+  }));
+  for (const c of counted) {
+    if (!rows.some((r) => r.productId === c.productId) && c.quantity > 0) {
+      throw new BadRequestException('A product counted on the vehicle is not on it');
+    }
+  }
+  return lines;
+}
+
+/** The quantities table, with the count when the trip was closed with one. */
+export function quantitiesOf(
+  rows: Omit<import('./entities/trip-planning.entity').QuantityRow, 'counted' | 'difference'>[],
+  closing: ClosingStockLine[] | null,
+): TripQuantities {
+  const counted = new Map((closing ?? []).map((c) => [c.productId, c.counted]));
+  const full = rows.map((r) => {
+    const c = closing ? (counted.get(r.productId) ?? '0.000') : null;
+    return { ...r, counted: c, difference: c === null ? null : (Number(c) - Number(r.expected)).toFixed(3) };
+  });
+  const kg = full.filter((r) => r.uom === 'kg');
+  const total = (pick: (r: (typeof full)[number]) => string) => kg.reduce((n, r) => n + Number(pick(r)), 0).toFixed(3);
+  return {
+    rows: full,
+    totalsKg: {
+      loaded: total((r) => r.loaded),
+      procured: total((r) => r.procured),
+      delivered: total((r) => r.delivered),
+      spotSold: total((r) => r.spotSold),
+      returned: total((r) => r.returned),
+      writtenOff: total((r) => r.writtenOff),
+      toDeliver: total((r) => r.toDeliver),
+      expected: total((r) => r.expected),
+      counted: closing ? total((r) => r.counted ?? '0') : null,
+    },
+    balanced: closing ? full.every((r) => Math.abs(Number(r.difference)) < 0.0005) : null,
+  };
 }

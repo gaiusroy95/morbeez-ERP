@@ -1,24 +1,147 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash, randomBytes } from 'crypto';
 import { PoolClient } from 'pg';
+import { DatabaseService } from '../../infra/database/database.service';
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
+import { PasswordSetupRepository } from './repositories/password-setup.repository';
 import { PasswordService } from './security/password.service';
 import { LoginIdentity, PublicUser, toPublicUser } from './entities/user.entity';
+
+/** How long a password set-up link works. */
+export const PASSWORD_SETUP_DAYS = 7;
+
+/** What a staff role may do. Drivers: their own trips, and spot sales from them (Driver App Architecture DRV.17). */
+export const STAFF_ROLES = {
+  Driver: ['logistics:read', 'logistics:write', 'inventory:write', 'spot_sales:record'],
+} as const;
+export type StaffRoleName = keyof typeof STAFF_ROLES;
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/** What the set-up page shows before the password is chosen. */
+export interface PasswordSetupInfo {
+  state: 'valid' | 'used' | 'expired';
+  business: string;
+  name: string | null;
+  /** The login they'll sign in with, partly hidden: +91 98•••••345. */
+  login: string;
+}
 
 @Injectable()
 export class UsersService {
   constructor(
+    private readonly db: DatabaseService,
     private readonly users: UsersRepository,
     private readonly roles: RolesRepository,
     private readonly sessions: AuthSessionsRepository,
+    private readonly setups: PasswordSetupRepository,
     private readonly password: PasswordService,
   ) {}
+
+  /**
+   * A login for a staff member, created by the owner (client feedback, Oct
+   * 2026). It has no usable password: a random one nobody knows, until the
+   * person opens their set-up link and chooses their own. Runs inside the
+   * caller's transaction (Workforce links it to the employee record there).
+   */
+  async provisionStaffLoginWithClient(
+    client: PoolClient,
+    tenantId: string,
+    phone: string,
+    roleName: StaffRoleName,
+  ): Promise<PublicUser> {
+    const passwordHash = await this.password.hash(randomBytes(32).toString('hex'));
+    let user;
+    try {
+      // A savepoint, so a taken number can be reported without aborting the caller's transaction.
+      await client.query('SAVEPOINT staff_login');
+      user = await this.users.createWithClient(client, tenantId, { phone, email: null }, passwordHash);
+      await client.query('RELEASE SAVEPOINT staff_login');
+    } catch (err) {
+      await client.query('ROLLBACK TO SAVEPOINT staff_login');
+      if (isUniqueViolation(err)) {
+        throw new ConflictException('This mobile number already has a Morbeez login, here or in another business. Use a different number.');
+      }
+      throw err;
+    }
+    const existing = await client.query<{ id: string }>('SELECT id FROM identity.role WHERE name = $1', [roleName]);
+    const roleId = existing.rows[0]?.id ?? (await this.roles.createWithClient(client, tenantId, roleName)).id;
+    // Also on an existing role: a permission added to the set later reaches every business.
+    for (const code of STAFF_ROLES[roleName]) await this.roles.assignPermissionWithClient(client, roleId, code);
+    await this.roles.assignToUserWithClient(client, user.id, roleId);
+    return toPublicUser(user);
+  }
+
+  /**
+   * A one-time link for choosing a password — for a new staff login, or a
+   * new password when one is forgotten. Earlier open links for the same
+   * person stop working. Returns the token; only its hash is stored.
+   */
+  async issuePasswordSetupWithClient(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    createdBy: string,
+  ): Promise<{ token: string; expiresAt: Date }> {
+    const exists = await client.query('SELECT 1 FROM identity.app_user WHERE id = $1', [userId]);
+    if (!exists.rowCount) throw new NotFoundException('User not found');
+    await this.setups.useAllForUserWithClient(client, userId);
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + PASSWORD_SETUP_DAYS * 24 * 60 * 60 * 1000);
+    await this.setups.createWithClient(client, tenantId, userId, hashToken(token), expiresAt, createdBy);
+    return { token, expiresAt };
+  }
+
+  /** For the set-up page: whose link it is, and whether it still works. */
+  async describePasswordSetup(token: string): Promise<PasswordSetupInfo> {
+    const setup = await this.setups.findByHash(hashToken(token));
+    if (!setup) throw new NotFoundException('This link is not valid. Ask for a new one.');
+    return this.db.withTenant(setup.tenant_id, async (client) => {
+      const r = await client.query<{ phone: string | null; email: string | null; business: string; name: string | null }>(
+        `SELECT u.phone, u.email, t.name AS business,
+                (SELECT e.name FROM trading_partners.employee e WHERE e.user_id = u.id LIMIT 1) AS name
+         FROM identity.app_user u JOIN tenant.tenant t ON t.id = u.tenant_id
+         WHERE u.id = $1`,
+        [setup.user_id],
+      );
+      const row = r.rows[0];
+      if (!row) throw new NotFoundException('This link is not valid. Ask for a new one.');
+      return {
+        state: setup.used_at ? 'used' : setup.expires_at.getTime() < Date.now() ? 'expired' : 'valid',
+        business: row.business,
+        name: row.name,
+        login: row.phone ? maskPhone(row.phone) : (row.email ?? ''),
+      };
+    });
+  }
+
+  /** Sets the password from a set-up link; the link then stops working, and any open sessions end. */
+  async completePasswordSetup(token: string, plaintextPassword: string): Promise<{ login: string }> {
+    const setup = await this.setups.findByHash(hashToken(token));
+    if (!setup) throw new NotFoundException('This link is not valid. Ask for a new one.');
+    const passwordHash = await this.password.hash(plaintextPassword);
+    return this.db.withTenant(setup.tenant_id, async (client) => {
+      const current = await this.setups.lockWithClient(client, setup.id);
+      if (!current || current.used_at) throw new GoneException('This link has already been used. Sign in, or ask for a new link.');
+      if (current.expires_at.getTime() < Date.now()) throw new GoneException('This link has expired. Ask for a new one.');
+      const r = await client.query<{ phone: string | null; email: string | null }>(
+        `UPDATE identity.app_user SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING phone, email`,
+        [passwordHash, current.user_id],
+      );
+      await this.setups.useAllForUserWithClient(client, current.user_id);
+      await client.query('UPDATE identity.auth_session SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [current.user_id]);
+      const user = r.rows[0];
+      return { login: user?.phone ?? user?.email ?? '' };
+    });
+  }
 
   /** The signed-in person's own settings. */
   async preferences(tenantId: string, userId: string): Promise<{ language: string }> {
@@ -145,4 +268,10 @@ export function loginTaken(err: unknown): ConflictException {
       ? 'This mobile number already has a Morbeez login. Sign in instead, or use a different number.'
       : 'This email already has a Morbeez login. Sign in instead, or use a different email.',
   );
+}
+
+/** "+919845012345" → "+91 98•••••345": enough for the person to recognise their own number. */
+export function maskPhone(phone: string): string {
+  const digits = phone.replace(/^\+91/, '');
+  return `+91 ${digits.slice(0, 2)}${'•'.repeat(Math.max(digits.length - 5, 0))}${digits.slice(-3)}`;
 }

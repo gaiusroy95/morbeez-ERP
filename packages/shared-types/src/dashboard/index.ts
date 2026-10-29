@@ -92,3 +92,77 @@ export interface DashboardOperations {
   procurement: { purchaseOrdersPlaced: number; awaitingReceipt: number; awaitingGrading: number; pickupsScheduledToday: number };
   stock: { lotsAvailable: number; lotsReserved: number; lotsUngraded: number };
 }
+
+/** GET /dashboard/home — the owner's Home screen (redesign V1.1). */
+export type HomePeriodName = 'today' | 'week' | 'month';
+
+export type HomeAlertCode = 'customers_overdue' | 'expense_approvals' | 'vehicle_documents_due' | AlertCode;
+
+export interface HomeAlert {
+  code: HomeAlertCode;
+  severity: AlertSeverity;
+  count: number;
+  amount: string | null;
+  /** Where the alert opens in the owner app. */
+  href: string;
+}
+
+export interface DashboardHome {
+  period: { from: string; to: string; previousFrom: string; previousTo: string; timezone: string; currency: string; name: HomePeriodName };
+  /** Sales − purchases for the period. */
+  netContribution: { value: string; previous: string; changePercent: string | null };
+  sales: string;
+  purchases: string;
+  receivables: string;
+  payables: string;
+  cash: string;
+  activeTrips: { active: number; total: number };
+  today: { procurement: number; deliveries: number; collections: number; activeTrips: number };
+  alerts: HomeAlert[];
+  insight: { id: string; title: string; explanation: string } | null;
+}
+
+/** The Finance and Profit & Insights period tabs. */
+export type RangeName = 'today' | 'week' | 'month' | 'custom';
+
+export interface DashboardRange {
+  name: RangeName;
+  from: string;
+  to: string;
+  previousFrom: string;
+  previousTo: string;
+  currency: string;
+}
+
+/** GET /dashboard/finance — the Finance hub (redesign V1.1, screen 15). */
+export interface FinanceSummary {
+  range: DashboardRange;
+  receivables: string;
+  payables: string;
+  cashBalance: string;
+  /** Every cost but the goods sold, in the period (from the ledger). */
+  expenses: string;
+}
+
+export interface ProductProfit {
+  productId: string;
+  product: string;
+  revenue: string;
+  costOfGoods: string;
+  profit: string;
+  marginPercent: string | null;
+}
+
+/** GET /dashboard/insights — Profit & Insights (redesign V1.1, screen 16), from the ledger. */
+export interface ProfitInsights {
+  range: DashboardRange;
+  revenue: string;
+  revenueChangePercent: string | null;
+  /** revenue − net profit: everything it took to earn the revenue. */
+  totalCost: string;
+  netProfit: string;
+  netProfitChangePercent: string | null;
+  marginPercent: string | null;
+  previous: { revenue: string; netProfit: string };
+  products: ProductProfit[];
+}

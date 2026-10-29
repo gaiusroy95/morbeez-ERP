@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AlertsModule } from '../alerts/alerts.module';
 import { ProcurementController } from './procurement.controller';
+import { ProcurementBoardRepository } from './repositories/procurement-board.repository';
 import { ProcurementService } from './procurement.service';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
 import { LotsRepository } from './repositories/lots.repository';
+import { LotStockRepository } from './repositories/lot-stock.repository';
+import { LotStockService } from './lot-stock.service';
 import { FarmersModule } from '../farmers/farmers.module';
 import { ProductsModule } from '../products/products.module';
 import { VehiclesModule } from '../vehicles/vehicles.module';
@@ -14,7 +17,9 @@ import { FinanceModule } from '../finance/finance.module';
 
 // Bounded context: Procurement — farmer purchase orders, pickups, goods
 // receipt (Lot creation), and grading. Owns commerce.purchase_order(_line)/
-// lot/pickup; money.farmer_settlement is legacy, superseded by Finance's
+// lot/pickup and where a lot's kilos are (stock.lot_balance,
+// commerce.lot_allocation — LotStockService, for Orders, Logistics, Spot
+// sales); money.farmer_settlement is legacy, superseded by Finance's
 // payables. Grading accrues the farmer payable through Finance's
 // PayablesService in the grading transaction.
 // Reaches Farmers/Products/Vehicles/Workforce only through their public
@@ -26,9 +31,12 @@ import { FinanceModule } from '../finance/finance.module';
   providers: [
     ProcurementService,
     PurchaseOrdersRepository,
+    ProcurementBoardRepository,
     PickupsRepository,
     LotsRepository,
+    LotStockRepository,
+    LotStockService,
   ],
-  exports: [ProcurementService],
+  exports: [ProcurementService, LotStockService],
 })
 export class ProcurementModule {}

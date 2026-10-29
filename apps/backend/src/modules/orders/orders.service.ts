@@ -1,12 +1,17 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { OptimisticLockException } from '../../common/persistence/optimistic-lock.exception';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { CustomersService } from '../customers/customers.service';
 import { ProductsService } from '../products/products.service';
-import { ProcurementService } from '../procurement/procurement.service';
+import { LotStockService } from '../procurement/lot-stock.service';
 import { ReceivablesService } from '../finance/receivables.service';
+import { RoutesService } from '../routes/routes.service';
+import { VehiclesService } from '../vehicles/vehicles.service';
+import { WorkforceService } from '../workforce/workforce.service';
+import { OrdersBoardRepository } from './repositories/orders-board.repository';
+import { OrdersBoard, OrdersBoardDay } from './entities/orders-board.entity';
 import { sumMoney } from '../../common/money';
 import { OrdersRepository } from './repositories/orders.repository';
 import { OrderRecord, OrderStatus } from './entities/customer-order.entity';
@@ -29,11 +34,20 @@ export class OrdersService {
     private readonly orders: OrdersRepository,
     private readonly customers: CustomersService,
     private readonly products: ProductsService,
-    private readonly procurement: ProcurementService,
+    private readonly stock: LotStockService,
     private readonly approvals: ApprovalsService,
     private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
+    private readonly routes: RoutesService,
+    private readonly vehicles: VehiclesService,
+    private readonly workforce: WorkforceService,
+    private readonly board: OrdersBoardRepository,
   ) {}
+
+  /** The owner's Delivery Orders list (redesign V1.1, screen 5). */
+  getBoard(tenantId: string, day: OrdersBoardDay, q: string | null, page: number, pageSize: number): Promise<OrdersBoard> {
+    return this.db.withTenant(tenantId, (client) => this.board.board(client, day, q, page, pageSize));
+  }
 
   listOrders(
     tenantId: string,
@@ -75,11 +89,43 @@ export class OrdersService {
    * refused rather than priced at an invented number. Either way the price
    * is captured on the line and never recomputed later: past transactions
    * are never silently changed.
+   *
+   * The delivery plan (date, time, route, driver, vehicle), the address —
+   * the customer's own unless given — and a credit term for this order are
+   * kept on it (redesign Phase 3). A credit term longer than the
+   * customer's usual terms is extending credit, so it needs
+   * customers:credit (`mayExtendCredit`).
+   *
+   * With `confirm` ("Save Order"), confirmation is tried straight away. If
+   * the credit check refuses, the order is still saved (status 'placed')
+   * and `confirmProblem` says why; confirm it later from the order. Stock
+   * never refuses: orders are often taken before the produce is in, and
+   * what isn't in the store comes from the day's procurement.
    */
-  async createOrder(tenantId: string, actorUserId: string, dto: CreateOrderDto): Promise<OrderRecord> {
+  async createOrder(
+    tenantId: string,
+    actorUserId: string,
+    dto: CreateOrderDto,
+    opts: { mayExtendCredit?: boolean } = {},
+  ): Promise<OrderRecord & { confirmProblem?: string }> {
     const customer = await this.customers.getById(tenantId, dto.customerId);
     if (customer.status !== 'active') {
       throw new ConflictException('Cannot place an order for an archived customer');
+    }
+    if (dto.deliveryTime && !dto.deliveryDate) throw new BadRequestException('A delivery time needs a delivery date');
+    if (dto.routeId) await this.routes.assertUsable(tenantId, dto.routeId);
+    if (dto.vehicleId) {
+      const vehicle = await this.vehicles.getById(tenantId, dto.vehicleId);
+      if (vehicle.status !== 'active') throw new ConflictException(`Vehicle is not active (status: ${vehicle.status})`);
+    }
+    if (dto.driverEmployeeId) {
+      const driver = await this.workforce.getById(tenantId, dto.driverEmployeeId);
+      if (driver.status !== 'active') throw new ConflictException('The driver is not active');
+    }
+    if (dto.creditTermDays !== undefined && dto.creditTermDays > customer.paymentTermsDays && !opts.mayExtendCredit) {
+      throw new ForbiddenException(
+        `${customer.name} usually pays in ${customer.paymentTermsDays} days; a longer credit term needs permission to change credit terms`,
+      );
     }
 
     const unpriced = [...new Set(dto.lines.filter((l) => l.unitPrice === undefined).map((l) => l.productId))];
@@ -99,10 +145,18 @@ export class OrdersService {
       lines.push({ productId: line.productId, quantity: line.quantity, unitPrice: price });
     }
 
-    return this.db.withTenant(tenantId, async (client) => {
+    const created = await this.db.withTenant(tenantId, async (client) => {
       const order = await this.orders.createWithClient(client, tenantId, actorUserId, {
         customerId: dto.customerId,
         lines,
+        deliveryDate: dto.deliveryDate ?? null,
+        deliveryTime: dto.deliveryTime ?? null,
+        routeId: dto.routeId ?? customer.routeId,
+        plannedDriverId: dto.driverEmployeeId ?? null,
+        plannedVehicleId: dto.vehicleId ?? null,
+        deliveryAddress: dto.deliveryAddress?.trim() || customer.address,
+        creditTermDays: dto.creditTermDays ?? null,
+        notes: dto.notes?.trim() || null,
       });
       await this.audit.record(client, {
         tenantId,
@@ -114,6 +168,14 @@ export class OrdersService {
       });
       return order;
     });
+    if (!dto.confirm) return created;
+    try {
+      await this.confirmOrder(tenantId, actorUserId, created.id, { version: created.version });
+    } catch (err) {
+      if (!(err instanceof ConflictException)) throw err;
+      return { ...(await this.getOrder(tenantId, created.id)), confirmProblem: err.message };
+    }
+    return this.getOrder(tenantId, created.id);
   }
 
   /**
@@ -209,19 +271,19 @@ export class OrdersService {
   }
 
   /**
-   * Cancelling a 'confirmed' order releases every lot its lines had
-   * claimed before the cancellation itself is written — two separate
-   * transactions (release, then cancel), the same eventual-consistency
-   * window Procurement already accepts between Approvals.evaluate() and
-   * its own confirm write. A 'placed' order never reserved anything, so
-   * there is nothing to release.
+   * Cancelling a 'confirmed' order lets go of every kilo its lines held
+   * before the cancellation itself is written — two separate transactions
+   * (release, then cancel), the same eventual-consistency window
+   * Procurement already accepts between Approvals.evaluate() and its own
+   * confirm write. A 'placed' order never reserved anything, so there is
+   * nothing to release.
    */
   async cancelOrder(tenantId: string, actorUserId: string, id: string, dto: VersionDto): Promise<OrderRecord> {
     const before = await this.getOrder(tenantId, id);
 
     if (before.status === 'confirmed') {
       for (const line of before.lines ?? []) {
-        await this.procurement.releaseLotsForOrderLine(tenantId, actorUserId, line.id);
+        await this.stock.releaseForOrderLine(tenantId, actorUserId, line.id);
       }
     }
 
@@ -242,17 +304,18 @@ export class OrdersService {
 
   /**
    * Called by Logistics (its public API, so Logistics never touches
-   * OrdersRepository directly, Constitution I.3-I.4). One transaction:
-   * the order is delivered, the lots reserved for it are consumed, and
-   * Finance issues the invoice and recognises the cost of goods (Event
-   * Catalog, Delivery Completed / Invoice Issued). Either all of it
-   * happens or none of it does.
-   */
-  /**
+   * OrdersRepository directly, Constitution I.3-I.4). One transaction: the
+   * order is delivered, what was delivered leaves stock, and Finance issues
+   * the invoice and recognises the cost of goods (Event Catalog, Delivery
+   * Completed / Invoice Issued). Either all of it happens or none of it does.
+   *
+   * [delivery]: per order line, what actually left — when it differs from
+   * what was ordered (driver app D0: delivered by the kilo) — and the trip
+   * and vehicle it left from; the stock comes off that vehicle. A line
+   * delivered as 0 lets go of its stock and isn't invoiced.
    * [settled]: per order line, what the customer is charged for when it
-   * differs from what was ordered — the customer-end weight of live birds,
-   * or eggs less those broken. The stock that left is consumed in full
-   * either way; the difference is the loss.
+   * differs from what left — the customer-end weight of live birds, or
+   * eggs less those broken. The difference is the loss.
    */
   async markDelivered(
     tenantId: string,
@@ -260,15 +323,20 @@ export class OrdersService {
     id: string,
     expectedVersion: number,
     settled: Map<string, string> = new Map(),
+    delivery: { delivered?: Map<string, string>; vehicleId?: string | null; tripId?: string | null } = {},
   ): Promise<OrderRecord> {
     const order = await this.getOrder(tenantId, id);
-    // Names for the invoice lines, read before the transaction opens so it
-    // never waits on a second pooled connection.
+    // Names for the invoice lines and messages, read before the transaction
+    // opens so it never waits on a second pooled connection.
     const names = new Map<string, string>();
     for (const line of order.lines ?? []) {
       if (!names.has(line.productId)) {
         names.set(line.productId, (await this.products.getById(tenantId, line.productId)).name);
       }
+    }
+    const delivered = new Map((order.lines ?? []).map((line) => [line.id, delivery.delivered?.get(line.id) ?? line.quantity]));
+    if ([...delivered.values()].every((q) => Number(q) <= 0)) {
+      throw new BadRequestException('Nothing was delivered on this order — skip the stop instead');
     }
 
     return this.db.withTenant(tenantId, async (client) => {
@@ -288,14 +356,22 @@ export class OrdersService {
 
       const lines = before.lines ?? [];
       const lineCosts: string[] = [];
-      for (const line of lines) {
-        const cost = await this.procurement.consumeLotsForOrderLineWithClient(
-          client,
-          tenantId,
-          actorUserId,
-          line.id,
-          line.quantity,
-        );
+      // Lines in product order, so two deliveries lock the same products in the same sequence.
+      for (const line of [...lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
+        const quantity = delivered.get(line.id) as string;
+        await this.orders.setDeliveredQuantityWithClient(client, line.id, quantity);
+        if (Number(quantity) <= 0) {
+          await this.stock.releaseForOrderLineWithClient(client, tenantId, actorUserId, line.id);
+          continue;
+        }
+        const cost = await this.stock.deliverForOrderLineWithClient(client, tenantId, actorUserId, {
+          orderLineId: line.id,
+          productId: line.productId,
+          label: names.get(line.productId) ?? 'product',
+          quantity,
+          vehicleId: delivery.vehicleId ?? null,
+          tripId: delivery.tripId ?? null,
+        });
         if (cost !== null) lineCosts.push(cost);
       }
 
@@ -303,14 +379,17 @@ export class OrdersService {
         orderId: id,
         customerId: before.customerId,
         deliveredAt: new Date(),
-        lines: lines.map((line) => ({
-          orderLineId: line.id,
-          productId: line.productId,
-          description: names.get(line.productId) ?? 'Product',
-          quantity: settled.get(line.id) ?? line.quantity,
-          unitPrice: line.unitPrice,
-        })),
+        lines: lines
+          .filter((line) => Number(delivered.get(line.id)) > 0)
+          .map((line) => ({
+            orderLineId: line.id,
+            productId: line.productId,
+            description: names.get(line.productId) ?? 'Product',
+            quantity: settled.get(line.id) ?? (delivered.get(line.id) as string),
+            unitPrice: line.unitPrice,
+          })),
         costOfGoods: lineCosts.length > 0 ? sumMoney(lineCosts) : null,
+        creditTermDays: before.creditTermDays,
       });
       return after;
     });
@@ -353,10 +432,10 @@ export class OrdersService {
   }
 
   /**
-   * Reserves stock for every line via Procurement's public API and flips
-   * the order to 'confirmed', all in one transaction: if any line can't be
-   * covered, nothing was reserved (Performance Audit PA-03 — it used to be
-   * a transaction per line, undone by hand on failure).
+   * Reserves what the store has for every line via Procurement's public API
+   * and flips the order to 'confirmed', all in one transaction (Performance
+   * Audit PA-03). What the store doesn't have is "to come" (driver app D0):
+   * the trip's quantity check shows it.
    */
   private async reserveAndConfirm(
     tenantId: string,
@@ -370,10 +449,10 @@ export class OrdersService {
 
       // Lines in product order, so two orders lock the same products in the same sequence.
       for (const line of [...lines].sort((a, b) => a.productId.localeCompare(b.productId))) {
-        await this.procurement.reserveLotsForOrderLineWithClient(client, tenantId, actorUserId, {
+        await this.stock.reserveForOrderLineWithClient(client, tenantId, actorUserId, {
           orderLineId: line.id,
           productId: line.productId,
-          quantity: Number(line.quantity),
+          quantity: line.quantity,
         });
       }
 

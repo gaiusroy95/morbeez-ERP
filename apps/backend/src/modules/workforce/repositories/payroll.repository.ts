@@ -10,6 +10,7 @@ import {
   PayrollSettings,
   SettlementLine,
   SettlementRecord,
+  WorkerDocument,
   WorkerRow,
 } from '../entities/payroll.entity';
 
@@ -163,7 +164,7 @@ export class PayrollRepository {
     const r = await client.query(
       `SELECT e.id AS employee_id, e.name, e.role_type, e.status, (e.user_id IS NOT NULL) AS has_login,
               COALESCE(p.employment_type, 'permanent') AS employment_type, COALESCE(p.skill_category, 'unskilled') AS skill_category,
-              p.work_state_code, p.joined_on::text AS joined_on, p.left_on::text AS left_on, p.phone,
+              p.work_state_code, p.joined_on::text AS joined_on, p.left_on::text AS left_on, p.phone, p.address,
               COALESCE(p.version, 0) AS profile_version,
               cur.id AS rate_id, cur.pay_basis, cur.rate::text AS rate, cur.unit_label,
               cur.effective_from::text AS effective_from, cur.effective_to::text AS effective_to,
@@ -193,6 +194,7 @@ export class PayrollRepository {
       joinedOn: row.joined_on,
       leftOn: row.left_on,
       phone: row.phone,
+      address: row.address,
       profileVersion: Number(row.profile_version),
       currentRate: row.rate_id
         ? toRate({ id: row.rate_id, employee_id: row.employee_id, pay_basis: row.pay_basis, rate: row.rate, unit_label: row.unit_label, effective_from: row.effective_from, effective_to: row.effective_to })
@@ -212,25 +214,53 @@ export class PayrollRepository {
     employeeId: string,
     userId: string,
     version: number,
-    p: { employmentType: string; skillCategory: string; workStateCode: string | null; joinedOn: string | null; leftOn: string | null; phone: string | null },
+    p: { employmentType: string; skillCategory: string; workStateCode: string | null; joinedOn: string | null; leftOn: string | null; phone: string | null; address: string | null },
   ): Promise<boolean> {
-    const values = [employeeId, tenantId, p.employmentType, p.skillCategory, p.workStateCode, p.joinedOn, p.leftOn, p.phone, userId];
+    const values = [employeeId, tenantId, p.employmentType, p.skillCategory, p.workStateCode, p.joinedOn, p.leftOn, p.phone, userId, p.address];
     if (version === 0) {
       const r = await client.query(
         `INSERT INTO workforce.worker_profile
-           (employee_id, tenant_id, employment_type, skill_category, work_state_code, joined_on, left_on, phone, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (employee_id) DO NOTHING`,
+           (employee_id, tenant_id, employment_type, skill_category, work_state_code, joined_on, left_on, phone, updated_by, address)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (employee_id) DO NOTHING`,
         values,
       );
       return (r.rowCount ?? 0) === 1;
     }
     const r = await client.query(
       `UPDATE workforce.worker_profile SET employment_type = $3, skill_category = $4, work_state_code = $5, joined_on = $6,
-         left_on = $7, phone = $8, updated_by = $9, version = version + 1, updated_at = now()
-       WHERE employee_id = $1 AND tenant_id = $2 AND version = $10`,
+         left_on = $7, phone = $8, updated_by = $9, address = $10, version = version + 1, updated_at = now()
+       WHERE employee_id = $1 AND tenant_id = $2 AND version = $11`,
       [...values, version],
     );
     return (r.rowCount ?? 0) === 1;
+  }
+
+  /** The worker's documents still kept (removed ones stay on record, unlisted). */
+  async documents(client: PoolClient, employeeId: string): Promise<WorkerDocument[]> {
+    const r = await client.query(
+      `SELECT id, kind, label, content_type, size_bytes, file_name, uploaded_at
+       FROM workforce.worker_document WHERE employee_id = $1 AND removed_at IS NULL ORDER BY uploaded_at DESC`,
+      [employeeId],
+    );
+    return r.rows.map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      label: d.label,
+      contentType: d.content_type,
+      sizeBytes: d.size_bytes,
+      fileName: d.file_name,
+      uploadedAt: (d.uploaded_at as Date).toISOString(),
+    }));
+  }
+
+  /** The number (or email) the worker signs in with, if they have a login. */
+  async loginOf(client: PoolClient, employeeId: string): Promise<string | null> {
+    const r = await client.query<{ login: string | null }>(
+      `SELECT COALESCE(u.phone, u.email::text) AS login
+       FROM trading_partners.employee e JOIN identity.app_user u ON u.id = e.user_id WHERE e.id = $1`,
+      [employeeId],
+    );
+    return r.rows[0]?.login ?? null;
   }
 
   async ratesFor(client: PoolClient, employeeId: string): Promise<PayRate[]> {
@@ -314,9 +344,19 @@ export class PayrollRepository {
   }
 
   /** A completed trip's hours, in the tenant's timezone. */
-  async tripWork(client: PoolClient, tripId: string): Promise<{ driver_employee_id: string; work_date: string; hours: string | null; stops: number } | null> {
+  async tripWork(
+    client: PoolClient,
+    tripId: string,
+  ): Promise<{
+    driver_employee_id: string;
+    packer_employee_id: string | null;
+    loader_employee_id: string | null;
+    work_date: string;
+    hours: string | null;
+    stops: number;
+  } | null> {
     const r = await client.query(
-      `SELECT t.driver_employee_id,
+      `SELECT t.driver_employee_id, t.packer_employee_id, t.loader_employee_id,
               ((COALESCE(t.started_at, t.completed_at) AT TIME ZONE tn.timezone)::date)::text AS work_date,
               CASE WHEN t.started_at IS NULL OR t.completed_at IS NULL THEN NULL
                    ELSE LEAST(24, GREATEST(0.01, ROUND(EXTRACT(EPOCH FROM (t.completed_at - t.started_at)) / 3600.0, 2)))::text END AS hours,

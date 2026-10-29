@@ -19,6 +19,7 @@ interface FarmerRow {
   created_at: Date;
   updated_at: Date;
   created_by: string;
+  place: string | null;
 }
 
 function toRecord(row: FarmerRow): FarmerRecord {
@@ -27,6 +28,7 @@ function toRecord(row: FarmerRow): FarmerRecord {
     tenantId: row.tenant_id,
     name: row.name,
     contact: row.contact ?? {},
+    place: row.place ?? null,
     // null: the farmer genuinely has no bank details on file yet.
     // list() overrides this to `undefined` afterward — decryption never
     // runs for a list query in the first place (see list()'s comment).
@@ -70,7 +72,7 @@ export class FarmersRepository {
     return this.db.withTenant(tenantId, async (client) => {
       const [rows, count] = await Promise.all([
         client.query<FarmerRow>(
-          `SELECT id, tenant_id, name, contact, NULL AS bank_details_decrypted,
+          `SELECT id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
                   reliability_rating, status, version, created_at, updated_at, created_by
            FROM trading_partners.farmer
            ORDER BY name
@@ -94,7 +96,7 @@ export class FarmersRepository {
 
   async findByIdWithClient(client: PoolClient, id: string): Promise<FarmerRecord | null> {
     const result = await client.query<FarmerRow>(
-      `SELECT id, tenant_id, name, contact,
+      `SELECT id, tenant_id, name, contact, place,
               CASE WHEN bank_details_encrypted IS NULL THEN NULL
                    ELSE pgp_sym_decrypt(bank_details_encrypted, $2) END AS bank_details_decrypted,
               reliability_rating, status, version, created_at, updated_at, created_by
@@ -109,7 +111,7 @@ export class FarmersRepository {
     client: PoolClient,
     tenantId: string,
     createdBy: string,
-    fields: { name: string; contact: Record<string, unknown>; bankDetails?: BankDetails },
+    fields: { name: string; contact: Record<string, unknown>; bankDetails?: BankDetails; place?: string | null },
   ): Promise<FarmerRecord> {
     // Same shape regardless of whether bankDetails is present — a fixed
     // parameter count/order that doesn't depend on building the SQL text
@@ -118,13 +120,13 @@ export class FarmersRepository {
     // from silently misaligning params.
     const result = await client.query<FarmerRow>(
       `INSERT INTO trading_partners.farmer
-         (tenant_id, name, contact, bank_details_encrypted, created_by)
+         (tenant_id, name, contact, bank_details_encrypted, created_by, place)
        VALUES (
          $1, $2, $3,
          CASE WHEN $4::text IS NULL THEN NULL ELSE pgp_sym_encrypt($4, $5) END,
-         $6
+         $6, $7
        )
-       RETURNING id, tenant_id, name, contact, NULL AS bank_details_decrypted,
+       RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
                  reliability_rating, status, version, created_at, updated_at, created_by`,
       [
         tenantId,
@@ -133,6 +135,7 @@ export class FarmersRepository {
         fields.bankDetails ? JSON.stringify(fields.bankDetails) : null,
         this.encryptionKey,
         createdBy,
+        fields.place ?? null,
       ],
     );
     return toRecord(result.rows[0]);
@@ -147,6 +150,7 @@ export class FarmersRepository {
       contact: Record<string, unknown>;
       bankDetails: BankDetails;
       reliabilityRating: number;
+      place: string | null;
     }>,
   ): Promise<FarmerRecord> {
     const result = await client.query<FarmerRow>(
@@ -155,10 +159,11 @@ export class FarmersRepository {
          contact = COALESCE($4, contact),
          bank_details_encrypted = CASE WHEN $5::text IS NULL THEN bank_details_encrypted ELSE pgp_sym_encrypt($5, $6) END,
          reliability_rating = COALESCE($7, reliability_rating),
+         place = CASE WHEN $8::boolean THEN $9 ELSE place END,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
-       RETURNING id, tenant_id, name, contact, NULL AS bank_details_decrypted,
+       RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
                  reliability_rating, status, version, created_at, updated_at, created_by`,
       [
         id,
@@ -168,6 +173,8 @@ export class FarmersRepository {
         fields.bankDetails ? JSON.stringify(fields.bankDetails) : null,
         this.encryptionKey,
         fields.reliabilityRating,
+        fields.place !== undefined,
+        fields.place ?? null,
       ],
     );
     if (result.rowCount === 0) {
@@ -184,7 +191,7 @@ export class FarmersRepository {
     const result = await client.query<FarmerRow>(
       `UPDATE trading_partners.farmer SET status = $2, version = version + 1, updated_at = now()
        WHERE id = $1
-       RETURNING id, tenant_id, name, contact, NULL AS bank_details_decrypted,
+       RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
                  reliability_rating, status, version, created_at, updated_at, created_by`,
       [id, status],
     );

@@ -51,15 +51,31 @@ export class TripStopsRepository {
     client: PoolClient,
     tripId: string,
   ): Promise<Map<string, { party: StopParty | null; items: StopItem[]; collect: StopCollect | null }>> {
-    const parties = await client.query<{ stop_id: string; kind: 'customer' | 'farmer'; id: string; name: string; phone: string | null }>(
-      `SELECT s.id AS stop_id, 'customer' AS kind, c.id, c.name, c.contact->>'phone' AS phone
-       FROM fulfilment.trip_stop s JOIN commerce.customer_order o ON o.id = s.order_id JOIN trading_partners.customer c ON c.id = o.customer_id
-       WHERE s.trip_id = $1
-       UNION ALL
-       SELECT s.id, 'farmer', f.id, f.name, f.contact->>'phone'
-       FROM fulfilment.trip_stop s JOIN commerce.pickup p ON p.id = s.pickup_id
-       JOIN commerce.purchase_order po ON po.id = p.purchase_order_id JOIN trading_partners.farmer f ON f.id = po.farmer_id
-       WHERE s.trip_id = $1`,
+    const parties = await client.query<{
+      stop_id: string;
+      kind: 'customer' | 'farmer';
+      id: string;
+      name: string;
+      phone: string | null;
+      place: string | null;
+      address: string | null;
+      latitude: string | null;
+      longitude: string | null;
+      qr_token: string | null;
+    }>(
+      `SELECT x.*, pin.latitude::text AS latitude, pin.longitude::text AS longitude
+       FROM (
+         SELECT s.id AS stop_id, 'customer' AS kind, c.id, c.name, c.contact->>'phone' AS phone, c.place,
+                COALESCE(o.delivery_address, c.address) AS address, c.qr_token
+         FROM fulfilment.trip_stop s JOIN commerce.customer_order o ON o.id = s.order_id JOIN trading_partners.customer c ON c.id = o.customer_id
+         WHERE s.trip_id = $1
+         UNION ALL
+         SELECT s.id, 'farmer', f.id, f.name, f.contact->>'phone', f.place, NULL, NULL
+         FROM fulfilment.trip_stop s JOIN commerce.pickup p ON p.id = s.pickup_id
+         JOIN commerce.purchase_order po ON po.id = p.purchase_order_id JOIN trading_partners.farmer f ON f.id = po.farmer_id
+         WHERE s.trip_id = $1
+       ) x
+       LEFT JOIN fulfilment.place_pin pin ON pin.kind = x.kind AND pin.ref_id = x.id`,
       [tripId],
     );
     const items = await client.query<{
@@ -86,20 +102,34 @@ export class TripStopsRepository {
        ORDER BY 2`,
       [tripId],
     );
-    // What each delivery should bring in: cash customers (no credit days) pay the order's value at the door.
+    // What each delivery should bring in: on no credit days — the order's
+    // own credit term, else the customer's usual terms — the order's value
+    // is paid at the door.
     const collect = await client.query<{ stop_id: string; terms_days: number; amount: string }>(
-      `SELECT s.id AS stop_id, c.payment_terms_days AS terms_days,
+      `SELECT s.id AS stop_id, COALESCE(o.credit_term_days, c.payment_terms_days) AS terms_days,
               SUM(ol.quantity * ol.unit_price)::numeric(12,2)::text AS amount
        FROM fulfilment.trip_stop s JOIN commerce.customer_order o ON o.id = s.order_id
        JOIN trading_partners.customer c ON c.id = o.customer_id
        JOIN commerce.customer_order_line ol ON ol.order_id = o.id
        WHERE s.trip_id = $1
-       GROUP BY s.id, c.payment_terms_days`,
+       GROUP BY s.id, o.credit_term_days, c.payment_terms_days`,
       [tripId],
     );
     const out = new Map<string, { party: StopParty | null; items: StopItem[]; collect: StopCollect | null }>();
     const entry = (id: string) => out.get(id) ?? out.set(id, { party: null, items: [], collect: null }).get(id)!;
-    for (const r of parties.rows) entry(r.stop_id).party = { kind: r.kind, id: r.id, name: r.name, phone: r.phone };
+    for (const r of parties.rows) {
+      entry(r.stop_id).party = {
+        kind: r.kind,
+        id: r.id,
+        name: r.name,
+        phone: r.phone,
+        place: r.place,
+        address: r.address,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        qrToken: r.qr_token,
+      };
+    }
     for (const r of items.rows) {
       entry(r.stop_id).items.push({
         productName: r.product_name,
@@ -172,6 +202,17 @@ export class TripStopsRepository {
   async completeWithClient(client: PoolClient, id: string): Promise<TripStopRecord | null> {
     const result = await client.query<TripStopRow>(
       `UPDATE fulfilment.trip_stop SET status = 'completed', completed_at = now()
+       WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [id],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  /** The driver reached the stop: when — the first time only. */
+  async arriveWithClient(client: PoolClient, id: string): Promise<TripStopRecord | null> {
+    const result = await client.query<TripStopRow>(
+      `UPDATE fulfilment.trip_stop SET arrived_at = COALESCE(arrived_at, now())
        WHERE id = $1 AND status = 'pending'
        RETURNING *`,
       [id],

@@ -6,6 +6,7 @@ interface TripStopPhotoRow {
   id: string;
   trip_stop_id: string;
   photo_type: PhotoType;
+  product_id: string | null;
   storage_key: string;
   content_type: string;
   size_bytes: number;
@@ -18,6 +19,7 @@ function toRecord(row: TripStopPhotoRow): TripStopPhotoRecord {
     id: row.id,
     tripStopId: row.trip_stop_id,
     photoType: row.photo_type,
+    productId: row.product_id,
     storageKey: row.storage_key,
     contentType: row.content_type,
     sizeBytes: row.size_bytes,
@@ -58,16 +60,17 @@ export class TripStopPhotosRepository {
     fields: {
       tripStopId: string;
       photoType: PhotoType;
+      productId?: string | null;
       storageKey: string;
       contentType: string;
       sizeBytes: number;
     },
   ): Promise<TripStopPhotoRecord> {
     const result = await client.query<TripStopPhotoRow>(
-      `INSERT INTO fulfilment.trip_stop_photo (trip_stop_id, photo_type, storage_key, content_type, size_bytes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO fulfilment.trip_stop_photo (trip_stop_id, photo_type, product_id, storage_key, content_type, size_bytes, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [fields.tripStopId, fields.photoType, fields.storageKey, fields.contentType, fields.sizeBytes, createdBy],
+      [fields.tripStopId, fields.photoType, fields.productId ?? null, fields.storageKey, fields.contentType, fields.sizeBytes, createdBy],
     );
     return toRecord(result.rows[0]);
   }

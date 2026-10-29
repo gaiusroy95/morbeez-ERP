@@ -12,6 +12,9 @@ import { PayablesService } from '../finance/payables.service';
 import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
+import { ProcurementBoardRepository } from './repositories/procurement-board.repository';
+import { AgentRecord, ProcurementBoard, ProcurementBoardDay } from './entities/procurement-board.entity';
+import { CreateAgentDto } from './dto/procurement-board.dto';
 import { LotsRepository } from './repositories/lots.repository';
 import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
@@ -26,6 +29,8 @@ import { ReceiveGoodsDto } from './dto/receive-goods.dto';
 import { GradeLotDto } from './dto/grade-lot.dto';
 import { SettleFarmerDto } from './dto/settle-farmer.dto';
 import { AlertsRepository } from '../alerts/alerts.repository';
+import { freeOf, LotStockRepository } from './repositories/lot-stock.repository';
+import { fromMilli, minMilli, toMilli } from '../../common/quantity';
 
 const PO_ENTITY = 'purchase_order';
 const PICKUP_ENTITY = 'pickup';
@@ -42,6 +47,7 @@ export class ProcurementService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly purchaseOrders: PurchaseOrdersRepository,
+    private readonly board: ProcurementBoardRepository,
     private readonly pickups: PickupsRepository,
     private readonly lots: LotsRepository,
     private readonly farmers: FarmersService,
@@ -52,6 +58,7 @@ export class ProcurementService implements OnModuleInit {
     private readonly payables: PayablesService,
     private readonly audit: AuditService,
     private readonly alerts: AlertsRepository,
+    private readonly stock: LotStockRepository,
   ) {}
 
   /** A purchase order closes once every lot on it has been paid for, however the payment was made. */
@@ -59,6 +66,42 @@ export class ProcurementService implements OnModuleInit {
     this.payables.onLotsPaid((tenantId, actorUserId, lotIds) =>
       this.closePaidPurchaseOrders(tenantId, actorUserId, lotIds),
     );
+  }
+
+  // ---- The owner's Procurement list and agents (redesign V1.1) ----
+
+  getBoard(tenantId: string, day: ProcurementBoardDay, q: string | null, page: number, pageSize: number): Promise<ProcurementBoard> {
+    return this.db.withTenant(tenantId, (client) => this.board.board(client, day, q, page, pageSize));
+  }
+
+  listAgents(tenantId: string): Promise<AgentRecord[]> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const r = await client.query(
+        `SELECT id, name, phone, default_commission_per_kg::text AS commission, status FROM trading_partners.agent ORDER BY status, name`,
+      );
+      return r.rows.map((a) => ({ id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status }));
+    });
+  }
+
+  createAgent(tenantId: string, actorUserId: string, dto: CreateAgentDto): Promise<AgentRecord> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const r = await client.query(
+        `INSERT INTO trading_partners.agent (tenant_id, name, phone, default_commission_per_kg)
+         VALUES ($1, $2, $3, $4) RETURNING id, name, phone, default_commission_per_kg::text AS commission, status`,
+        [tenantId, dto.name.trim(), dto.phone?.trim() || null, dto.defaultCommissionPerKg ?? 0],
+      );
+      const a = r.rows[0];
+      const agent: AgentRecord = { id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status };
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'create',
+        entityType: 'agent',
+        entityId: agent.id,
+        after: agent as unknown as Record<string, unknown>,
+      });
+      return agent;
+    });
   }
 
   // ---- Purchase orders ----
@@ -78,30 +121,98 @@ export class ProcurementService implements OnModuleInit {
     return po;
   }
 
+  /**
+   * A purchase order, with its pickup plan (date, time, driver, vehicle),
+   * an optional agent and commission, and lines by the kilo or by the bag.
+   * With `confirm`, it's confirmed in the same step — the owner's "Save
+   * Procurement" (redesign V1.1) — and its pickup scheduled; an order over
+   * the approval limit waits for approval instead, and its pickup is
+   * scheduled once approved.
+   */
   async createPurchaseOrder(
     tenantId: string,
     actorUserId: string,
     dto: CreatePurchaseOrderDto,
   ): Promise<PurchaseOrderRecord> {
-    await this.farmers.getById(tenantId, dto.farmerId);
+    const farmer = await this.farmers.getById(tenantId, dto.farmerId);
+    if (farmer.status !== 'active') throw new ConflictException('This farmer is archived');
     for (const line of dto.lines) {
       await this.products.getById(tenantId, line.productId);
+      if ((line.bags === undefined) !== (line.kgPerBag === undefined)) {
+        throw new BadRequestException('A line bought by the bag needs both the bags and the kg in each bag');
+      }
+      if (line.bags !== undefined && Math.abs(line.bags * line.kgPerBag! - line.expectedQuantity) > 0.0005) {
+        throw new BadRequestException('A line bought by the bag must weigh bags × kg per bag');
+      }
     }
+    if (dto.vehicleId) await this.assertVehicleActive(tenantId, dto.vehicleId);
+    if (dto.driverEmployeeId) await this.assertEmployeeActive(tenantId, dto.driverEmployeeId);
+    if (dto.commissionPerKg !== undefined && !dto.agentId) throw new BadRequestException('A commission needs an agent');
+    if (dto.pickupTime && !dto.pickupDate) throw new BadRequestException('A pickup time needs a pickup date');
 
-    return this.db.withTenant(tenantId, async (client) => {
-      const po = await this.purchaseOrders.createWithClient(client, tenantId, actorUserId, {
+    const po = await this.db.withTenant(tenantId, async (client) => {
+      if (dto.agentId) {
+        const agent = await client.query<{ status: string }>('SELECT status FROM trading_partners.agent WHERE id = $1', [dto.agentId]);
+        if (!agent.rows[0]) throw new NotFoundException('Agent not found');
+        if (agent.rows[0].status !== 'active') throw new ConflictException('This agent is archived');
+      }
+      const created = await this.purchaseOrders.createWithClient(client, tenantId, actorUserId, {
         farmerId: dto.farmerId,
         lines: dto.lines,
+        pickupDate: dto.pickupDate ?? null,
+        pickupTime: dto.pickupTime ?? null,
+        plannedDriverId: dto.driverEmployeeId ?? null,
+        plannedVehicleId: dto.vehicleId ?? null,
+        agentId: dto.agentId ?? null,
+        commissionPerKg: dto.commissionPerKg ?? null,
+        notes: dto.notes?.trim() || null,
       });
       await this.audit.record(client, {
         tenantId,
         actorUserId,
         action: 'create',
         entityType: PO_ENTITY,
-        entityId: po.id,
-        after: po as unknown as Record<string, unknown>,
+        entityId: created.id,
+        after: created as unknown as Record<string, unknown>,
       });
-      return po;
+      return created;
+    });
+    if (!dto.confirm) return po;
+    const confirmed = await this.confirmPurchaseOrder(tenantId, actorUserId, po.id, { version: po.version });
+    if (confirmed.status === 'confirmed') await this.schedulePlannedPickup(tenantId, actorUserId, confirmed);
+    return this.getPurchaseOrder(tenantId, po.id);
+  }
+
+  /** Turns a confirmed order's pickup plan into a scheduled pickup, once (nothing to do without a plan). */
+  private async schedulePlannedPickup(tenantId: string, actorUserId: string, po: PurchaseOrderRecord): Promise<void> {
+    if (!po.pickupDate && !po.plannedDriverId && !po.plannedVehicleId) return;
+    await this.db.withTenant(tenantId, async (client) => {
+      const existing = await client.query('SELECT 1 FROM commerce.pickup WHERE purchase_order_id = $1 LIMIT 1', [po.id]);
+      if (existing.rowCount) return;
+      const at = po.pickupDate
+        ? (
+            await client.query<{ at: Date }>(
+              `SELECT (($1::date + COALESCE($2::time, '00:00'::time)) AT TIME ZONE t.timezone) AS at
+                 FROM tenant.tenant t WHERE t.id = current_tenant_id()`,
+              [po.pickupDate, po.pickupTime],
+            )
+          ).rows[0].at.toISOString()
+        : null;
+      const pickup = await this.pickups.createWithClient(client, tenantId, actorUserId, {
+        purchaseOrderId: po.id,
+        farmerId: po.farmerId,
+        vehicleId: po.plannedVehicleId,
+        driverEmployeeId: po.plannedDriverId,
+        scheduledAt: at,
+      });
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'create',
+        entityType: PICKUP_ENTITY,
+        entityId: pickup.id,
+        after: pickup as unknown as Record<string, unknown>,
+      });
     });
   }
 
@@ -144,7 +255,7 @@ export class ProcurementService implements OnModuleInit {
     return this.db.withTenant(tenantId, async (client) => {
       const after = evaluation.required
         ? await this.purchaseOrders.setApprovalRequestWithClient(client, id, before.version, evaluation.request.id)
-        : await this.purchaseOrders.confirmWithClient(client, id, before.version, dto.expectedDeliveryDate ?? null);
+        : await this.purchaseOrders.confirmWithClient(client, id, before.version, dto.expectedDeliveryDate ?? before.pickupDate ?? null);
 
       await this.audit.record(client, {
         tenantId,
@@ -173,10 +284,10 @@ export class ProcurementService implements OnModuleInit {
       throw new ConflictException('The approval decision is still pending');
     }
 
-    return this.db.withTenant(tenantId, async (client) => {
+    const finalized = await this.db.withTenant(tenantId, async (client) => {
       const after =
         request.status === 'approved'
-          ? await this.purchaseOrders.confirmWithClient(client, id, before.version, null)
+          ? await this.purchaseOrders.confirmWithClient(client, id, before.version, before.pickupDate)
           : await this.purchaseOrders.cancelWithClient(client, id, before.version);
 
       await this.audit.record(client, {
@@ -190,6 +301,8 @@ export class ProcurementService implements OnModuleInit {
       });
       return after;
     });
+    if (finalized.status === 'confirmed') await this.schedulePlannedPickup(tenantId, actorUserId, finalized);
+    return finalized;
   }
 
   cancelPurchaseOrder(tenantId: string, actorUserId: string, id: string, dto: VersionDto): Promise<PurchaseOrderRecord> {
@@ -390,6 +503,114 @@ export class ProcurementService implements OnModuleInit {
     });
   }
 
+  /**
+   * A farm stop on a trip (driver app D0; the client's answer 1: the owner
+   * sets the price). Each product is weighed and accepted or rejected at
+   * the farm: the lot is graded there and then at the purchase order's
+   * rate, its accepted kilos go onto the trip's vehicle, and the farmer is
+   * owed for them at once. What was rejected stays at the farm.
+   */
+  async acceptAtFarm(
+    tenantId: string,
+    actorUserId: string,
+    purchaseOrderId: string,
+    input: {
+      pickupId: string;
+      tripId: string;
+      vehicleId: string;
+      lines: { productId: string; acceptedQuantity: number; rejectedQuantity: number; rejectionReason: string | null }[];
+    },
+  ): Promise<LotRecord[]> {
+    const po = await this.getPurchaseOrder(tenantId, purchaseOrderId);
+    if (po.status !== 'confirmed') {
+      throw new ConflictException('Goods can only be received against a confirmed purchase order');
+    }
+    const rates = new Map((po.lines ?? []).map((line) => [line.productId, line.indicativePrice]));
+    for (const line of input.lines) {
+      if (!rates.has(line.productId)) {
+        throw new BadRequestException(`Product ${line.productId} is not one of this purchase order's lines`);
+      }
+    }
+    const weighed = input.lines.filter((line) => line.acceptedQuantity + line.rejectedQuantity > 0);
+    if (weighed.length === 0) return [];
+
+    return this.db.withTenant(tenantId, async (client) => {
+      const vehicleLocationId = await this.stock.vehicleLocationWithClient(client, tenantId, actorUserId, input.vehicleId);
+      const lots: LotRecord[] = [];
+      for (const line of weighed) {
+        const received = await this.lots.createWithClient(client, tenantId, actorUserId, {
+          purchaseOrderId,
+          farmerId: po.farmerId,
+          productId: line.productId,
+          pickupId: input.pickupId,
+          receivedQuantity: Math.round((line.acceptedQuantity + line.rejectedQuantity) * 1000) / 1000,
+        });
+        const accepted = line.acceptedQuantity > 0;
+        const lot = await this.lots.gradeWithClient(client, received.id, received.version, actorUserId, {
+          acceptedQuantity: line.acceptedQuantity,
+          rejectedQuantity: line.rejectedQuantity,
+          grade: null,
+          rejectionReason: line.rejectionReason,
+          unitCost: accepted ? Number(rates.get(line.productId)) : null,
+        });
+        await this.audit.record(client, {
+          tenantId,
+          actorUserId,
+          action: 'create',
+          entityType: LOT_ENTITY,
+          entityId: lot.id,
+          after: { ...lot, acceptedAtFarm: true, tripId: input.tripId } as unknown as Record<string, unknown>,
+        });
+        if (accepted && lot.currentQuantity) {
+          await this.stock.createWithClient(client, tenantId, {
+            lotId: lot.id,
+            productId: lot.productId,
+            locationId: vehicleLocationId,
+            quantity: lot.currentQuantity,
+          });
+          await this.stock.insertMovementWithClient(client, tenantId, actorUserId, {
+            lotId: lot.id,
+            productId: lot.productId,
+            type: 'picked_up',
+            quantity: lot.currentQuantity,
+            toLocationId: vehicleLocationId,
+            tripId: input.tripId,
+          });
+        }
+        if (accepted && lot.acceptedQuantity && lot.unitCost && lot.gradedAt) {
+          await this.payables.accrueLotPayableWithClient(client, tenantId, actorUserId, {
+            lotId: lot.id,
+            farmerId: lot.farmerId,
+            acceptedQuantity: lot.acceptedQuantity,
+            unitCost: lot.unitCost,
+            gradedAt: lot.gradedAt,
+          });
+        }
+        await this.breakageAlertWithClient(client, tenantId, lot.id);
+        lots.push(lot);
+      }
+
+      const poBefore = await this.purchaseOrders.findByIdWithClient(client, purchaseOrderId);
+      if (!poBefore) throw new NotFoundException('Purchase order not found');
+      const poAfter = await this.purchaseOrders.markReceivedWithClient(client, purchaseOrderId, poBefore.version);
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: PO_ENTITY,
+        entityId: purchaseOrderId,
+        before: poBefore as unknown as Record<string, unknown>,
+        after: poAfter as unknown as Record<string, unknown>,
+      });
+      await this.maybeMarkPurchaseOrderGraded(client, tenantId, actorUserId, purchaseOrderId);
+      await this.closeIfPaidWithClient(client, tenantId, actorUserId, purchaseOrderId);
+
+      const out: LotRecord[] = [];
+      for (const lot of lots) out.push((await this.lots.findByIdWithClient(client, lot.id)) as LotRecord);
+      return out;
+    });
+  }
+
   async gradeLot(tenantId: string, actorUserId: string, id: string, dto: GradeLotDto): Promise<LotRecord> {
     return this.db.withTenant(tenantId, async (client) => {
       const before = await this.lots.findByIdWithClient(client, id);
@@ -423,6 +644,11 @@ export class ProcurementService implements OnModuleInit {
         before: before as unknown as Record<string, unknown>,
         after: after as unknown as Record<string, unknown>,
       });
+
+      // What was accepted is stock now, in the store.
+      if (!fullyRejected && after.currentQuantity) {
+        await this.stock.createWithClient(client, tenantId, { lotId: after.id, productId: after.productId, locationId: null, quantity: after.currentQuantity });
+      }
 
       // The cost is fixed now (LOT.2), so it's owed: posted in this same
       // transaction, so a graded lot and its payable exist together or not at all.
@@ -565,119 +791,6 @@ export class ProcurementService implements OnModuleInit {
     });
   }
 
-  // ---- Stock reservation (called by Orders — Constitution I.3-I.4: the
-  // public service API is how another bounded context claims stock, never
-  // a direct import of LotsRepository) ----
-
-  /**
-   * Claims whole available lots for this product, oldest received_at
-   * first, until `quantity` is covered — never a fraction of one lot
-   * (see the migration comment on commerce.lot.reserved_for_order_line_id).
-   * All-or-nothing: if the product's available lots can't cover the
-   * requested quantity, every reservation attempted in this call rolls
-   * back (the throw inside db.withTenant's work callback triggers
-   * DatabaseService.transaction's ROLLBACK) rather than leaving a partial
-   * claim for the caller to unwind.
-   */
-  async reserveLotsForOrderLine(
-    tenantId: string,
-    actorUserId: string,
-    fields: { orderLineId: string; productId: string; quantity: number },
-  ): Promise<LotRecord[]> {
-    return this.db.withTenant(tenantId, (client) => this.reserveLotsForOrderLineWithClient(client, tenantId, actorUserId, fields));
-  }
-
-  /** The same, inside the caller's transaction — so a whole order reserves or nothing does (Performance Audit PA-03). */
-  async reserveLotsForOrderLineWithClient(
-    client: PoolClient,
-    tenantId: string,
-    actorUserId: string,
-    fields: { orderLineId: string; productId: string; quantity: number },
-  ): Promise<LotRecord[]> {
-    const candidates = await this.lots.lockForQuantityWithClient(client, tenantId, fields.productId, fields.quantity);
-
-    const claimed: LotRecord[] = [];
-    let remaining = fields.quantity;
-    for (const lot of candidates) {
-      if (remaining <= 0) break;
-
-      const after = await this.lots.reserveWithClient(client, lot.id, lot.version, fields.orderLineId);
-      await this.audit.record(client, {
-        tenantId,
-        actorUserId,
-        action: 'update',
-        entityType: LOT_ENTITY,
-        entityId: lot.id,
-        before: lot as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-      });
-      claimed.push(after);
-      remaining -= Number(lot.currentQuantity ?? 0);
-    }
-
-    if (remaining > 0) {
-      throw new ConflictException(
-        `Insufficient available stock for product ${fields.productId}: short by ${remaining}`,
-      );
-    }
-    return claimed;
-  }
-
-  /** Reverses reserveLotsForOrderLine — every lot it claimed goes back to 'available'. */
-  async releaseLotsForOrderLine(tenantId: string, actorUserId: string, orderLineId: string): Promise<void> {
-    await this.db.withTenant(tenantId, async (client) => {
-      const reserved = await this.lots.listReservedForOrderLineWithClient(client, orderLineId);
-      for (const lot of reserved) {
-        const after = await this.lots.releaseWithClient(client, lot.id, lot.version);
-        await this.audit.record(client, {
-          tenantId,
-          actorUserId,
-          action: 'update',
-          entityType: LOT_ENTITY,
-          entityId: lot.id,
-          before: lot as unknown as Record<string, unknown>,
-          after: after as unknown as Record<string, unknown>,
-        });
-      }
-    });
-  }
-
-  /**
-   * Called by Orders once an order is delivered: its reserved lots have
-   * left the warehouse. They move to 'delivered' and keep their link to the
-   * order line, which is how cost of goods finds them.
-   */
-  /**
-   * The goods have left: every lot reserved for this order line moves to
-   * 'delivered'. Runs inside Orders' delivery transaction and returns the
-   * line's cost of goods for Finance to recognise: quantity delivered x the
-   * quantity-weighted unit cost of the lots reserved for it (Accounting
-   * Engine, LOT.1/LOT.3), or null when none of those lots carries a cost.
-   */
-  async consumeLotsForOrderLineWithClient(
-    client: PoolClient,
-    tenantId: string,
-    actorUserId: string,
-    orderLineId: string,
-    deliveredQuantity: string,
-  ): Promise<string | null> {
-    const lots = await this.lots.listReservedForOrderLineWithClient(client, orderLineId);
-    const cost = await this.lots.lineCostWithClient(client, orderLineId, deliveredQuantity);
-    for (const lot of lots.filter((l) => l.status === 'reserved')) {
-      const after = await this.lots.consumeWithClient(client, lot.id, lot.version);
-      await this.audit.record(client, {
-        tenantId,
-        actorUserId,
-        action: 'update',
-        entityType: LOT_ENTITY,
-        entityId: lot.id,
-        before: lot as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-      });
-    }
-    return cost;
-  }
-
   /** Stock for every product in one read — for Inventory's overview. */
   stockByProduct(tenantId: string): Promise<ProductStockRow[]> {
     return this.lots.stockByProduct(tenantId);
@@ -734,6 +847,12 @@ export class ProcurementService implements OnModuleInit {
     return this.drawDown(tenantId, actorUserId, lotId, expectedVersion, quantity, 'rejected');
   }
 
+  /**
+   * Writes off kilos of a lot that are free in the store (stock lost or
+   * found bad there). Kilos held for orders, or out on a vehicle, aren't
+   * touched: a reservation is let go by its order, and a vehicle's stock
+   * is counted when its trip is closed.
+   */
   private async drawDown(
     tenantId: string,
     actorUserId: string,
@@ -743,20 +862,31 @@ export class ProcurementService implements OnModuleInit {
     terminalStatus: 'available' | 'rejected',
   ): Promise<LotRecord> {
     return this.db.withTenant(tenantId, async (client) => {
-      const before = await this.lots.findByIdWithClient(client, lotId);
-      if (!before) throw new NotFoundException('Lot not found');
+      const found = await this.lots.findByIdWithClient(client, lotId);
+      if (!found) throw new NotFoundException('Lot not found');
+      const before = await this.lots.lockWithClient(client, lotId, expectedVersion);
       if (before.status !== 'available') {
-        throw new ConflictException(
-          `Cannot adjust a lot in status '${before.status}' — release any reservation on it first`,
-        );
+        throw new ConflictException(`Cannot adjust a lot in status '${before.status}'`);
       }
-      if (quantity <= 0 || quantity > Number(before.currentQuantity ?? 0)) {
+      const places = await this.stock.inStoreForLotWithClient(client, lotId);
+      const free = places.reduce((n, b) => n + freeOf(b), 0n);
+      let left = toMilli(quantity.toFixed(3));
+      if (left <= 0n || left > free) {
         throw new BadRequestException(
-          `quantity must be positive and at most the lot's current quantity (${before.currentQuantity})`,
+          `quantity must be positive and at most what's free of this lot in the store (${fromMilli(free)})`,
         );
       }
+      for (const b of places) {
+        const take = minMilli(freeOf(b), left);
+        if (take <= 0n) continue;
+        const done = await this.stock.takeWithClient(client, tenantId, b, { quantity: fromMilli(take), fromReserved: '0', orderLineId: null, sold: false });
+        if (!done) throw new OptimisticLockException('Lot', lotId);
+        left -= take;
+        if (left <= 0n) break;
+      }
+      if (terminalStatus === 'rejected') await this.lots.markEmptyAsWithClient(client, lotId, 'rejected');
 
-      const after = await this.lots.drawDownWithClient(client, lotId, expectedVersion, quantity, terminalStatus);
+      const after = (await this.lots.findByIdWithClient(client, lotId)) as LotRecord;
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -770,22 +900,35 @@ export class ProcurementService implements OnModuleInit {
     });
   }
 
-  /** Moves an available lot to a new location — Inventory validates the location itself before calling this. */
+  /**
+   * Moves a lot's kilos in the store to a new location (a warehouse, or a
+   * vehicle to sell from) — Inventory validates the location itself before
+   * calling this. Kilos already out on a vehicle stay where they are.
+   * Returns where each part came from, for Inventory's movement record.
+   */
   async transferLot(
     tenantId: string,
     actorUserId: string,
     lotId: string,
     expectedVersion: number,
     toLocationId: string,
-  ): Promise<LotRecord> {
+  ): Promise<{ lot: LotRecord; moves: { fromLocationId: string | null; quantity: string }[] }> {
     return this.db.withTenant(tenantId, async (client) => {
-      const before = await this.lots.findByIdWithClient(client, lotId);
-      if (!before) throw new NotFoundException('Lot not found');
+      const found = await this.lots.findByIdWithClient(client, lotId);
+      if (!found) throw new NotFoundException('Lot not found');
+      const before = await this.lots.lockWithClient(client, lotId, expectedVersion);
       if (before.status !== 'available') {
         throw new ConflictException(`Cannot transfer a lot in status '${before.status}'`);
       }
+      const moves: { fromLocationId: string | null; quantity: string }[] = [];
+      for (const b of await this.stock.inStoreForLotWithClient(client, lotId)) {
+        if (b.locationId === toLocationId) continue;
+        await this.stock.moveWithClient(client, tenantId, b, b.quantity, toLocationId, null);
+        moves.push({ fromLocationId: b.locationId, quantity: b.quantity });
+      }
+      if (moves.length === 0) throw new BadRequestException('Nothing of this lot is in the store to move there');
 
-      const after = await this.lots.transferWithClient(client, lotId, expectedVersion, toLocationId);
+      const after = await this.lots.touchWithClient(client, lotId);
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -793,9 +936,9 @@ export class ProcurementService implements OnModuleInit {
         entityType: LOT_ENTITY,
         entityId: lotId,
         before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
+        after: { ...after, moves } as unknown as Record<string, unknown>,
       });
-      return after;
+      return { lot: after, moves };
     });
   }
 }

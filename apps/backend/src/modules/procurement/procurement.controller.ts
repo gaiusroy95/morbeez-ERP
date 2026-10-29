@@ -19,6 +19,8 @@ import { SettleFarmerDto } from './dto/settle-farmer.dto';
 import { PurchaseOrderRecord } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
 import { LotRecord } from './entities/lot.entity';
+import { AgentRecord, ProcurementBoard } from './entities/procurement-board.entity';
+import { CreateAgentDto, ProcurementBoardQueryDto } from './dto/procurement-board.dto';
 import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 
 @ApiTags('procurement')
@@ -27,6 +29,25 @@ import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finan
 @Controller('procurement')
 export class ProcurementController {
   constructor(private readonly procurementService: ProcurementService) {}
+
+  /** The owner's Procurement list: one card per order, for today, tomorrow or all days, with search. */
+  @Get('board')
+  @RequirePermissions('procurement:read')
+  board(@CurrentUser() user: AuthContext, @Query() query: ProcurementBoardQueryDto): Promise<ProcurementBoard> {
+    return this.procurementService.getBoard(user.tenantId, query.day ?? 'today', query.q ?? null, query.page ?? 1, query.pageSize ?? 50);
+  }
+
+  @Get('agents')
+  @RequirePermissions('procurement:read')
+  agents(@CurrentUser() user: AuthContext): Promise<AgentRecord[]> {
+    return this.procurementService.listAgents(user.tenantId);
+  }
+
+  @Post('agents')
+  @RequirePermissions('procurement:write')
+  createAgent(@CurrentUser() user: AuthContext, @Body() dto: CreateAgentDto): Promise<AgentRecord> {
+    return this.procurementService.createAgent(user.tenantId, user.userId, dto);
+  }
 
   // ---- Purchase orders ----
 

@@ -1,6 +1,8 @@
 import { Test } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { UsersService } from './users.service';
+import { maskPhone, UsersService } from './users.service';
+import { DatabaseService } from '../../infra/database/database.service';
+import { PasswordSetupRepository } from './repositories/password-setup.repository';
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
 import { AuthSessionsRepository } from './repositories/auth-sessions.repository';
@@ -46,6 +48,8 @@ describe('UsersService', () => {
           provide: AuthSessionsRepository,
           useValue: { revokeAllForUser: jest.fn() },
         },
+        { provide: DatabaseService, useValue: { withTenant: jest.fn(), query: jest.fn() } },
+        { provide: PasswordSetupRepository, useValue: {} },
         {
           provide: PasswordService,
           useValue: { hash: jest.fn(), verify: jest.fn() },
@@ -125,5 +129,11 @@ describe('UsersService', () => {
       'new-hashed-value',
     );
     expect(sessionsRepo.revokeAllForUser).toHaveBeenCalledWith('tenant-1', 'user-1');
+  });
+});
+
+describe('maskPhone', () => {
+  it('keeps the first two and last three digits of a mobile number', () => {
+    expect(maskPhone('+919845012345')).toBe('+91 98•••••345');
   });
 });

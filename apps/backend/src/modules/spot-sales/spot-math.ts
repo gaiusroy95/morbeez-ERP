@@ -4,6 +4,9 @@
 // Money in paise, quantities in thousandths, never floats.
 
 import { fromCents, toCents } from '../../common/money';
+import { fromMilli, toMilli } from '../../common/quantity';
+
+export { fromMilli, toMilli };
 
 export type BandSource = 'band' | 'default' | 'none';
 export type PriceException = 'below_band' | 'above_band' | 'no_band' | 'below_cost';
@@ -21,16 +24,6 @@ function bps(rate: string): bigint {
 }
 
 const halfUp = (num: bigint, den: bigint) => (num * 2n + den) / (den * 2n);
-
-/** Quantity with up to 3 dp → thousandths. */
-export function toMilli(q: string): bigint {
-  const [w, f = ''] = q.split('.');
-  return BigInt(w || '0') * 1000n + BigInt((f + '000').slice(0, 3));
-}
-
-export function fromMilli(m: bigint): string {
-  return `${m / 1000n}.${(m % 1000n).toString().padStart(3, '0')}`;
-}
 
 /** quantity × unit price, half-up to the paisa. */
 export function lineValue(quantity: string, unitPrice: string): string {
@@ -82,7 +75,9 @@ export function judgeLine(
 
 export interface VehicleLot {
   lotId: string;
-  quantity: string; // what's left in it
+  /** The part of the lot on the vehicle (stock.lot_balance) — a lot can be there in more than one part. */
+  balanceId?: string;
+  quantity: string; // what's free in it
   unitCost: string;
   receivedAt: string; // ISO — oldest goes first
 }
@@ -91,16 +86,19 @@ export interface VehicleLot {
  * Which lots a quantity comes from: oldest received first, whole lots
  * before the next is touched. Null when the vehicle doesn't hold enough.
  */
-export function planDraw(lots: VehicleLot[], quantity: string): { draws: { lotId: string; quantity: string; unitCost: string }[]; cost: string } | null {
+export function planDraw(
+  lots: VehicleLot[],
+  quantity: string,
+): { draws: { lotId: string; balanceId?: string; quantity: string; unitCost: string }[]; cost: string } | null {
   let left = toMilli(quantity);
-  const draws: { lotId: string; quantity: string; unitCost: string }[] = [];
+  const draws: { lotId: string; balanceId?: string; quantity: string; unitCost: string }[] = [];
   let costNum = 0n; // paise × thousandths
   for (const lot of [...lots].sort((a, b) => (a.receivedAt < b.receivedAt ? -1 : a.receivedAt > b.receivedAt ? 1 : 0))) {
     if (left === 0n) break;
     const have = toMilli(lot.quantity);
     if (have <= 0n) continue;
     const take = have < left ? have : left;
-    draws.push({ lotId: lot.lotId, quantity: fromMilli(take), unitCost: lot.unitCost });
+    draws.push({ lotId: lot.lotId, balanceId: lot.balanceId, quantity: fromMilli(take), unitCost: lot.unitCost });
     costNum += take * toCents(lot.unitCost);
     left -= take;
   }

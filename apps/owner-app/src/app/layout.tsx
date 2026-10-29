@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
+import './redesign.css';
 import { cookies } from 'next/headers';
 import { Providers } from './providers';
 import { isLang, LANG_COOKIE } from '@/lib/i18n/langs';

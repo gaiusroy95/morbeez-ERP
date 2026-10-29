@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import { ObjectStorageService } from '../../infra/storage/object-storage.service';
 import { PoolClient } from 'pg';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { LogisticsService } from './logistics.service';
+import { closingStockOf, LogisticsService, mondayOf, quantitiesOf } from './logistics.service';
 import { TripsRepository } from './repositories/trips.repository';
 import { TripStopsRepository } from './repositories/trip-stops.repository';
 import { TripExpensesRepository } from './repositories/trip-expenses.repository';
@@ -30,6 +30,12 @@ import { VehicleRecord } from '../vehicles/entities/vehicle.entity';
 import { EmployeeRecord } from '../workforce/entities/employee.entity';
 import { PickupRecord } from '../procurement/entities/pickup.entity';
 import { OrderRecord } from '../orders/entities/customer-order.entity';
+import { RoutesService } from '../routes/routes.service';
+import { TripPlanningRepository } from './repositories/trip-planning.repository';
+import { LotStockService } from '../procurement/lot-stock.service';
+import { FarmStopsRepository } from './repositories/farm-stops.repository';
+import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
+import { CratesService } from '../crates/crates.service';
 
 const storage = { put: jest.fn().mockResolvedValue(undefined) };
 
@@ -69,12 +75,20 @@ const baseDriver: EmployeeRecord = {
 const baseTrip: TripRecord = {
   id: 'trip-1',
   tenantId: 'tenant-1',
+  number: 'T-20261028-001',
+  routeId: null,
   vehicleId: 'vehicle-1',
   driverEmployeeId: 'employee-1',
+  packerEmployeeId: null,
+  loaderEmployeeId: null,
   status: 'planned',
   plannedDate: null,
   advanceAmount: '500',
   startedAt: null,
+  openingKm: null,
+  startLatitude: null,
+  startLongitude: null,
+  deliveryStartedAt: null,
   completedAt: null,
   submittedBy: null,
   cashDeclared: null,
@@ -117,6 +131,15 @@ const basePickup: PickupRecord = {
 const baseOrder: OrderRecord = {
   id: 'order-1',
   tenantId: 'tenant-1',
+  number: 1,
+  deliveryDate: null,
+  deliveryTime: null,
+  routeId: null,
+  plannedDriverId: null,
+  plannedVehicleId: null,
+  deliveryAddress: null,
+  creditTermDays: null,
+  notes: null,
   customerId: 'customer-1',
   status: 'confirmed',
   approvalRequestId: null,
@@ -159,8 +182,14 @@ describe('LogisticsService', () => {
   let workforce: jest.Mocked<WorkforceService>;
   let procurement: jest.Mocked<ProcurementService>;
   let orders: jest.Mocked<OrdersService>;
+  let planning: jest.Mocked<TripPlanningRepository>;
+  let lotStock: jest.Mocked<LotStockService>;
   let receivables: jest.Mocked<ReceivablesService>;
   let ledger: jest.Mocked<LedgerService>;
+  let farmStops: jest.Mocked<FarmStopsRepository>;
+  let deliveries: jest.Mocked<DeliveryStopsRepository>;
+  let crates: { listTypes: jest.Mock; stopCountsProblemWithClient: jest.Mock; recordStopCountsWithClient: jest.Mock };
+  let payroll: { recordTripWorkWithClient: jest.Mock; recordLoadingWorkWithClient: jest.Mock };
 
   beforeEach(async () => {
     measures = { lineFactsWithClient: jest.fn().mockResolvedValue([]), insertWithClient: jest.fn() };
@@ -182,6 +211,7 @@ describe('LogisticsService', () => {
             findByIdWithClient: jest.fn(),
             createWithClient: jest.fn(),
             startWithClient: jest.fn(),
+            startDeliveriesWithClient: jest.fn(),
             completeWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
             markReconciledWithClient: jest.fn(),
@@ -199,6 +229,7 @@ describe('LogisticsService', () => {
             createWithClient: jest.fn(),
             completeWithClient: jest.fn(),
             skipWithClient: jest.fn(),
+            arriveWithClient: jest.fn(),
             countPendingWithClient: jest.fn(),
             countWithClient: jest.fn(),
           },
@@ -234,15 +265,74 @@ describe('LogisticsService', () => {
         { provide: WorkforceService, useValue: { getById: jest.fn(), getEmployeeIdForUser: jest.fn() } },
         {
           provide: ProcurementService,
-          useValue: { getPickup: jest.fn(), completePickup: jest.fn() },
+          useValue: { getPickup: jest.fn(), completePickup: jest.fn(), acceptAtFarm: jest.fn() },
         },
         { provide: OrdersService, useValue: { getOrder: jest.fn(), markDelivered: jest.fn() } },
         { provide: ReceivablesService, useValue: { recordCollectionPaymentWithClient: jest.fn() } },
-        { provide: PayrollService, useValue: { recordTripWorkWithClient: jest.fn() } },
+        { provide: PayrollService, useValue: { recordTripWorkWithClient: jest.fn(), recordLoadingWorkWithClient: jest.fn() } },
+        {
+          provide: DeliveryStopsRepository,
+          useValue: {
+            factsWithClient: jest.fn().mockResolvedValue({
+              qrToken: 'ABCD1234EF567890',
+              customerName: 'Hotel Sagar',
+              lines: [{ id: 'line-1', productName: 'Tomato', quantity: '350.000' }],
+            }),
+            insertShortfallsWithClient: jest.fn(),
+            outcomesForTripWithClient: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
+        {
+          provide: CratesService,
+          useValue: {
+            listTypes: jest.fn().mockResolvedValue([]),
+            stopCountsProblemWithClient: jest.fn().mockResolvedValue(null),
+            recordStopCountsWithClient: jest.fn(),
+          },
+        },
+        {
+          provide: FarmStopsRepository,
+          useValue: {
+            poProductsWithClient: jest.fn().mockResolvedValue([
+              { productId: 'p-onion', name: 'Onion', uom: 'kg' },
+              { productId: 'p-tomato', name: 'Tomato', uom: 'kg' },
+              { productId: 'p-ginger', name: 'Ginger', uom: 'kg' },
+            ]),
+            activeWorkersWithClient: jest.fn().mockResolvedValue(new Map([['worker-1', 'Suresh'], ['worker-2', 'Ramesh']])),
+            farmerNameWithClient: jest.fn().mockResolvedValue('Green Valley Farm'),
+            insertLinesWithClient: jest.fn(),
+            setCrewWithClient: jest.fn(),
+            outcomesForTripWithClient: jest.fn().mockResolvedValue(new Map()),
+            crewOptionsWithClient: jest.fn().mockResolvedValue([]),
+          },
+        },
         { provide: FleetService, useValue: { assertRoadworthyWithClient: jest.fn() } },
         { provide: DelegationService, useValue: delegation },
         { provide: DeliveryMeasuresRepository, useValue: measures },
         { provide: AlertsRepository, useValue: alertsRepo },
+        { provide: RoutesService, useValue: { assertUsable: jest.fn() } },
+        {
+          provide: TripPlanningRepository,
+          useValue: {
+            todayWithClient: jest.fn().mockResolvedValue('2026-10-28'),
+            activeTripOfOrderWithClient: jest.fn().mockResolvedValue(null),
+            activeTripOfPickupWithClient: jest.fn().mockResolvedValue(null),
+            routePositionsWithClient: jest.fn().mockResolvedValue(new Map()),
+            quantitiesWithClient: jest.fn().mockResolvedValue([]),
+            pendingDeliveryLineIdsWithClient: jest.fn().mockResolvedValue(['line-1', 'line-2']),
+            lastOdometerWithClient: jest.fn().mockResolvedValue('48620.0'),
+            laterTripOnVehicleWithClient: jest.fn().mockResolvedValue(null),
+          },
+        },
+        {
+          provide: LotStockService,
+          useValue: {
+            loadOrderLinesWithClient: jest.fn(),
+            carryOverWithClient: jest.fn().mockResolvedValue('0.000'),
+            vehicleStockWithClient: jest.fn().mockResolvedValue([]),
+            returnFromVehicleWithClient: jest.fn().mockResolvedValue([]),
+          },
+        },
         {
           provide: LedgerService,
           useValue: {
@@ -271,8 +361,14 @@ describe('LogisticsService', () => {
     workforce = module.get(WorkforceService);
     procurement = module.get(ProcurementService);
     orders = module.get(OrdersService);
+    planning = module.get(TripPlanningRepository);
+    lotStock = module.get(LotStockService);
     receivables = module.get(ReceivablesService);
     ledger = module.get(LedgerService);
+    farmStops = module.get(FarmStopsRepository);
+    deliveries = module.get(DeliveryStopsRepository);
+    crates = module.get(CratesService);
+    payroll = module.get(PayrollService);
   });
 
   it('is defined', () => {
@@ -286,6 +382,81 @@ describe('LogisticsService', () => {
     await expect(
       service.createTrip('tenant-1', 'user-1', { vehicleId: 'vehicle-1', driverEmployeeId: 'employee-1' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("createTrip numbers the trip for its day and makes its stops in the route's visiting order", async () => {
+    vehicles.getById.mockResolvedValue(baseVehicle);
+    workforce.getById.mockResolvedValue(baseDriver);
+    orders.getOrder.mockImplementation(async (_t, id) => ({ ...baseOrder, id, customerId: `customer-${id}`, status: 'confirmed' }));
+    procurement.getPickup.mockResolvedValue(basePickup);
+    trips.createWithClient.mockImplementation(async (_c, _t, _u, fields) => ({ ...baseTrip, number: fields.number, routeId: fields.routeId ?? null, plannedDate: fields.plannedDate }));
+    stops.createWithClient.mockImplementation(async (_c, f) => ({ id: `stop-${f.sequenceNumber}`, ...f }) as unknown as TripStopRecord);
+    // The route visits customer-b first, then the farmer, then customer-a.
+    planning.routePositionsWithClient.mockResolvedValue(new Map([['customer-b', 1], ['farmer-1', 2], ['customer-a', 3]]));
+    // The day's running number comes from the counter: the 7th trip today.
+    const counter = jest.fn().mockResolvedValue({ rows: [{ last_number: 7 }] });
+    Object.assign(fakeClient, { query: counter });
+
+    const trip = await service.createTrip('tenant-1', 'user-1', {
+      vehicleId: 'vehicle-1',
+      driverEmployeeId: 'employee-1',
+      plannedDate: '2026-10-28',
+      routeId: 'route-1',
+      orderIds: ['a', 'b', 'c'],
+      pickupIds: ['pickup-1'],
+    });
+
+    delete (fakeClient as { query?: unknown }).query;
+    expect(trip.number).toBe('T-20261028-007');
+    expect(counter).toHaveBeenCalledWith(expect.stringContaining('document_counter'), ['tenant-1', 'trip:2026-10-28']);
+    const made = stops.createWithClient.mock.calls.map(([, f]) => f.orderId ?? f.pickupId);
+    // On the route in its order; customer-c isn't on it, so it comes last.
+    expect(made).toEqual(['b', 'pickup-1', 'a', 'c']);
+    expect(stops.createWithClient.mock.calls.map(([, f]) => f.sequenceNumber)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("createTrip refuses an order that isn't confirmed, or is already on another trip", async () => {
+    vehicles.getById.mockResolvedValue(baseVehicle);
+    workforce.getById.mockResolvedValue(baseDriver);
+    orders.getOrder.mockResolvedValueOnce({ ...baseOrder, status: 'placed' });
+    await expect(
+      service.createTrip('tenant-1', 'user-1', { vehicleId: 'vehicle-1', driverEmployeeId: 'employee-1', orderIds: ['order-1'] }),
+    ).rejects.toThrow(/not confirmed/);
+
+    orders.getOrder.mockResolvedValue({ ...baseOrder, status: 'confirmed' });
+    planning.activeTripOfOrderWithClient.mockResolvedValueOnce('T-20261028-001');
+    await expect(
+      service.createTrip('tenant-1', 'user-1', { vehicleId: 'vehicle-1', driverEmployeeId: 'employee-1', orderIds: ['order-1'] }),
+    ).rejects.toThrow(/already on trip T-20261028-001/);
+    expect(trips.createWithClient).not.toHaveBeenCalled();
+  });
+
+  it('createTrip refuses the driver as their own packer or loader', async () => {
+    vehicles.getById.mockResolvedValue(baseVehicle);
+    workforce.getById.mockResolvedValue(baseDriver);
+    await expect(
+      service.createTrip('tenant-1', 'user-1', { vehicleId: 'vehicle-1', driverEmployeeId: 'employee-1', packerEmployeeId: 'employee-1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('the vehicle count at closing is checked against loaded + picked up − delivered − sold on the spot', () => {
+    const rows = [
+      { productId: 'p-tomato', product: 'Tomato', uom: 'kg', loaded: '100.000', procured: '50.000', delivered: '80.000', spotSold: '10.000', returned: '55.000', writtenOff: '5.000', toDeliver: '0.000', expected: '60.000' },
+      { productId: 'p-egg', product: 'Eggs', uom: 'piece', loaded: '30.000', procured: '0.000', delivered: '30.000', spotSold: '0.000', returned: '0.000', writtenOff: '0.000', toDeliver: '0.000', expected: '0.000' },
+    ];
+    const closing = closingStockOf(rows, [{ productId: 'p-tomato', quantity: 55 }]);
+    expect(closing).toEqual([
+      expect.objectContaining({ productId: 'p-tomato', expected: '60.000', counted: '55.000' }),
+      expect.objectContaining({ productId: 'p-egg', expected: '0.000', counted: '0.000' }),
+    ]);
+    const q = quantitiesOf(rows, closing);
+    expect(q.balanced).toBe(false);
+    expect(q.rows[0].difference).toBe('-5.000');
+    expect(q.totalsKg).toEqual(
+      expect.objectContaining({ loaded: '100.000', procured: '50.000', delivered: '80.000', spotSold: '10.000', expected: '60.000', counted: '55.000', writtenOff: '5.000' }),
+    );
+    expect(quantitiesOf(rows, null).balanced).toBeNull();
+    expect(() => closingStockOf(rows, [{ productId: 'p-other', quantity: 3 }])).toThrow(/is not on it/);
   });
 
   it('createTrip refuses an inactive vehicle', async () => {
@@ -365,6 +536,72 @@ describe('LogisticsService', () => {
     });
   });
 
+  it("Start Day records the opening KM and where the phone was", async () => {
+    trips.findById.mockResolvedValue(baseTrip);
+    stops.countWithClient.mockResolvedValue(2);
+    trips.startWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', version: 2 });
+
+    await service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1, openingKm: 48650, latitude: 12.31, longitude: 76.64, accuracyMeters: 8 });
+
+    expect(planning.lastOdometerWithClient).toHaveBeenCalledWith(fakeClient, 'vehicle-1', 'trip-1');
+    expect(trips.startWithClient).toHaveBeenCalledWith(fakeClient, 'trip-1', 1, { openingKm: 48650, latitude: 12.31, longitude: 76.64, accuracyMeters: 8 });
+  });
+
+  it("Start Day refuses an opening KM below the vehicle's last reading, and half a position", async () => {
+    trips.findById.mockResolvedValue(baseTrip);
+    stops.countWithClient.mockResolvedValue(2);
+
+    await expect(service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1, openingKm: 48600 })).rejects.toThrow(/below the vehicle's last reading, 48620 km/);
+    await expect(service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1, latitude: 12.3 })).rejects.toBeInstanceOf(BadRequestException);
+    expect(trips.startWithClient).not.toHaveBeenCalled();
+  });
+
+  it('a driver starts the trip planned for today, not one planned for later', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, plannedDate: '2026-10-29' });
+    stops.countWithClient.mockResolvedValue(2);
+    workforce.getEmployeeIdForUser.mockResolvedValue('employee-1');
+
+    await expect(service.startTrip('tenant-1', 'user-driver-1', false, 'trip-1', { version: 1 })).rejects.toThrow(/planned for 2026-10-29/);
+  });
+
+  it('pay settles weekly: the week runs from Monday', () => {
+    expect(mondayOf('2026-10-28')).toBe('2026-10-26'); // a Wednesday
+    expect(mondayOf('2026-10-26')).toBe('2026-10-26');
+    expect(mondayOf('2026-11-01')).toBe('2026-10-26'); // a Sunday
+  });
+
+  it("startTrip loads what's reserved for its deliveries onto the vehicle", async () => {
+    trips.findById.mockResolvedValue(baseTrip);
+    stops.countWithClient.mockResolvedValue(2);
+    trips.startWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', version: 2 });
+
+    await service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 });
+
+    expect(lotStock.loadOrderLinesWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', { id: 'trip-1', vehicleId: 'vehicle-1' }, [
+      'line-1',
+      'line-2',
+    ]);
+  });
+
+  it('startTrip takes on whatever an earlier trip left on the vehicle', async () => {
+    trips.findById.mockResolvedValue(baseTrip);
+    stops.countWithClient.mockResolvedValue(2);
+    trips.startWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', version: 2 });
+
+    await service.startTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 });
+
+    expect(lotStock.carryOverWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', { id: 'trip-1', vehicleId: 'vehicle-1' });
+  });
+
+  it('cancelling a trip on the road brings its vehicle stock back to the store', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    trips.cancelWithClient.mockResolvedValue({ ...baseTrip, status: 'cancelled', version: 2 });
+
+    await service.cancelTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 });
+
+    expect(lotStock.returnFromVehicleWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', { id: 'trip-1', vehicleId: 'vehicle-1' }, null, null);
+  });
+
   it('recordExpense posts the expense to its transport account', async () => {
     const recordedAt = new Date();
     trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
@@ -423,6 +660,226 @@ describe('LogisticsService', () => {
     });
   });
 
+  it('completePickupStop with farm weights accepts them at the farm onto the vehicle', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    workforce.getEmployeeIdForUser.mockResolvedValue('employee-1');
+    stops.findByIdWithClient.mockResolvedValue(makeStop({}));
+    procurement.getPickup.mockResolvedValue(basePickup);
+    stops.completeWithClient.mockResolvedValue(makeStop({ status: 'completed' }));
+
+    await service.completePickupStop('tenant-1', 'user-driver-1', false, 'trip-1', 'stop-1', {
+      weights: [
+        { productId: 'p-tomato', netQuantity: 985, rejectedQuantity: 15, rejectionReason: ' damaged ' },
+        { productId: 'p-onion', netQuantity: 120 },
+      ],
+    });
+
+    expect(procurement.acceptAtFarm).toHaveBeenCalledWith('tenant-1', 'user-driver-1', basePickup.purchaseOrderId, {
+      pickupId: 'pickup-1',
+      tripId: 'trip-1',
+      vehicleId: 'vehicle-1',
+      lines: [
+        { productId: 'p-tomato', acceptedQuantity: 985, rejectedQuantity: 15, rejectionReason: 'damaged' },
+        { productId: 'p-onion', acceptedQuantity: 120, rejectedQuantity: 0, rejectionReason: null },
+      ],
+    });
+  });
+
+  describe('the farmer stop (driver app D2)', () => {
+    const farmLines = [
+      { productId: 'p-tomato', outcome: 'accepted' as const, netQuantity: 480 },
+      { productId: 'p-onion', outcome: 'accepted' as const, measuredBy: 'bags' as const, sacks: 7, kgPerBag: 45 },
+      { productId: 'p-ginger', outcome: 'rejected' as const, reason: 'quality_issue' as const, note: ' soft ' },
+    ];
+
+    beforeEach(() => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      workforce.getEmployeeIdForUser.mockResolvedValue('employee-1');
+      stops.findByIdWithClient.mockResolvedValue(makeStop({}));
+      procurement.getPickup.mockResolvedValue(basePickup);
+      stops.completeWithClient.mockResolvedValue(makeStop({ status: 'completed' }));
+      procurement.acceptAtFarm.mockResolvedValue([
+        { id: 'lot-tomato', productId: 'p-tomato', acceptedQuantity: '480.000' },
+        { id: 'lot-onion', productId: 'p-onion', acceptedQuantity: '315.000' },
+      ] as never);
+    });
+
+    it('receives what was accepted (bags as sacks × kg a bag), keeps every line, credits the crew and tells the owner of the rejection', async () => {
+      await service.completePickupStop('tenant-1', 'user-driver-1', false, 'trip-1', 'stop-1', {
+        lines: farmLines,
+        packerEmployeeId: 'worker-1',
+        loaderEmployeeId: 'worker-2',
+      });
+
+      expect(procurement.acceptAtFarm).toHaveBeenCalledWith('tenant-1', 'user-driver-1', 'po-1', expect.objectContaining({
+        lines: [
+          { productId: 'p-tomato', acceptedQuantity: 480, rejectedQuantity: 0, rejectionReason: null },
+          { productId: 'p-onion', acceptedQuantity: 315, rejectedQuantity: 0, rejectionReason: null },
+          { productId: 'p-ginger', acceptedQuantity: 0, rejectedQuantity: 0, rejectionReason: 'Quality issue: soft' },
+        ],
+      }));
+      expect(farmStops.insertLinesWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'user-driver-1', 'stop-1', [
+        expect.objectContaining({ productId: 'p-tomato', acceptedQuantity: '480.000', lotId: 'lot-tomato' }),
+        expect.objectContaining({ productId: 'p-onion', acceptedQuantity: '315.000', measuredBy: 'bags', sacks: 7, kgPerBag: '45.000', lotId: 'lot-onion' }),
+        expect.objectContaining({ productId: 'p-ginger', outcome: 'rejected', reason: 'quality_issue', note: 'soft', lotId: null }),
+      ]);
+      expect(farmStops.setCrewWithClient).toHaveBeenCalledWith(expect.anything(), 'stop-1', 'worker-1', 'worker-2');
+      expect(payroll.recordLoadingWorkWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'user-driver-1', {
+        tripNumber: baseTrip.number,
+        workDate: '2026-10-28',
+        place: 'Green Valley Farm',
+        kg: '795.000',
+        packerId: 'worker-1',
+        loaderId: 'worker-2',
+      });
+      expect(alertsRepo.raiseWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', expect.objectContaining({
+        kind: 'procurement_issue',
+        title: 'Rejected at Green Valley Farm: Ginger',
+        dedupeKey: 'farm-rejected:stop-1',
+      }));
+    });
+
+    it('refuses to complete while a product is neither accepted nor rejected — before anything is received', async () => {
+      await expect(
+        service.completePickupStop('tenant-1', 'user-driver-1', false, 'trip-1', 'stop-1', { lines: farmLines.slice(0, 2) }),
+      ).rejects.toThrow('Ginger still open');
+      expect(procurement.completePickup).not.toHaveBeenCalled();
+      expect(procurement.acceptAtFarm).not.toHaveBeenCalled();
+    });
+
+    it("refuses a packer who isn't one of the business's active workers", async () => {
+      await expect(
+        service.completePickupStop('tenant-1', 'user-driver-1', false, 'trip-1', 'stop-1', { lines: farmLines, packerEmployeeId: 'stranger' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(procurement.completePickup).not.toHaveBeenCalled();
+    });
+
+    it('raises no alert when nothing was rejected', async () => {
+      await service.completePickupStop('tenant-1', 'user-driver-1', false, 'trip-1', 'stop-1', {
+        lines: [...farmLines.slice(0, 2), { productId: 'p-ginger', outcome: 'accepted', netQuantity: 190 }],
+      });
+      expect(alertsRepo.raiseWithClient).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the delivery checklist (driver app D3)", () => {
+    const tomatoOrder = {
+      ...baseOrder,
+      lines: [{ id: 'line-1', orderId: 'order-1', productId: 'p-tomato', quantity: '350.000', unitPrice: '30.00', deliveredQuantity: null }],
+    };
+
+    beforeEach(() => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+      orders.getOrder.mockResolvedValue(tomatoOrder);
+      stops.completeWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', status: 'completed' }));
+      photos.countByStopAndTypeWithClient.mockResolvedValue(1);
+    });
+
+    it("refuses another customer's QR before anything is delivered", async () => {
+      await expect(
+        service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', { recipientName: 'A', qrToken: 'MORBEEZ:C:FFFF0000FFFF0000', allUnloaded: true }),
+      ).rejects.toThrow("This QR isn't Hotel Sagar's");
+      expect(orders.markDelivered).not.toHaveBeenCalled();
+    });
+
+    it('refuses a delivery not unloaded, and a short line without its reason', async () => {
+      await expect(
+        service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', { recipientName: 'A', allUnloaded: false }),
+      ).rejects.toThrow('Unload everything delivered');
+      await expect(
+        service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', {
+          recipientName: 'A',
+          allUnloaded: true,
+          qrNote: 'QR missing',
+          lines: [{ orderLineId: 'line-1', deliveredQuantity: 300 }],
+        }),
+      ).rejects.toThrow('Say why less Tomato was delivered');
+      expect(orders.markDelivered).not.toHaveBeenCalled();
+    });
+
+    it('records the QR scanned, the shortfall and its reason, the crates — and tells the owner of the shortfall', async () => {
+      await service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', {
+        recipientName: 'A. Shopkeeper',
+        qrToken: 'morbeez:c:abcd1234ef567890',
+        allUnloaded: true,
+        lines: [{ orderLineId: 'line-1', deliveredQuantity: 300, shortReason: 'customer_took_less', shortNote: ' slow day ' }],
+        crates: [{ crateTypeId: 'crate-1', dropped: 20, collected: 18 }],
+      });
+
+      expect(pods.createWithClient).toHaveBeenCalledWith(fakeClient, 'user-driver-1', expect.objectContaining({ qrStatus: 'scanned', qrNote: null, allUnloaded: true }));
+      expect(deliveries.insertShortfallsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-driver-1', 'stop-1', [
+        { orderLineId: 'line-1', ordered: '350.000', delivered: '300.000', reason: 'customer_took_less', note: 'slow day' },
+      ]);
+      expect(alertsRepo.raiseWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', expect.objectContaining({
+        kind: 'customer_rejection',
+        title: 'Delivered short to Hotel Sagar: Tomato',
+      }));
+      expect(crates.recordStopCountsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-driver-1', 'trip-1', 'stop-1', {
+        lines: [{ crateTypeId: 'crate-1', dropped: 20, collected: 18 }],
+      });
+    });
+
+    it("a missing QR doesn't stop the delivery: it's recorded as not scanned, with why", async () => {
+      await service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', { recipientName: 'A', allUnloaded: true, qrNote: ' Damaged ' });
+      expect(pods.createWithClient).toHaveBeenCalledWith(fakeClient, 'user-driver-1', expect.objectContaining({ qrStatus: 'not_scanned', qrNote: 'Damaged' }));
+      expect(deliveries.insertShortfallsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-driver-1', 'stop-1', []);
+    });
+
+    it("crates that don't add up never block the delivery: the owner is told instead", async () => {
+      crates.stopCountsProblemWithClient.mockResolvedValue('The vehicle holds only 0 CR, not 20');
+      await service.completeDeliveryStop('tenant-1', 'user-driver-1', true, 'trip-1', 'stop-1', {
+        recipientName: 'A',
+        allUnloaded: true,
+        qrToken: 'ABCD1234EF567890',
+        crates: [{ crateTypeId: 'crate-1', dropped: 20, collected: 0 }],
+      });
+      expect(orders.markDelivered).toHaveBeenCalled();
+      expect(crates.recordStopCountsWithClient).not.toHaveBeenCalled();
+      expect(alertsRepo.raiseWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', expect.objectContaining({ kind: 'inventory_mismatch', title: 'Crates at Hotel Sagar not recorded' }));
+    });
+
+    it('the owner app, sending no checklist, delivers short without a reason as before', async () => {
+      await service.completeDeliveryStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', {
+        recipientName: 'A',
+        signatureData: 'x',
+        lines: [{ orderLineId: 'line-1', deliveredQuantity: 300 }],
+      });
+      expect(orders.markDelivered).toHaveBeenCalled();
+      expect(pods.createWithClient).toHaveBeenCalledWith(fakeClient, 'dispatcher-1', expect.objectContaining({ qrStatus: null, allUnloaded: null }));
+    });
+  });
+
+  it('startDeliveries sets the delivery run off once, on a trip on the road', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'planned' });
+    await expect(service.startDeliveries('tenant-1', 'dispatcher-1', true, 'trip-1')).rejects.toBeInstanceOf(ConflictException);
+
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    trips.startDeliveriesWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', deliveryStartedAt: new Date() });
+    expect((await service.startDeliveries('tenant-1', 'dispatcher-1', true, 'trip-1')).deliveryStartedAt).not.toBeNull();
+
+    trips.startDeliveriesWithClient.mockClear();
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', deliveryStartedAt: new Date() });
+    await service.startDeliveries('tenant-1', 'dispatcher-1', true, 'trip-1');
+    expect(trips.startDeliveriesWithClient).not.toHaveBeenCalled();
+  });
+
+  it('arriveAtStop records the arrival on a trip on the road, and only then', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'planned' });
+    await expect(service.arriveAtStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1')).rejects.toBeInstanceOf(ConflictException);
+
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    stops.findByIdWithClient.mockResolvedValue(makeStop({}));
+    stops.arriveWithClient.mockResolvedValue(makeStop({ arrivedAt: new Date() }));
+    const arrived = await service.arriveAtStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1');
+    expect(arrived.arrivedAt).not.toBeNull();
+
+    stops.arriveWithClient.mockClear();
+    stops.findByIdWithClient.mockResolvedValue(makeStop({ status: 'completed' }));
+    await service.arriveAtStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1');
+    expect(stops.arriveWithClient).not.toHaveBeenCalled();
+  });
+
   it('completePickupStop refuses a driver acting on someone else\'s trip', async () => {
     trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
     workforce.getEmployeeIdForUser.mockResolvedValue('a-different-employee');
@@ -461,12 +918,39 @@ describe('LogisticsService', () => {
       signatureData: 'data:image/png;base64,abcd',
     });
 
-    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map());
+    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map(), {
+      delivered: new Map(),
+      vehicleId: 'vehicle-1',
+      tripId: 'trip-1',
+    });
     expect(pods.createWithClient).toHaveBeenCalledWith(
       fakeClient,
       'dispatcher-1',
       expect.objectContaining({ tripStopId: 'stop-1', recipientName: 'A. Shopkeeper' }),
     );
+  });
+
+  it('completeDeliveryStop delivers what the driver entered, off the trip vehicle', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+    orders.getOrder.mockResolvedValue({
+      ...baseOrder,
+      lines: [{ id: 'line-1', orderId: 'order-1', productId: 'p-tomato', quantity: '350.000', unitPrice: '30.00', deliveredQuantity: null }],
+    });
+    stops.completeWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', status: 'completed' }));
+
+    await service.completeDeliveryStop('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', {
+      recipientName: 'A. Shopkeeper',
+      signatureData: 'data:image/png;base64,abcd',
+      lines: [{ orderLineId: 'line-1', deliveredQuantity: 340.5 }],
+    });
+
+    expect(measures.lineFactsWithClient).not.toHaveBeenCalled();
+    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map(), {
+      delivered: new Map([['line-1', '340.500']]),
+      vehicleId: 'vehicle-1',
+      tripId: 'trip-1',
+    });
   });
 
   it("live birds: the customer's weight settles the invoice; shrinkage beyond tolerance alerts the owner", async () => {
@@ -484,7 +968,7 @@ describe('LogisticsService', () => {
       lines: [{ orderLineId: 'line-1', customerWeight: 485 }],
     });
 
-    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map([['line-1', '485.000']]));
+    expect(orders.markDelivered).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', 'order-1', 1, new Map([['line-1', '485.000']]), expect.anything());
     expect(measures.insertWithClient).toHaveBeenCalledWith(
       fakeClient,
       'tenant-1',
@@ -547,6 +1031,7 @@ describe('LogisticsService', () => {
       id: 'photo-1',
       tripStopId: 'stop-1',
       photoType: 'pickup',
+      productId: null,
       storageKey: 'tenant-1/stop-1/x.jpg',
       contentType: 'image/jpeg',
       sizeBytes: 3,
@@ -657,6 +1142,7 @@ describe('LogisticsService', () => {
       variance: String(fields.variance),
       reconciledBy: 'user-1',
       reconciledAt: new Date(),
+      closingStock: fields.closingStock ?? null,
     }));
 
   it('reconcileTrip: the driver hands over exactly what was expected — closes as a pass', async () => {
@@ -672,6 +1158,8 @@ describe('LogisticsService', () => {
     expect(result.variance).toBe('0');
     expect(result.outcome).toBe('pass');
     expect(result.checklist?.every((c) => c.status === 'pass')).toBe(true);
+    // No count: what's on the vehicle comes back as the books have it.
+    expect(lotStock.returnFromVehicleWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', { id: 'trip-1', vehicleId: 'vehicle-1' }, null, null);
     // The float the ledger settles includes the delivery cash.
     expect(ledger.postTripReconciliationWithClient).toHaveBeenCalledWith(
       expect.anything(),
@@ -679,6 +1167,54 @@ describe('LogisticsService', () => {
       'user-1',
       expect.objectContaining({ advanceAmount: '500', cashIn: '1200.00', totalExpenses: '300', cashDeposited: '0.00', cashReturned: '1400' }),
     );
+  });
+
+  it("reconcileTrip counts the vehicle against what's on it and brings the stock back, short kilos written off", async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '0' });
+    expenses.sumByTripWithClient.mockResolvedValue(0);
+    storeReconciliation();
+    trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
+    lotStock.vehicleStockWithClient.mockResolvedValue([
+      { vehicleId: 'vehicle-1', registrationNumber: 'KA-01', productId: 'p-tomato', product: 'Tomato', uom: 'kg', onVehicle: '385.000', reserved: '0.000', valueAtCost: '3850.00' },
+    ]);
+
+    await expect(
+      service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 0, closingStock: [{ productId: 'p-tomato', quantity: 380 }] }),
+    ).rejects.toThrow(/needs a reason/);
+
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', {
+      version: 1,
+      cashReturned: 0,
+      closingStock: [{ productId: 'p-tomato', quantity: 380 }],
+      exceptionNote: '5 kg spoiled in the heat',
+    });
+
+    expect(result.closingStock).toEqual([expect.objectContaining({ productId: 'p-tomato', expected: '385.000', counted: '380.000' })]);
+    expect(lotStock.returnFromVehicleWithClient).toHaveBeenCalledWith(
+      fakeClient,
+      'tenant-1',
+      'user-1',
+      { id: 'trip-1', vehicleId: 'vehicle-1' },
+      new Map([['p-tomato', '380.000']]),
+      '5 kg spoiled in the heat',
+    );
+  });
+
+  it('reconcileTrip leaves the vehicle stock to a later trip that has set off with it', async () => {
+    trips.findByIdWithClient.mockResolvedValue({ ...baseTrip, status: 'completed', advanceAmount: '0' });
+    expenses.sumByTripWithClient.mockResolvedValue(0);
+    storeReconciliation();
+    trips.markReconciledWithClient.mockResolvedValue({ ...baseTrip, status: 'reconciled', version: 2 });
+    planning.laterTripOnVehicleWithClient.mockResolvedValue('T-20261028-009');
+    planning.quantitiesWithClient.mockResolvedValue([
+      { productId: 'p-tomato', product: 'Tomato', uom: 'kg', loaded: '20.000', procured: '0.000', delivered: '0.000', spotSold: '0.000', returned: '0.000', writtenOff: '0.000', toDeliver: '0.000', expected: '20.000' },
+    ]);
+
+    const result = await service.reconcileTrip('tenant-1', 'user-1', 'trip-1', { version: 1, cashReturned: 0, closingStock: [{ productId: 'p-tomato', quantity: 20 }] });
+
+    expect(result.closingStock).toEqual([expect.objectContaining({ productId: 'p-tomato', expected: '20.000', counted: '20.000' })]);
+    expect(lotStock.vehicleStockWithClient).not.toHaveBeenCalled();
+    expect(lotStock.returnFromVehicleWithClient).not.toHaveBeenCalled();
   });
 
   it('reconcileTrip: a short handover is an exception — closing it needs the owner\'s reason', async () => {

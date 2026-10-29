@@ -17,6 +17,8 @@ export interface FarmerRecord {
   tenantId: string;
   name: string;
   contact: FarmerContact;
+  /** Village or town, shown under the name. */
+  place: string | null;
   // Present only when the caller has bankDetails:read-equivalent access
   // and the repository was asked to decrypt it — never included in a list
   // response (FarmersRepository.list omits it entirely; see its comment).

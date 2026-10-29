@@ -112,6 +112,12 @@ export function useActiveDrivers() {
   return { ...result, records: result.records.filter((e) => e.status === 'active' && e.roleType === 'driver') };
 }
 
+/** Everyone working now, any role — for a trip's packer and loader. */
+export function useActiveEmployees() {
+  const result = useRecords<EmployeeRecord>('employees', 'workforce', 'workforce:read');
+  return { ...result, records: result.records.filter((e) => e.status === 'active') };
+}
+
 export function shortRef(id: string): string {
   return `#${id.slice(0, 8)}`;
 }

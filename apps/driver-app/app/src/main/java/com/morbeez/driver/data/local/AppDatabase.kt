@@ -14,8 +14,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * (Driver App Architecture, DRV.10).
  */
 @Database(
-    entities = [TripEntity::class, TripStopEntity::class, PendingOperationEntity::class, PendingPhotoEntity::class],
-    version = 4,
+    entities = [
+        TripEntity::class,
+        TripStopEntity::class,
+        PendingOperationEntity::class,
+        PendingPhotoEntity::class,
+        DriverDayEntity::class,
+        StopDraftEntity::class,
+    ],
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -23,6 +30,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun tripStopDao(): TripStopDao
     abstract fun pendingOperationDao(): PendingOperationDao
     abstract fun pendingPhotoDao(): PendingPhotoDao
+    abstract fun driverDayDao(): DriverDayDao
+    abstract fun stopDraftDao(): StopDraftDao
 
     companion object {
         /** Trip handover: the owner's review note and the driver's declared cash. Queued actions are kept. */
@@ -46,6 +55,50 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE trip_stops ADD COLUMN itemsJson TEXT")
+            }
+        }
+
+        /** Driver app V1 (D1): the driver's day, Start Day's readings, each stop's phone and map pin. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trips ADD COLUMN number TEXT")
+                db.execSQL("ALTER TABLE trips ADD COLUMN openingKm TEXT")
+                db.execSQL("ALTER TABLE trips ADD COLUMN startedAt TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyPhone TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyPlace TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyAddress TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyLatitude REAL")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyLongitude REAL")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `driver_day` (`id` INTEGER NOT NULL, `today` TEXT NOT NULL, " +
+                        "`driverName` TEXT, `vehicleRegistration` TEXT, `routeName` TEXT, `lastOdometerKm` TEXT, " +
+                        "`weekFrom` TEXT NOT NULL, `earnedThisWeek` TEXT, `stockJson` TEXT, `refreshedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        /** Driver app V1 (D2): the farmer stop — its draft on the phone, arrival, outcome, crew to pick from, a photo's product. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN arrivedAt TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN farmJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN crewJson TEXT")
+                db.execSQL("ALTER TABLE pending_photos ADD COLUMN productId TEXT")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stop_drafts` (`stopId` TEXT NOT NULL, `tripId` TEXT NOT NULL, " +
+                        "`json` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`stopId`))",
+                )
+            }
+        }
+
+        /** Driver app V1 (D3): Start Trip, each shop's QR, a delivery's outcome on the phone, the crate types. */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trips ADD COLUMN deliveryStartedAt TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyQrToken TEXT")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN deliveryJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN crateTypesJson TEXT")
             }
         }
     }

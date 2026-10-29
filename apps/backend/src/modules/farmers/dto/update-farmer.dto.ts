@@ -4,6 +4,7 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  MaxLength,
   IsString,
   Max,
   Min,
@@ -24,6 +25,12 @@ export class UpdateFarmerDto {
   @IsString()
   @MinLength(2)
   name?: string;
+
+  @ApiPropertyOptional({ description: 'Village or town' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  place?: string | null;
 
   @ApiPropertyOptional({ type: FarmerContactDto })
   @IsOptional()

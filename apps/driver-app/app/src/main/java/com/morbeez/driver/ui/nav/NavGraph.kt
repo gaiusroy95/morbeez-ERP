@@ -17,30 +17,46 @@ import com.morbeez.driver.data.mode.AppModeStore
 import com.morbeez.driver.data.security.TokenStore
 import com.morbeez.driver.ui.screens.launcher.LauncherScreen
 import com.morbeez.driver.ui.screens.cash.CashCollectionScreen
-import com.morbeez.driver.ui.screens.delivery.DeliveryScreen
+import com.morbeez.driver.ui.screens.deliver.DeliveryStopScreen
+import com.morbeez.driver.ui.screens.deliver.VehicleStockScreen
 import com.morbeez.driver.ui.screens.expenses.ExpensesScreen
+import com.morbeez.driver.ui.screens.farm.FarmStopScreen
+import com.morbeez.driver.ui.screens.home.HomeScreen
 import com.morbeez.driver.ui.screens.login.LoginScreen
 import com.morbeez.driver.ui.screens.login.SetPinScreen
 import com.morbeez.driver.ui.screens.route.RouteScreen
 import com.morbeez.driver.ui.screens.shortage.ShortageReportScreen
-import com.morbeez.driver.ui.screens.stopdetail.StopDetailScreen
+import com.morbeez.driver.ui.screens.startday.StartDayScreen
+import com.morbeez.driver.ui.screens.sync.SyncScreen
 
 private object Routes {
     const val LAUNCHER = "launcher"
     const val LOGIN = "login"
     const val SET_PIN = "set-pin"
+    const val HOME = "home"
+    const val START_DAY = "start-day"
+    const val SYNC = "sync"
     const val ROUTE = "route"
-    const val STOP_DETAIL = "trips/{tripId}/stops/{stopId}"
-    const val DELIVERY = "trips/{tripId}/stops/{stopId}/delivery"
+    const val FARM_STOP = "trips/{tripId}/farm/{stopId}"
+    const val DELIVER = "trips/{tripId}/deliver/{stopId}"
+    const val VEHICLE_STOCK = "vehicle-stock"
     const val COLLECTION = "trips/{tripId}/stops/{stopId}/collect"
     const val ISSUE = "trips/{tripId}/stops/{stopId}/issue"
     const val EXPENSES = "trips/{tripId}/expenses"
 
-    fun stopDetail(tripId: String, stopId: String) = "trips/$tripId/stops/$stopId"
-    fun delivery(tripId: String, stopId: String) = "trips/$tripId/stops/$stopId/delivery"
+    fun farmStop(tripId: String, stopId: String) = "trips/$tripId/farm/$stopId"
+    fun deliver(tripId: String, stopId: String) = "trips/$tripId/deliver/$stopId"
+
+    /** A farm opens the farmer stop (D2); a shop, its delivery (D3). */
+    fun stop(tripId: String, stopId: String, isPickup: Boolean) = if (isPickup) farmStop(tripId, stopId) else deliver(tripId, stopId)
     fun collection(tripId: String, stopId: String) = "trips/$tripId/stops/$stopId/collect"
     fun issue(tripId: String, stopId: String) = "trips/$tripId/stops/$stopId/issue"
     fun expenses(tripId: String) = "trips/$tripId/expenses"
+}
+
+/** Back to the list the stop was opened from: the route timeline, or home. */
+private fun NavHostController.backToStops() {
+    if (!popBackStack(Routes.ROUTE, false)) popBackStack(Routes.HOME, false)
 }
 
 /**
@@ -58,7 +74,7 @@ fun MorbeezNavGraph(
 ) {
     fun openDriver() {
         modeStore.lastMode = AppMode.DRIVER
-        navController.navigate(if (tokenStore.isLoggedIn()) Routes.ROUTE else Routes.LOGIN) { launchSingleTop = true }
+        navController.navigate(if (tokenStore.isLoggedIn()) Routes.HOME else Routes.LOGIN) { launchSingleTop = true }
     }
     fun openOwner() {
         modeStore.lastMode = AppMode.OWNER
@@ -85,25 +101,49 @@ fun MorbeezNavGraph(
         composable(Routes.LOGIN) {
             LoginScreen(
                 onLoggedIn = { offerPin ->
-                    navController.navigate(if (offerPin) Routes.SET_PIN else Routes.ROUTE) { popUpTo(Routes.LOGIN) { inclusive = true } }
+                    navController.navigate(if (offerPin) Routes.SET_PIN else Routes.HOME) { popUpTo(Routes.LOGIN) { inclusive = true } }
                 },
                 onBack = { navController.popBackStack() },
             )
         }
 
         composable(Routes.SET_PIN) {
-            SetPinScreen(onDone = { navController.navigate(Routes.ROUTE) { popUpTo(Routes.SET_PIN) { inclusive = true } } })
+            SetPinScreen(onDone = { navController.navigate(Routes.HOME) { popUpTo(Routes.SET_PIN) { inclusive = true } } })
         }
 
-        composable(Routes.ROUTE) {
-            RouteScreen(
-                onOpenStop = { tripId, stopId -> navController.navigate(Routes.stopDetail(tripId, stopId)) },
+        // The driver's home: Dashboard, Procurement, Delivery, the side drawer (Driver app V1, D1).
+        composable(Routes.HOME) {
+            HomeScreen(
+                onStartDay = { navController.navigate(Routes.START_DAY) { launchSingleTop = true } },
+                onOpenStop = { tripId, stopId, isPickup -> navController.navigate(Routes.stop(tripId, stopId, isPickup)) },
+                onOpenTrip = { navController.navigate(Routes.ROUTE) { launchSingleTop = true } },
                 onOpenExpenses = { tripId -> navController.navigate(Routes.expenses(tripId)) },
+                onOpenSync = { navController.navigate(Routes.SYNC) { launchSingleTop = true } },
+                onOpenVehicleStock = { navController.navigate(Routes.VEHICLE_STOCK) { launchSingleTop = true } },
+                onSignedOut = { navController.navigate(Routes.LOGIN) { popUpTo(Routes.HOME) { inclusive = true } } },
             )
         }
 
+        composable(Routes.START_DAY) {
+            StartDayScreen(onBack = { navController.popBackStack() }, onStarted = { navController.popBackStack() })
+        }
+
+        composable(Routes.SYNC) {
+            SyncScreen(onBack = { navController.popBackStack() })
+        }
+
+        // The whole route as a timeline: the drawer's Current trip.
+        composable(Routes.ROUTE) {
+            RouteScreen(
+                onOpenStop = { tripId, stopId, isPickup -> navController.navigate(Routes.stop(tripId, stopId, isPickup)) },
+                onOpenExpenses = { tripId -> navController.navigate(Routes.expenses(tripId)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // The farmer stop (driver app V1, D2): accept or reject, pack and weigh, load, hold to complete.
         composable(
-            Routes.STOP_DETAIL,
+            Routes.FARM_STOP,
             arguments = listOf(
                 navArgument("tripId") { type = NavType.StringType },
                 navArgument("stopId") { type = NavType.StringType },
@@ -111,25 +151,33 @@ fun MorbeezNavGraph(
         ) { backStackEntry ->
             val tripId = backStackEntry.arguments?.getString("tripId").orEmpty()
             val stopId = backStackEntry.arguments?.getString("stopId").orEmpty()
-            StopDetailScreen(
-                tripId = tripId,
-                stopId = stopId,
-                onOpenDelivery = { navController.navigate(Routes.delivery(tripId, stopId)) },
-                onOpenCollection = { navController.navigate(Routes.collection(tripId, stopId)) },
-                onOpenIssueReport = { navController.navigate(Routes.issue(tripId, stopId)) },
+            FarmStopScreen(
                 onBack = { navController.popBackStack() },
+                onDone = { navController.backToStops() },
+                onReport = { navController.navigate(Routes.issue(tripId, stopId)) },
             )
         }
 
-        composable(Routes.DELIVERY) { backStackEntry ->
+        // A delivery (driver app V1, D3): to the shop, its QR, the goods line by line, unloaded, photo, crates, hold to complete.
+        composable(
+            Routes.DELIVER,
+            arguments = listOf(
+                navArgument("tripId") { type = NavType.StringType },
+                navArgument("stopId") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
             val tripId = backStackEntry.arguments?.getString("tripId").orEmpty()
             val stopId = backStackEntry.arguments?.getString("stopId").orEmpty()
-            DeliveryScreen(
-                tripId = tripId,
-                stopId = stopId,
-                onDone = { navController.popBackStack(Routes.ROUTE, false) },
+            DeliveryStopScreen(
                 onBack = { navController.popBackStack() },
+                onDone = { navController.backToStops() },
+                onCollect = { navController.navigate(Routes.collection(tripId, stopId)) },
+                onReport = { navController.navigate(Routes.issue(tripId, stopId)) },
             )
+        }
+
+        composable(Routes.VEHICLE_STOCK) {
+            VehicleStockScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.COLLECTION) { backStackEntry ->
@@ -149,7 +197,7 @@ fun MorbeezNavGraph(
             ShortageReportScreen(
                 tripId = tripId,
                 stopId = stopId,
-                onDone = { navController.popBackStack(Routes.ROUTE, false) },
+                onDone = { navController.backToStops() },
                 onBack = { navController.popBackStack() },
             )
         }

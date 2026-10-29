@@ -5,6 +5,8 @@ import { WorkforceService } from './workforce.service';
 import { EmployeesRepository } from './repositories/employees.repository';
 import { PayrollController } from './payroll.controller';
 import { PayrollService } from './payroll.service';
+import { WorkerAccessService } from './worker-access.service';
+import { UsersModule } from '../users/users.module';
 import { PayrollRepository } from './repositories/payroll.repository';
 
 // Bounded context: Workforce — who works for the tenant and in what
@@ -15,11 +17,11 @@ import { PayrollRepository } from './repositories/payroll.repository';
 // posts labour cost to Finance's ledger only through LedgerService.
 // Logistics calls in when a trip completes, to record its driver's work.
 @Module({
-  imports: [FinanceModule],
+  imports: [FinanceModule, UsersModule],
   // PayrollController first: its /workforce/workers, /assignments, … must
   // be matched before WorkforceController's catch-all /workforce/:id.
   controllers: [PayrollController, WorkforceController],
-  providers: [WorkforceService, EmployeesRepository, PayrollService, PayrollRepository],
+  providers: [WorkforceService, EmployeesRepository, PayrollService, PayrollRepository, WorkerAccessService],
   exports: [WorkforceService, PayrollService],
 })
 export class WorkforceModule {}

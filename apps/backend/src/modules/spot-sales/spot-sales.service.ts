@@ -9,6 +9,7 @@ import { DelegationService } from '../logistics/delegation.service';
 import { TripStatus } from '../logistics/entities/trip.entity';
 import { LedgerService } from '../finance/ledger.service';
 import { ReceivablesService } from '../finance/receivables.service';
+import { LotStockService } from '../procurement/lot-stock.service';
 import { assertRealDate } from '../../common/period';
 import { clampPageSize, PaginatedResult } from '../../common/persistence/pagination';
 import { moneyFromNumber, subtractMoney, sumMoney, toCents } from '../../common/money';
@@ -56,6 +57,7 @@ export class SpotSalesService {
     private readonly receivables: ReceivablesService,
     private readonly audit: AuditService,
     private readonly delegation: DelegationService,
+    private readonly stock: LotStockService,
   ) {}
 
   // ---- Settings and bands ----
@@ -209,7 +211,9 @@ export class SpotSalesService {
         const quantity = qty3(line.quantity);
         const unitPrice = moneyFromNumber(line.unitPrice);
         // Sellable = on the vehicle less what pending sales hold; costed as the draw would be.
-        const mine: VehicleLot[] = lots.filter((l) => l.product_id === line.productId).map((l) => ({ lotId: l.lot_id, quantity: l.quantity, unitCost: l.unit_cost, receivedAt: l.received_at }));
+        const mine: VehicleLot[] = lots
+          .filter((l) => l.product_id === line.productId)
+          .map((l) => ({ lotId: l.lot_id, balanceId: l.balance_id, quantity: l.quantity, unitCost: l.unit_cost, receivedAt: l.received_at }));
         const on = mine.reduce((s, l) => s + toMilli(l.quantity), 0n);
         const free = on - toMilli(held.get(line.productId) ?? '0');
         if (toMilli(quantity) > free) {
@@ -296,20 +300,23 @@ export class SpotSalesService {
     const costs: string[] = [];
     for (const line of lines) {
       const mine = lots.filter((l) => l.product_id === line.productId);
-      const plan = planDraw(mine.map((l) => ({ lotId: l.lot_id, quantity: l.quantity, unitCost: l.unit_cost, receivedAt: l.received_at })), line.quantity);
+      const plan = planDraw(
+        mine.map((l) => ({ lotId: l.lot_id, balanceId: l.balance_id, quantity: l.quantity, unitCost: l.unit_cost, receivedAt: l.received_at })),
+        line.quantity,
+      );
       if (!plan) throw new ConflictException(`${trip.registration_number} no longer holds ${line.quantity} of ${line.productName}`);
       for (const d of plan.draws) {
-        if (!(await this.repo.drawLot(client, d.lotId, d.quantity))) throw new ConflictException(`A lot of ${line.productName} changed while selling — try again`);
-        await this.repo.insertLineLot(client, tenantId, line.id, d.lotId, d.quantity, d.unitCost);
-        await this.repo.insertStockMovement(client, {
-          tenantId,
+        const sold = await this.stock.takeForSaleWithClient(client, tenantId, userId, {
+          balanceId: d.balanceId as string,
           lotId: d.lotId,
           productId: line.productId,
           quantity: d.quantity,
-          locationId: mine.find((l) => l.lot_id === d.lotId)!.location_id,
+          locationId: mine.find((l) => l.balance_id === d.balanceId)!.location_id,
           reason: `Spot sale ${sale.sale_number}`,
-          userId,
+          tripId: sale.trip_id,
         });
+        if (!sold) throw new ConflictException(`A lot of ${line.productName} changed while selling — try again`);
+        await this.repo.insertLineLot(client, tenantId, line.id, d.lotId, d.quantity, d.unitCost);
       }
       costs.push(plan.cost);
     }

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
 import { LANGUAGES } from '../../../common/languages';
 
@@ -32,4 +32,21 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsIn(LANGUAGES)
   preferredLanguage?: string;
+
+  @ApiPropertyOptional({ description: 'Village or town shown under the name', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  place?: string | null;
+
+  @ApiPropertyOptional({ description: 'Default delivery address', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  address?: string | null;
+
+  @ApiPropertyOptional({ description: 'The route this customer is usually delivered on', nullable: true })
+  @IsOptional()
+  @IsUUID()
+  routeId?: string | null;
 }

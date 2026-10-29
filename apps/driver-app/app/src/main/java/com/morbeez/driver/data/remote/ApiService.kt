@@ -42,11 +42,16 @@ interface ApiService {
         @Query("pageSize") pageSize: Int = 25,
     ): PagedResponse<TripResponse>
 
+    /** Today's trip (the owner plans first), its vehicle and the vehicle's last odometer reading, this week's earnings, vehicle stock. */
+    @GET("logistics/trips/mine/day")
+    suspend fun getMyDay(): DriverDayResponse
+
     @GET("logistics/trips/{tripId}/stops")
     suspend fun listStops(@Path("tripId") tripId: String): List<TripStopResponse>
 
+    /** Start Day: sets off, with the opening KM and the phone's position. */
     @POST("logistics/trips/{tripId}/start")
-    suspend fun startTrip(@Path("tripId") tripId: String, @Body body: VersionRequest): TripResponse
+    suspend fun startTrip(@Path("tripId") tripId: String, @Body body: StartTripRequest): TripResponse
 
     /** The driver submits the trip: completed, awaiting the owner's reconciliation. */
     @POST("logistics/trips/{tripId}/complete")
@@ -105,7 +110,17 @@ interface ApiService {
         @Path("stopId") stopId: String,
         @Part("photoType") photoType: okhttp3.RequestBody,
         @Part file: MultipartBody.Part,
+        /** A farm stop's rejection photo names its product; left out otherwise. */
+        @Part("productId") productId: okhttp3.RequestBody? = null,
     ): TripStopPhotoResponse
+
+    /** Start Trip (D3): the delivery run sets off. */
+    @POST("logistics/trips/{tripId}/start-deliveries")
+    suspend fun startDeliveries(@Path("tripId") tripId: String): TripResponse
+
+    /** The driver reached the stop (D2: Start pickup). */
+    @POST("logistics/trips/{tripId}/stops/{stopId}/arrive")
+    suspend fun arriveAtStop(@Path("tripId") tripId: String, @Path("stopId") stopId: String): TripStopResponse
 
     @GET("logistics/trips/{tripId}/stops/{stopId}/photos")
     suspend fun listPhotos(

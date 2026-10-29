@@ -109,7 +109,12 @@ export class PayrollService {
   private async workerDetail(client: PoolClient, employeeId: string): Promise<WorkerDetail> {
     const [row] = await this.repo.workers(client, (await this.repo.today(client)).today, employeeId);
     if (!row) throw new NotFoundException('Worker not found');
-    return { ...row, rates: await this.repo.ratesFor(client, employeeId) };
+    return {
+      ...row,
+      rates: await this.repo.ratesFor(client, employeeId),
+      documents: await this.repo.documents(client, employeeId),
+      login: await this.repo.loginOf(client, employeeId),
+    };
   }
 
   saveProfile(tenantId: string, userId: string, employeeId: string, dto: WorkerProfileDto): Promise<WorkerDetail> {
@@ -126,6 +131,7 @@ export class PayrollService {
         joinedOn: dto.joinedOn ?? null,
         leftOn: dto.leftOn ?? null,
         phone: clean(dto.phone),
+        address: clean(dto.address),
       });
       if (!ok) throw new ConflictException("This worker's details were changed by someone else — reload and try again");
       const after = await this.workerDetail(client, employeeId);
@@ -254,18 +260,60 @@ export class PayrollService {
   async recordTripWorkWithClient(client: PoolClient, tenantId: string, userId: string, tripId: string): Promise<void> {
     const trip = await this.repo.tripWork(client, tripId);
     if (!trip) return;
-    if (await this.repo.tripAssignmentExists(client, tripId, trip.driver_employee_id)) return;
-    const id = await this.repo.insertAssignment(client, tenantId, userId, {
-      employeeId: trip.driver_employee_id,
-      workDate: trip.work_date,
-      kind: 'trip',
-      status: 'completed',
-      hours: trip.hours,
-      units: `${trip.stops}.000`,
-      tripId,
-      notes: null,
-    });
-    await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'assignment', entityId: id, after: { tripId, ...trip } });
+    // The driver and the crew beside them (packer, loader) each worked the trip.
+    const crew = [
+      { employeeId: trip.driver_employee_id, role: 'driver' },
+      { employeeId: trip.packer_employee_id, role: 'packer' },
+      { employeeId: trip.loader_employee_id, role: 'loader' },
+    ].filter((c): c is { employeeId: string; role: string } => c.employeeId !== null);
+    for (const { employeeId, role } of crew) {
+      if (await this.repo.tripAssignmentExists(client, tripId, employeeId)) continue;
+      const id = await this.repo.insertAssignment(client, tenantId, userId, {
+        employeeId,
+        workDate: trip.work_date,
+        kind: 'trip',
+        status: 'completed',
+        hours: trip.hours,
+        units: `${trip.stops}.000`,
+        tripId,
+        notes: role === 'driver' ? null : `Trip ${role}`,
+      });
+      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'assignment', entityId: id, after: { tripId, role, ...trip } });
+    }
+  }
+
+  /**
+   * Called by Logistics when a farm stop completes, inside its transaction
+   * (driver app D2; the client's answer 4: the packer and loader are the
+   * business's own workers on contract, paid by the quantity loaded): each
+   * is credited with the kilos loaded there, as 'loading' work — once, when
+   * the same person did both. A piece rate per kg pays on it. Only a trip's
+   * own day of work carries its trip id (assignment_valid); the note names it.
+   */
+  async recordLoadingWorkWithClient(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    work: { tripNumber: string; workDate: string; place: string; kg: string; packerId: string | null; loaderId: string | null },
+  ): Promise<void> {
+    if (Number(work.kg) <= 0) return;
+    const roles = new Map<string, string[]>();
+    if (work.packerId) roles.set(work.packerId, ['Packed']);
+    if (work.loaderId) roles.set(work.loaderId, [...(roles.get(work.loaderId) ?? []), work.loaderId === work.packerId ? 'loaded' : 'Loaded']);
+    for (const [employeeId, did] of roles) {
+      const notes = `${did.join(' and ')} at ${work.place}, trip ${work.tripNumber}`;
+      const id = await this.repo.insertAssignment(client, tenantId, userId, {
+        employeeId,
+        workDate: work.workDate,
+        kind: 'loading',
+        status: 'completed',
+        hours: null,
+        units: work.kg,
+        tripId: null,
+        notes,
+      });
+      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'assignment', entityId: id, after: { ...work, employeeId, notes } });
+    }
   }
 
   // ---- Rules ----
@@ -431,6 +479,24 @@ export class PayrollService {
       incentives: await this.repo.incentiveRules(client),
       minimumWages: await this.repo.minimumWages(client),
     };
+  }
+
+  /**
+   * What one worker has earned from [from] to [to] and isn't settled yet —
+   * the driver app's "earned so far" (pay settles weekly). null when there's
+   * no such worker or their pay can't be worked out yet.
+   */
+  async earnedSoFar(tenantId: string, employeeId: string, from: string, to: string): Promise<string | null> {
+    try {
+      return await this.db.withTenant(tenantId, async (client) => {
+        const [worker] = await this.repo.workers(client, to, employeeId);
+        if (!worker) return null;
+        const preview = await this.earnings(client, worker, from, to, { adjustments: [], maxAdvanceRecovery: null }, await this.shared(client));
+        return preview.gross;
+      });
+    } catch {
+      return null;
+    }
   }
 
   /** What every active worker would be paid for a period, before anything is saved. */

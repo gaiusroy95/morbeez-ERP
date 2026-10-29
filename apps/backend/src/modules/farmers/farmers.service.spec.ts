@@ -5,12 +5,14 @@ import { FarmersRepository } from './repositories/farmers.repository';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { FarmerRecord } from './entities/farmer.entity';
+import { FarmerInsightsRepository } from './repositories/farmer-insights.repository';
 
 const mockFarmer: FarmerRecord = {
   id: 'farmer-1',
   tenantId: 'tenant-1',
   name: 'Test Farm',
   contact: {},
+  place: null,
   bankDetails: { accountHolderName: 'Test Farm', accountNumber: '123456789', ifscCode: 'ABCD0123456' },
   reliabilityRating: null,
   status: 'active',
@@ -47,6 +49,7 @@ describe('FarmersService', () => {
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: FarmerInsightsRepository, useValue: { figuresWithClient: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

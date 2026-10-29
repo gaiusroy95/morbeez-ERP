@@ -53,7 +53,7 @@ class LanguageViewModel @Inject constructor(private val auth: AuthRepository) : 
  * for the four. Choosing one redraws the screen in it.
  */
 @Composable
-fun LanguagePill(onDark: Boolean, viewModel: LanguageViewModel = hiltViewModel()) {
+fun LanguagePill(onDark: Boolean) {
     val context = LocalContext.current
     val current = AppLanguage.current(context)
     var open by remember { mutableStateOf(false) }
@@ -72,44 +72,50 @@ fun LanguagePill(onDark: Boolean, viewModel: LanguageViewModel = hiltViewModel()
             color = if (onDark) Fresh.onCarbon else Fresh.ink,
         )
     }
-    if (open) {
-        AlertDialog(
-            onDismissRequest = { open = false },
-            containerColor = Fresh.surface,
-            title = { Text(stringResource(R.string.language_choose), style = MaterialTheme.typography.titleLarge, color = Fresh.ink) },
-            text = {
-                Column {
-                    AppLanguage.CHOICES.forEach { (code, name) ->
-                        val on = code == current
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (on) Fresh.carbon else Fresh.surface2)
-                                .clickable(role = Role.RadioButton) {
-                                    open = false
-                                    if (!on) {
-                                        AppLanguage.choose(context, code)
-                                        viewModel.save(code)
-                                        (context as? Activity)?.recreate()
-                                    }
+    if (open) LanguageDialog(onDismiss = { open = false })
+}
+
+/** The four languages, each in its own script; choosing one redraws the app in it. */
+@Composable
+fun LanguageDialog(onDismiss: () -> Unit, viewModel: LanguageViewModel = hiltViewModel()) {
+    val context = LocalContext.current
+    val current = AppLanguage.current(context)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Fresh.surface,
+        title = { Text(stringResource(R.string.language_choose), style = MaterialTheme.typography.titleLarge, color = Fresh.ink) },
+        text = {
+            Column {
+                AppLanguage.CHOICES.forEach { (code, name) ->
+                    val on = code == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (on) Fresh.carbon else Fresh.surface2)
+                            .clickable(role = Role.RadioButton) {
+                                onDismiss()
+                                if (!on) {
+                                    AppLanguage.choose(context, code)
+                                    viewModel.save(code)
+                                    (context as? Activity)?.recreate()
                                 }
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (on) {
-                                GlyphIcon(Glyph.Check, Fresh.accent, size = 16.dp)
-                                Spacer(Modifier.width(10.dp))
                             }
-                            Text(name, style = MaterialTheme.typography.titleMedium, color = if (on) Fresh.onCarbon else Fresh.ink)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (on) {
+                            GlyphIcon(Glyph.Check, Fresh.accent, size = 16.dp)
+                            Spacer(Modifier.width(10.dp))
                         }
+                        Text(name, style = MaterialTheme.typography.titleMedium, color = if (on) Fresh.onCarbon else Fresh.ink)
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { open = false }) { Text(stringResource(R.string.cancel), color = Fresh.inkMuted) }
-            },
-        )
-    }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = Fresh.inkMuted) }
+        },
+    )
 }

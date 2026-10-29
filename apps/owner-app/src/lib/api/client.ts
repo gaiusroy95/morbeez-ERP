@@ -58,6 +58,17 @@ export async function apiSend<T>(method: 'POST' | 'PATCH' | 'PUT', path: string,
   return readResponse<T>(response);
 }
 
+/** A file upload: multipart form data (the browser sets the boundary). */
+export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(`/api/backend/${path}`, {
+    method: 'POST',
+    headers: { accept: 'application/json' },
+    body: form,
+    cache: 'no-store',
+  });
+  return readResponse<T>(response);
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   if (response.status === 401) {
     const next = encodeURIComponent(window.location.pathname + window.location.search);

@@ -45,6 +45,11 @@ export const envSchema = z
     // boot instead of silently allowing every origin.
     CORS_ORIGIN: z.string().optional(),
 
+    // The owner web app's public address, for links the API hands out (a
+    // staff member's password set-up link). Unset: the first CORS_ORIGIN,
+    // which is that same app.
+    PUBLIC_APP_URL: z.string().url().optional(),
+
     // API documentation (Constitution IV.1) — on unless production, where
     // the full API map shouldn't be public by default (Security Audit
     // SA-17); set it explicitly to override either way.

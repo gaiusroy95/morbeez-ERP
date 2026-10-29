@@ -17,5 +17,6 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api/|_next/|login|signup|favicon.ico).*)'],
+  // set-password: a new staff member's one-time link, opened before they have a login.
+  matcher: ['/((?!api/|_next/|login|signup|set-password|favicon.ico).*)'],
 };

@@ -4,6 +4,12 @@ import com.morbeez.driver.data.i18n.AppLanguage
 import com.morbeez.driver.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
+import com.morbeez.driver.data.local.DriverDayDao
+import com.morbeez.driver.data.local.DriverDayEntity
+import com.morbeez.driver.data.local.FarmDraft
+import com.morbeez.driver.data.local.StopDraftDao
+import com.morbeez.driver.data.local.StopDraftEntity
+import com.morbeez.driver.data.local.DeliveryDraft
 import com.morbeez.driver.data.local.PendingOperationDao
 import com.morbeez.driver.data.local.PendingOperationEntity
 import com.morbeez.driver.data.local.PendingPhotoDao
@@ -15,10 +21,18 @@ import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.data.remote.ApiService
 import com.morbeez.driver.data.remote.dto.HandoverResponse
 import com.morbeez.driver.data.remote.dto.TripExpenseResponse
+import com.morbeez.driver.data.remote.dto.TripVehicleStockResponse
+import com.morbeez.driver.data.remote.dto.CrewOptionResponse
+import com.morbeez.driver.data.remote.dto.CrateTypeResponse
+import com.morbeez.driver.data.remote.dto.DeliveryOutcomeResponse
+import com.morbeez.driver.data.remote.dto.CompleteDeliveryRequest
+import com.morbeez.driver.data.remote.dto.FarmLineRequest
+import com.morbeez.driver.data.remote.dto.FarmStopOutcomeResponse
 import com.morbeez.driver.data.remote.dto.TripStopResponse
 import com.morbeez.driver.data.remote.dto.DeliveryLineMeasure
 import com.morbeez.driver.data.remote.dto.FarmWeight
 import com.morbeez.driver.data.remote.dto.StopItemResponse
+import com.morbeez.driver.data.sync.ArriveStopPayload
 import com.morbeez.driver.data.sync.CompleteDeliveryPayload
 import com.morbeez.driver.data.sync.CompletePickupPayload
 import com.morbeez.driver.data.sync.PendingOperationType
@@ -28,12 +42,16 @@ import com.morbeez.driver.data.sync.RecordDepositPayload
 import com.morbeez.driver.data.sync.RecordExpensePayload
 import com.morbeez.driver.data.sync.ReportProblemPayload
 import com.morbeez.driver.data.sync.SkipStopPayload
+import com.morbeez.driver.data.sync.StartDeliveriesPayload
+import com.morbeez.driver.data.sync.StartTripPayload
 import com.morbeez.driver.data.sync.SubmitTripPayload
 import com.squareup.moshi.Moshi
+import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * The single door between the UI and both Room and the network — screens
@@ -49,6 +67,8 @@ class TripRepository @Inject constructor(
     private val stopDao: TripStopDao,
     private val pendingOperationDao: PendingOperationDao,
     private val pendingPhotoDao: PendingPhotoDao,
+    private val dayDao: DriverDayDao,
+    private val draftDao: StopDraftDao,
     private val moshi: Moshi,
     @ApplicationContext private val appContext: Context,
 ) {
@@ -59,6 +79,97 @@ class TripRepository @Inject constructor(
     fun observeStops(tripId: String): Flow<List<TripStopEntity>> = stopDao.observeByTrip(tripId)
     fun observeFailedOperations(): Flow<List<PendingOperationEntity>> = pendingOperationDao.observeFailed()
     fun observePendingCount(): Flow<Int> = pendingOperationDao.observePendingCount()
+    fun observeDay(): Flow<DriverDayEntity?> = dayDao.observe()
+    suspend fun getDay(): DriverDayEntity? = dayDao.find()
+
+    /** What was on the vehicle when the server last answered. */
+    fun stockOf(day: DriverDayEntity?): TripVehicleStockResponse? =
+        day?.stockJson?.let { runCatching { stockAdapter.fromJson(it) }.getOrNull() }
+
+    private val stockAdapter by lazy { moshi.adapter(TripVehicleStockResponse::class.java) }
+
+    /** The business's workers, to pick a farm's packer and loader from — as the server last listed them. */
+    fun crewOf(day: DriverDayEntity?): List<CrewOptionResponse> =
+        day?.crewJson?.let { runCatching { crewAdapter.fromJson(it) }.getOrNull() } ?: emptyList()
+
+    private val crewAdapter by lazy {
+        moshi.adapter<List<CrewOptionResponse>>(
+            com.squareup.moshi.Types.newParameterizedType(List::class.java, CrewOptionResponse::class.java),
+        )
+    }
+
+    /** A completed farm stop: what was accepted and rejected, and the crew. */
+    fun farmOf(stop: TripStopEntity): FarmStopOutcomeResponse? =
+        stop.farmJson?.let { runCatching { farmAdapter.fromJson(it) }.getOrNull() }
+
+    private val farmAdapter by lazy { moshi.adapter(FarmStopOutcomeResponse::class.java) }
+    private val draftAdapter by lazy { moshi.adapter(FarmDraft::class.java) }
+
+    /** The farm stop being worked on, kept on the phone (D2); null until something is entered. */
+    fun observeDraft(stopId: String): Flow<FarmDraft?> =
+        draftDao.observe(stopId).map { row -> row?.let { runCatching { draftAdapter.fromJson(it.json) }.getOrNull() } }
+
+    suspend fun saveDraft(tripId: String, stopId: String, draft: FarmDraft) {
+        draftDao.upsert(StopDraftEntity(stopId, tripId, draftAdapter.toJson(draft), System.currentTimeMillis()))
+    }
+
+    /** The crate types, as the server last listed them. */
+    fun crateTypesOf(day: DriverDayEntity?): List<CrateTypeResponse> =
+        day?.crateTypesJson?.let { runCatching { crateTypesAdapter.fromJson(it) }.getOrNull() } ?: emptyList()
+
+    private val crateTypesAdapter by lazy {
+        moshi.adapter<List<CrateTypeResponse>>(
+            com.squareup.moshi.Types.newParameterizedType(List::class.java, CrateTypeResponse::class.java),
+        )
+    }
+
+    /** A completed delivery: its QR, shortfalls, crates — and, until the server answers, what left the vehicle. */
+    fun deliveryOf(stop: TripStopEntity): DeliveryOutcomeResponse? =
+        stop.deliveryJson?.let { runCatching { deliveryAdapter.fromJson(it) }.getOrNull() }
+
+    private val deliveryAdapter by lazy { moshi.adapter(DeliveryOutcomeResponse::class.java) }
+    private val deliveryDraftAdapter by lazy { moshi.adapter(DeliveryDraft::class.java) }
+
+    /** The delivery being worked on, kept on the phone (D3); null until something is entered. */
+    fun observeDeliveryDraft(stopId: String): Flow<DeliveryDraft?> =
+        draftDao.observe(stopId).map { row -> row?.let { runCatching { deliveryDraftAdapter.fromJson(it.json) }.getOrNull() } }
+
+    suspend fun saveDeliveryDraft(tripId: String, stopId: String, draft: DeliveryDraft) {
+        draftDao.upsert(StopDraftEntity(stopId, tripId, deliveryDraftAdapter.toJson(draft), System.currentTimeMillis()))
+    }
+
+    /** Start Trip (D3): the deliveries unlock on the phone at once; the server hears when there's signal. */
+    suspend fun queueStartDeliveries(tripId: String) {
+        val trip = tripDao.findById(tripId) ?: return
+        if (trip.deliveryStartedAt != null) return
+        val at = java.time.Instant.now().toString()
+        enqueue<StartDeliveriesPayload>(tripId, PendingOperationType.START_DELIVERIES, StartDeliveriesPayload(at))
+        tripDao.markDeliveriesStarted(tripId, at)
+    }
+
+    /**
+     * Hold-to-complete at a shop (D3): the checklist, queued behind the
+     * delivery's photos; the stop shows as delivered, with what left the
+     * vehicle, straight away, and the draft is let go.
+     */
+    suspend fun queueCompleteDelivery(tripId: String, stopId: String, request: CompleteDeliveryRequest, outcome: DeliveryOutcomeResponse) {
+        enqueue<CompleteDeliveryPayload>(
+            tripId,
+            PendingOperationType.COMPLETE_DELIVERY_STOP,
+            CompleteDeliveryPayload(
+                stopId,
+                request.recipientName,
+                request.signatureData,
+                request.lines,
+                request.qrToken,
+                request.qrNote,
+                request.allUnloaded,
+                request.crates,
+            ),
+        )
+        stopDao.markDeliveryCompleted(stopId, deliveryAdapter.toJson(outcome))
+        draftDao.delete(stopId)
+    }
 
     suspend fun getStop(stopId: String): TripStopEntity? = stopDao.findById(stopId)
 
@@ -74,20 +185,36 @@ class TripRepository @Inject constructor(
     suspend fun getActiveTrip(): TripEntity? = tripDao.findActiveTrip()
 
     /**
-     * Pulls this driver's current trip and its route from the backend and
-     * replaces the local copy — only called once the push side of sync has
-     * fully drained (Driver App Architecture, DRV.9), so a pull can never
-     * overwrite an action the driver took that hasn't reached the server yet.
+     * Pulls this driver's day — today's trip and its route, the vehicle,
+     * earnings, vehicle stock — from the backend and replaces the local copy;
+     * only called once the push side of sync has fully drained (Driver App
+     * Architecture, DRV.9), so a pull can never overwrite an action the
+     * driver took that hasn't reached the server yet. The server picks the
+     * trip: on the road first, then one planned for today (never a later
+     * day: the owner plans first), then a submitted one not yet closed.
      */
     suspend fun refreshMyTrips() {
-        val page = api.listMyTrips(status = null, page = 1, pageSize = 5)
-        // On the road first; otherwise a submitted trip the owner hasn't closed yet.
-        val active = page.items.firstOrNull { it.status == "in_progress" }
-            ?: page.items.firstOrNull { it.status == "planned" }
-            ?: page.items.firstOrNull { it.status == "completed" || it.status == "on_hold" }
+        val day = api.getMyDay()
+        dayDao.upsert(
+            DriverDayEntity(
+                today = day.today,
+                driverName = day.driver?.name,
+                vehicleRegistration = day.vehicle?.registrationNumber,
+                routeName = day.routeName,
+                lastOdometerKm = day.lastOdometerKm,
+                weekFrom = day.weekFrom,
+                earnedThisWeek = day.earnedThisWeek,
+                stockJson = day.vehicleStock?.let { stockAdapter.toJson(it) },
+                refreshedAt = System.currentTimeMillis(),
+                crewJson = crewAdapter.toJson(day.crew),
+                crateTypesJson = crateTypesAdapter.toJson(day.crateTypes),
+            ),
+        )
+        val active = day.trip
         if (active == null) {
             tripDao.clear()
             stopDao.clear()
+            draftDao.clear()
             return
         }
 
@@ -95,7 +222,7 @@ class TripRepository @Inject constructor(
             TripEntity(
                 id = active.id,
                 vehicleId = active.vehicleId,
-                vehicleRegistrationNumber = active.vehicleId, // resolved lazily by the UI if needed; kept simple here
+                vehicleRegistrationNumber = day.vehicle?.registrationNumber ?: active.vehicleId,
                 driverEmployeeId = active.driverEmployeeId,
                 status = active.status,
                 plannedDate = active.plannedDate,
@@ -106,12 +233,17 @@ class TripRepository @Inject constructor(
                 // What the owner has authorized on this trip; kept from the last pull when unreachable.
                 authorityLevel = runCatching { api.getAuthority(active.id).level }.getOrNull()
                     ?: tripDao.findActiveTrip()?.takeIf { it.id == active.id }?.authorityLevel,
+                number = active.number.ifBlank { null },
+                openingKm = active.openingKm,
+                startedAt = active.startedAt,
+                deliveryStartedAt = active.deliveryStartedAt,
             ),
         )
 
         // The server's current trip is the only one this phone keeps (DRV.3).
         tripDao.deleteAllExcept(active.id)
         stopDao.deleteAllExceptTrip(active.id)
+        draftDao.deleteAllExceptTrip(active.id)
 
         val stops = api.listStops(active.id)
         val entities = stops.map { toEntity(it) }
@@ -158,10 +290,59 @@ class TripRepository @Inject constructor(
             collectTerms = stop.collect?.terms,
             collectAmount = stop.collect?.amount,
             itemsJson = itemsAdapter.toJson(stop.items),
+            partyPhone = stop.party?.phone?.ifBlank { null },
+            partyPlace = stop.party?.place?.ifBlank { null },
+            partyAddress = stop.party?.address?.ifBlank { null },
+            partyLatitude = stop.party?.latitude?.toDoubleOrNull(),
+            partyLongitude = stop.party?.longitude?.toDoubleOrNull(),
+            arrivedAt = stop.arrivedAt,
+            farmJson = stop.farm?.let { farmAdapter.toJson(it) },
+            partyQrToken = stop.party?.qrToken,
+            deliveryJson = stop.delivery?.let { deliveryAdapter.toJson(it) },
         )
     }
 
     // ---- Queuing offline actions (Driver App Architecture, DRV.3) ----
+
+    /**
+     * Start Day: the trip is on the road on this phone at once; the server
+     * hears with the opening KM and where the phone was ([latitude] and
+     * [longitude] both, or neither).
+     */
+    suspend fun queueStartDay(tripId: String, openingKm: Double, latitude: Double?, longitude: Double?, accuracyMeters: Double?) {
+        enqueue<StartTripPayload>(tripId, PendingOperationType.START_TRIP, StartTripPayload(openingKm, latitude, longitude, accuracyMeters))
+        tripDao.markStarted(tripId, String.format(Locale.ROOT, "%.1f", openingKm), java.time.Instant.now().toString())
+    }
+
+    /** Start pickup (D2): the driver reached the farm — on the phone at once, sent when there's signal. */
+    suspend fun queueArrive(tripId: String, stopId: String) {
+        val stop = stopDao.findById(stopId) ?: return
+        if (stop.arrivedAt != null) return
+        enqueue<ArriveStopPayload>(tripId, PendingOperationType.ARRIVE_STOP, ArriveStopPayload(stopId))
+        stopDao.markArrived(stopId, java.time.Instant.now().toString())
+    }
+
+    /**
+     * Hold-to-complete at a farm (D2): every product accepted or rejected
+     * and the crew, queued behind the farm's photos; the stop shows as done
+     * with what was loaded straight away, and the draft is let go.
+     */
+    suspend fun queueCompleteFarmStop(
+        tripId: String,
+        stopId: String,
+        lines: List<FarmLineRequest>,
+        packerId: String?,
+        loaderId: String?,
+        outcome: FarmStopOutcomeResponse,
+    ) {
+        enqueue<CompletePickupPayload>(
+            tripId,
+            PendingOperationType.COMPLETE_PICKUP_STOP,
+            CompletePickupPayload(stopId, lines = lines, packerEmployeeId = packerId, loaderEmployeeId = loaderId),
+        )
+        stopDao.markFarmCompleted(stopId, farmAdapter.toJson(outcome))
+        draftDao.delete(stopId)
+    }
 
     /** [weights]: the farm weighment, net per product — it receives the goods (the purchase weight). */
     suspend fun queueCompletePickupStop(tripId: String, stopId: String, weights: List<FarmWeight> = emptyList()) {
@@ -218,6 +399,18 @@ class TripRepository @Inject constructor(
         tripDao.markSubmitted(tripId, cashDeclared?.let { "%.2f".format(it) })
     }
 
+    /**
+     * Start Day refused (the opening KM below the vehicle's last reading,
+     * read since this phone last synced): the driver reads the odometer again
+     * and it's sent in its place in the queue, ahead of what came after it.
+     */
+    suspend fun correctStartDay(operation: PendingOperationEntity, openingKm: Double) {
+        val adapter = moshi.adapter(StartTripPayload::class.java)
+        val payload = adapter.fromJson(operation.payloadJson) ?: return
+        pendingOperationDao.retryWith(operation.idempotencyKey, adapter.toJson(payload.copy(openingKm = openingKm)))
+        tripDao.setOpeningKm(operation.tripId, String.format(Locale.ROOT, "%.1f", openingKm))
+    }
+
     /** The driver can't go on, the trip can't proceed, something's wrong: queued like everything else, sent at once when there's signal. */
     suspend fun queueProblem(tripId: String, kind: String, note: String) {
         enqueue<ReportProblemPayload>(tripId, PendingOperationType.REPORT_PROBLEM, ReportProblemPayload(kind, note.trim()))
@@ -245,7 +438,8 @@ class TripRepository @Inject constructor(
     suspend fun listExpenses(tripId: String): List<TripExpenseResponse> =
         runCatching { api.listExpenses(tripId) }.getOrDefault(emptyList())
 
-    suspend fun queuePhoto(tripId: String, stopId: String, photoType: String, localPath: String, mimeType: String) {
+    /** [productId]: a farm stop's rejection photo names the product it shows. */
+    suspend fun queuePhoto(tripId: String, stopId: String, photoType: String, localPath: String, mimeType: String, productId: String? = null) {
         if (mimeType == "image/jpeg") PhotoShrinker.shrink(localPath)
         pendingPhotoDao.insert(
             PendingPhotoEntity(
@@ -256,6 +450,7 @@ class TripRepository @Inject constructor(
                 localPath = localPath,
                 mimeType = mimeType,
                 createdAt = System.currentTimeMillis(),
+                productId = productId,
             ),
         )
     }

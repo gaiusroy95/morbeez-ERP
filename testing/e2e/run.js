@@ -4,7 +4,8 @@
 // driver's completed trips, the books closed through last month), so a chain
 // always runs whole and in order, on a freshly reset database:
 //
-//   1. E2E_RESET_CMD  — empty database → migrations → dev seed → master data
+//   1. E2E_RESET_CMD  — empty database → migrations → dev seed → master data;
+//      then the local Redis is emptied (rate-limit counters, reset-redis.js)
 //   2. start the API  — E2E_API_CMD (as morbeez_app, so RLS applies)
 //   3. the chain's suites, in order — each module's API suite, then its UI
 //   4. stop the API
@@ -32,7 +33,7 @@ const CHAINS = {
     'ai-e2e.js', 'ai-ui-e2e.js',
   ],
   // Backdates invoices and closes periods of its own — on a database of its own.
-  finance: ['owner-modules-e2e.js', 'finance-e2e.js'],
+  finance: ['owner-modules-e2e.js', 'finance-e2e.js', 'redesign-home-e2e.js'],
   // Signs businesses up and ends a trial; needs nothing but the seed.
   signup: ['signup-trial-e2e.js'],
   // Driver money handover and owner trip closure; makes its own data.
@@ -43,6 +44,23 @@ const CHAINS = {
   produce: ['chicken-eggs-finance-e2e.js'],
   // The user's language and each customer's; makes its own data.
   languages: ['languages-e2e.js'],
+  // Worker details, documents and app logins by set-up link; makes its own businesses.
+  staff: ['staff-access-e2e.js'],
+  // Owner app redesign (docs/redesign): Home, Procurement, Delivery orders, Trips, Customers & Farmers, then the
+  // driver app's stock by the kilo (D0), then Inventory, Collections, Finance and Profit, then the driver's day (D1)
+  // the farmer stop (D2) and delivery (D3); runs on the seed, in this order.
+  redesign: [
+    'redesign-home-e2e.js',
+    'redesign-procurement-e2e.js',
+    'redesign-orders-e2e.js',
+    'redesign-trips-e2e.js',
+    'redesign-parties-e2e.js',
+    'stock-by-the-kilo-e2e.js',
+    'redesign-money-e2e.js',
+    'driver-day-e2e.js',
+    'farm-stop-e2e.js',
+    'delivery-stop-e2e.js',
+  ],
 };
 
 const REPO = path.resolve(__dirname, '../..');
@@ -106,6 +124,7 @@ function runSuite(file) {
     for (const c of chains) {
       console.log(`\n##### ${c}`);
       sh(RESET);
+      sh(`node ${path.join(__dirname, 'reset-redis.js')}`);
       const api = background(API_CMD, 'API');
       try {
         await waitFor(`${API}/health`, api);

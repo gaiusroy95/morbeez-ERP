@@ -38,6 +38,8 @@ export interface SaleInvoiceInput {
   // Specific-lot cost of what was delivered (Accounting Engine, COGS.1-2);
   // null when no delivered line had a costed lot.
   costOfGoods: string | null;
+  // The credit term agreed on this order (days); null: the customer's usual terms.
+  creditTermDays?: number | null;
 }
 
 export interface CollectionPaymentInput {
@@ -131,8 +133,9 @@ export class ReceivablesService {
       orderId: input.orderId,
       sourceInvoiceId: null,
       issuedAt: input.deliveredAt,
-      // Fixed now from the terms in force — a later terms change never re-dates it.
-      dueDate: addDays(today, customer.paymentTermsDays),
+      // Fixed now from the terms in force (the order's own, else the
+      // customer's) — a later terms change never re-dates it.
+      dueDate: addDays(today, input.creditTermDays ?? customer.paymentTermsDays),
       // What the customer owes: the goods plus any GST on them.
       amount: tax.total,
       createdBy: actorUserId,

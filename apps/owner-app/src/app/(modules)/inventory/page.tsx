@@ -4,7 +4,11 @@ import { useMemo, useState } from 'react';
 import type { LotRecord, ProductStockRow } from '@morbeez/shared-types';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { EmptyRow, Figures, PageHeader, SelectableRow } from '@/components/ui/ListControls';
+import { EmptyRow, Figures, SelectableRow } from '@/components/ui/ListControls';
+import { DayTabs } from '@/components/redesign/ListCards';
+import { Icon } from '@/components/ui/Icon';
+import { useVehicleBoard } from '@/lib/hooks/use-money-stock';
+import { useT } from '@/lib/i18n';
 import { DetailPanel } from '@/components/ui/DetailPanel';
 import { Field, FormDialog } from '@/components/ui/Form';
 import { apiSend } from '@/lib/api/client';
@@ -138,7 +142,7 @@ function ProductLots({ row, onClose }: { row: ProductStockRow; onClose: () => vo
 
   // The endpoint returns graded lots only; delivered and rejected ones are
   // history, not stock. Ungraded arrivals are summarised from the overview row.
-  const inStock = (data ?? []).filter((lot) => lot.status === 'available' || lot.status === 'reserved');
+  const inStock = (data ?? []).filter((lot) => lot.status === 'available' && Number(lot.currentQuantity ?? 0) > 0);
   const columns = canWrite ? 8 : 7;
 
   return (
@@ -183,11 +187,14 @@ function ProductLots({ row, onClose }: { row: ProductStockRow; onClose: () => vo
                     </td>
                     <td>{lot.grade ?? '—'}</td>
                     <td>{locationName(lot.currentLocationId)}</td>
-                    <td className="align-right">{formatQuantity(lot.currentQuantity ?? lot.receivedQuantity, uom)}</td>
+                    <td className="align-right">
+                      {formatQuantity(lot.currentQuantity ?? lot.receivedQuantity, uom)}
+                      {Number(lot.reservedQuantity) > 0 && <div className="muted">{formatQuantity(lot.reservedQuantity, uom)} held for orders</div>}
+                    </td>
                     <td className="align-right">{lot.unitCost ? formatMoney(lot.unitCost, currency) : '—'}</td>
                     {canWrite && (
                       <td>
-                        {/* A reserved lot is promised to an order; only available stock can change. */}
+                        {/* Only the kilos not held for orders, in the store, can be written off or moved. */}
                         {lot.status === 'available' && (
                           <span className="row-actions">
                             <button
@@ -233,7 +240,110 @@ function ProductLots({ row, onClose }: { row: ProductStockRow; onClose: () => vo
   );
 }
 
-export default function InventoryPage() {
+/** Vehicle Stock (client design V1.1, screen 13): what's on each vehicle now — committed to its deliveries, and free. */
+function VehicleStock() {
+  const t = useT();
+  const { data, error, isPending, refetch } = useVehicleBoard();
+  const [vehicleId, setVehicleId] = useState('');
+  if (isPending) return <SkeletonLines lines={5} height={64} />;
+  if (error) {
+    return (
+      <div className="panel">
+        <ErrorState error={error} onRetry={() => refetch()} />
+      </div>
+    );
+  }
+  const cards = vehicleId ? data.vehicles.filter((v) => v.vehicleId === vehicleId) : data.vehicles;
+  const totals = vehicleId
+    ? cards.reduce(
+        (sum, v) => {
+          for (const p of v.products.filter((x) => x.uom === 'kg')) {
+            sum.onVehicles += Number(p.onVehicle);
+            sum.committed += Number(p.committed);
+            sum.free += Number(p.free);
+          }
+          return sum;
+        },
+        { onVehicles: 0, committed: 0, free: 0 },
+      )
+    : { onVehicles: Number(data.totalsKg.onVehicles), committed: Number(data.totalsKg.committed), free: Number(data.totalsKg.free) };
+  const kg = (value: number | string) => formatQuantity(String(Number(value)), 'kg');
+  return (
+    <>
+      <label className="vehicle-filter">
+        <span className="visually-hidden">{t('Which vehicles')}</span>
+        <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
+          <option value="">{t('All Vehicles')}</option>
+          {data.vehicles.map((v) => (
+            <option key={v.vehicleId} value={v.vehicleId}>
+              {v.registrationNumber}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="card-list">
+        {cards.length === 0 && <div className="list-empty">{t('Nothing is on a vehicle right now.')}</div>}
+        {cards.map((v) => (
+          <section key={v.vehicleId} className="vehicle-stock-card" aria-label={v.registrationNumber}>
+            <div className="vehicle-stock-head">
+              <span className="list-card-badge" aria-hidden="true">
+                <Icon name="truck" size={20} />
+              </span>
+              <span className="vehicle-stock-name">
+                <strong>{v.registrationNumber}</strong>
+                <span className="muted">
+                  {[v.driverName, v.status === 'in_transit' ? t('In Transit') : t('Available')].filter(Boolean).join(' · ')}
+                  {v.tripNumber && (
+                    <>
+                      {' · '}
+                      <span className="nowrap">{v.tripNumber}</span>
+                    </>
+                  )}
+                </span>
+              </span>
+              <span className="vehicle-stock-total">
+                <span className="muted">{t('Total')}</span> <strong>{kg(v.totalKg)}</strong>
+              </span>
+            </div>
+            <ul className="vehicle-stock-lines">
+              {v.products.length === 0 && <li className="muted">{t('Nothing aboard')}</li>}
+              {v.products.map((p) => (
+                <li key={p.productId}>
+                  <span>{p.product}</span>
+                  <span className="num">
+                    {formatQuantity(String(Number(p.onVehicle)), p.uom)}
+                    {Number(p.committed) > 0 && <span className="muted"> · {t('{q} committed', { q: formatQuantity(String(Number(p.committed)), p.uom) })}</span>}
+                    {Number(p.toDeliver) > Number(p.onVehicle) && (
+                      <span className="vehicle-stock-short"> · {t('{q} short', { q: formatQuantity(String(Number(p.toDeliver) - Number(p.onVehicle)), p.uom) })}</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+      <div className="stock-totals">
+        <div>
+          <span>{t('Total on Vehicles')}</span>
+          <strong>{kg(totals.onVehicles)}</strong>
+        </div>
+        <div>
+          <span>{t('Committed')}</span>
+          <strong>{kg(totals.committed)}</strong>
+        </div>
+        <div data-tone="good">
+          <span>{t('Free Stock')}</span>
+          <strong>{kg(totals.free)}</strong>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Total Stock: every product, in the store and out on vehicles; a product opens its lots. */
+function TotalStock() {
+  const t = useT();
   const { data, error, isPending, refetch } = useStockOverview();
   const [selected, setSelected] = useState<string | null>(null);
   const currency = useCurrency();
@@ -255,23 +365,19 @@ export default function InventoryPage() {
   }).length;
 
   return (
-    <div className="stack">
-      <PageHeader
-        title="Inventory"
-        subtitle="What's in the warehouse right now — sellable, promised to orders, and still to be graded."
-      />
+    <>
       {data && (
         <Figures
           items={[
-            { label: 'Stock value at cost', value: formatMoney(sumMoney(rows.map((r) => r.valueAtCost)), currency) },
-            { label: 'Products in stock', value: formatCount(rows.filter((r) => Number(r.physical) > 0).length) },
+            { label: t('Stock value at cost'), value: formatMoney(sumMoney(rows.map((r) => r.valueAtCost)), currency) },
+            { label: t('Products in stock'), value: formatCount(rows.filter((r) => Number(r.physical) > 0).length) },
             {
-              label: 'Lots waiting for grading',
+              label: t('Lots waiting for grading'),
               value: formatCount(rows.reduce((n, r) => n + r.ungradedLots, 0)),
               tone: rows.some((r) => r.ungradedLots > 0) ? 'attention' : undefined,
             },
             {
-              label: `Products with stock ${AGING_AFTER_DAYS}+ days old`,
+              label: t('Products with stock {n}+ days old', { n: AGING_AFTER_DAYS }),
               value: formatCount(aging),
               tone: aging > 0 ? 'attention' : undefined,
             },
@@ -279,7 +385,7 @@ export default function InventoryPage() {
         />
       )}
       <div className="split" data-detail={selectedRow ? 'open' : undefined}>
-        <Panel title="Stock by product" meta="available = on hand − reserved">
+        <Panel title={t('Stock by product')} meta={t('free = on hand − held for orders')}>
           {isPending ? (
             <SkeletonLines lines={6} />
           ) : error ? (
@@ -289,20 +395,22 @@ export default function InventoryPage() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Product</th>
-                    <th className="align-right">Available</th>
-                    <th className="align-right">Reserved</th>
-                    <th className="align-right">On hand</th>
-                    <th className="align-right">Ungraded</th>
-                    <th className="align-right">Value at cost</th>
-                    <th className="align-right">Oldest</th>
+                    <th>{t('Product')}</th>
+                    <th className="align-right">{t('On hand')}</th>
+                    <th className="align-right">{t('In store')}</th>
+                    <th className="align-right">{t('On vehicles')}</th>
+                    <th className="align-right">{t('Held for orders')}</th>
+                    <th className="align-right">{t('Free')}</th>
+                    <th className="align-right">{t('Value at cost')}</th>
+                    <th className="align-right">{t('Oldest')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 && <EmptyRow colSpan={7}>No stock recorded yet.</EmptyRow>}
+                  {rows.length === 0 && <EmptyRow colSpan={8}>{t('No stock recorded yet.')}</EmptyRow>}
                   {rows.map((row) => {
                     const uom = productUom(row.productId);
                     const age = daysSince(row.oldestAvailableReceivedAt);
+                    const inStore = (Number(row.physical) - Number(row.onVehicles)).toFixed(3);
                     return (
                       <SelectableRow
                         key={row.productId}
@@ -310,23 +418,25 @@ export default function InventoryPage() {
                         onSelect={() => setSelected(row.productId)}
                         label={`Lots of ${productName(row.productId)}`}
                       >
-                        <td>{productName(row.productId)}</td>
-                        <td className="align-right strong">{formatQuantity(row.available, uom)}</td>
-                        <td className="align-right">{formatQuantity(row.reserved, uom)}</td>
-                        <td className="align-right">{formatQuantity(row.physical, uom)}</td>
-                        <td className="align-right">
-                          {row.ungradedLots > 0 ? formatQuantity(row.ungradedQuantity, uom) : '—'}
+                        <td>
+                          {productName(row.productId)}
+                          {row.ungradedLots > 0 && <div className="muted">{t('{q} to grade', { q: formatQuantity(row.ungradedQuantity, uom) })}</div>}
                         </td>
+                        <td className="align-right strong">{formatQuantity(row.physical, uom)}</td>
+                        <td className="align-right">{formatQuantity(inStore, uom)}</td>
+                        <td className="align-right">{formatQuantity(row.onVehicles, uom)}</td>
+                        <td className="align-right">{formatQuantity(row.reserved, uom)}</td>
+                        <td className="align-right">{formatQuantity(row.available, uom)}</td>
                         <td className="align-right">{formatMoney(row.valueAtCost, currency)}</td>
                         <td className="align-right">
                           {age === null ? (
                             '—'
                           ) : age >= AGING_AFTER_DAYS ? (
-                            <StatusBadge status="aging" tone="attention" label={`${age} days`} />
+                            <StatusBadge status="aging" tone="attention" label={t('{n} days', { n: age })} />
                           ) : age === 0 ? (
-                            'Today'
+                            t('Today')
                           ) : (
-                            `${age} day${age === 1 ? '' : 's'}`
+                            t(age === 1 ? '{n} day' : '{n} days', { n: age })
                           )}
                         </td>
                       </SelectableRow>
@@ -339,6 +449,29 @@ export default function InventoryPage() {
         </Panel>
         {selectedRow && <ProductLots key={selectedRow.productId} row={selectedRow} onClose={() => setSelected(null)} />}
       </div>
+    </>
+  );
+}
+
+type StockTab = 'vehicles' | 'total';
+
+/** Inventory (client design V1.1, screen 13): Vehicle Stock and Total Stock. */
+export default function InventoryPage() {
+  const t = useT();
+  const [tab, setTab] = useState<StockTab>('vehicles');
+  return (
+    <div className="stack" style={{ maxWidth: tab === 'vehicles' ? 760 : undefined }}>
+      <h1 className="page-title visually-hidden">{t('Inventory')}</h1>
+      <DayTabs
+        label="Stock view"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'vehicles', label: 'Vehicle Stock' },
+          { value: 'total', label: 'Total Stock' },
+        ]}
+      />
+      {tab === 'vehicles' ? <VehicleStock /> : <TotalStock />}
     </div>
   );
 }

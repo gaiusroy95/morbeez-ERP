@@ -10,6 +10,9 @@ interface CustomerRow {
   tenant_id: string;
   name: string;
   contact: Record<string, unknown>;
+  place: string | null;
+  address: string | null;
+  route_id: string | null;
   preferred_language: string;
   credit_limit: string;
   payment_terms_days: number;
@@ -18,6 +21,8 @@ interface CustomerRow {
   finance_charge_grace_days: number;
   credit_hold: boolean;
   credit_hold_reason: string | null;
+  is_walk_in: boolean;
+  qr_token: string;
   status: 'active' | 'archived';
   version: number;
   created_at: Date;
@@ -25,12 +30,19 @@ interface CustomerRow {
   created_by: string;
 }
 
+// A customer's usual route is the route they're a stop on (Routes owns trading_partners.route_stop).
+const CUSTOMER_SELECT = `SELECT c.*, (SELECT s.route_id FROM trading_partners.route_stop s WHERE s.customer_id = c.id) AS route_id
+  FROM trading_partners.customer c`;
+
 function toRecord(row: CustomerRow): CustomerRecord {
   return {
     id: row.id,
     tenantId: row.tenant_id,
     name: row.name,
     contact: row.contact ?? {},
+    place: row.place ?? null,
+    address: row.address ?? null,
+    routeId: row.route_id ?? null,
     preferredLanguage: row.preferred_language ?? 'en',
     creditLimit: row.credit_limit,
     paymentTermsDays: row.payment_terms_days,
@@ -39,6 +51,8 @@ function toRecord(row: CustomerRow): CustomerRecord {
     financeChargeGraceDays: row.finance_charge_grace_days,
     creditHold: row.credit_hold,
     creditHoldReason: row.credit_hold_reason,
+    isWalkIn: row.is_walk_in,
+    qrToken: row.qr_token,
     status: row.status,
     version: row.version,
     createdAt: row.created_at,
@@ -62,8 +76,8 @@ export class CustomersRepository {
     return this.db.withTenant(tenantId, async (client) => {
       const [rows, count] = await Promise.all([
         client.query<CustomerRow>(
-          `SELECT * FROM trading_partners.customer
-           ORDER BY name
+          `${CUSTOMER_SELECT}
+           ORDER BY c.name
            LIMIT $1 OFFSET $2`,
           [size, offset],
         ),
@@ -85,10 +99,7 @@ export class CustomersRepository {
   }
 
   async findByIdWithClient(client: PoolClient, id: string): Promise<CustomerRecord | null> {
-    const result = await client.query<CustomerRow>(
-      'SELECT * FROM trading_partners.customer WHERE id = $1',
-      [id],
-    );
+    const result = await client.query<CustomerRow>(`${CUSTOMER_SELECT} WHERE c.id = $1`, [id]);
     return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
@@ -102,13 +113,15 @@ export class CustomersRepository {
       creditLimit: number;
       paymentTermsDays: number;
       preferredLanguage?: string;
+      place?: string | null;
+      address?: string | null;
     },
   ): Promise<CustomerRecord> {
-    const result = await client.query<CustomerRow>(
+    const result = await client.query<{ id: string }>(
       `INSERT INTO trading_partners.customer
-         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by, preferred_language)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
+         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by, preferred_language, place, address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id`,
       [
         tenantId,
         fields.name,
@@ -117,9 +130,11 @@ export class CustomersRepository {
         fields.paymentTermsDays,
         createdBy,
         fields.preferredLanguage ?? 'en',
+        fields.place ?? null,
+        fields.address ?? null,
       ],
     );
-    return toRecord(result.rows[0]);
+    return (await this.findByIdWithClient(client, result.rows[0].id))!;
   }
 
   /**
@@ -136,29 +151,38 @@ export class CustomersRepository {
       name: string;
       contact: Record<string, unknown>;
       preferredLanguage: string;
+      // A key that is present (even as null) is written; one left out is kept.
+      place: string | null;
+      address: string | null;
     }>,
   ): Promise<CustomerRecord> {
-    const result = await client.query<CustomerRow>(
+    const result = await client.query<{ id: string }>(
       `UPDATE trading_partners.customer SET
          name = COALESCE($3, name),
          contact = COALESCE($4, contact),
          preferred_language = COALESCE($5, preferred_language),
+         place = CASE WHEN $6::boolean THEN $7 ELSE place END,
+         address = CASE WHEN $8::boolean THEN $9 ELSE address END,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
-       RETURNING *`,
+       RETURNING id`,
       [
         id,
         expectedVersion,
         fields.name,
         fields.contact ? JSON.stringify(fields.contact) : null,
         fields.preferredLanguage ?? null,
+        'place' in fields,
+        fields.place ?? null,
+        'address' in fields,
+        fields.address ?? null,
       ],
     );
     if (result.rowCount === 0) {
       throw new OptimisticLockException('Customer', id);
     }
-    return toRecord(result.rows[0]);
+    return (await this.findByIdWithClient(client, id))!;
   }
 
   /**
@@ -192,7 +216,7 @@ export class CustomersRepository {
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
-       RETURNING *`,
+       RETURNING id`,
       [
         id,
         expectedVersion,
@@ -208,7 +232,19 @@ export class CustomersRepository {
     if (result.rowCount === 0) {
       throw new OptimisticLockException('Customer', id);
     }
-    return toRecord(result.rows[0]);
+    return (await this.findByIdWithClient(client, id))!;
+  }
+
+  /** A new QR for the shop: the old printout stops matching. */
+  async newQrWithClient(client: PoolClient, id: string): Promise<CustomerRecord | null> {
+    const result = await client.query<CustomerRow>(
+      `UPDATE trading_partners.customer
+       SET qr_token = upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)), version = version + 1, updated_at = now()
+       WHERE id = $1
+       RETURNING id`,
+      [id],
+    );
+    return result.rows[0] ? this.findByIdWithClient(client, id) : null;
   }
 
   async setStatusWithClient(
@@ -219,9 +255,9 @@ export class CustomersRepository {
     const result = await client.query<CustomerRow>(
       `UPDATE trading_partners.customer SET status = $2, version = version + 1, updated_at = now()
        WHERE id = $1
-       RETURNING *`,
+       RETURNING id`,
       [id, status],
     );
-    return result.rows[0] ? toRecord(result.rows[0]) : null;
+    return result.rows[0] ? this.findByIdWithClient(client, id) : null;
   }
 }

@@ -24,39 +24,43 @@ import androidx.core.view.WindowCompat
 import com.morbeez.driver.R
 
 /**
- * "Fresh Ledger" — the same design system as the owner web app
- * (apps/owner-app/src/app/globals.css): a carbon frame, a light workspace,
- * emerald for the brand and lime for what's active. Colours are named for
- * their role, never used raw in a screen.
+ * The client's Driver App V1 look (docs/redesign/driver-app-v1-plan.md),
+ * the same green brand as the redesigned owner app
+ * (apps/owner-app/src/app/redesign.css): a deep green frame, a light
+ * workspace, green for the brand and a fresh light green for what's active.
+ * Colours are named for their role, never used raw in a screen — the frame
+ * keeps its old "carbon" names.
  */
 object Fresh {
-    val carbon = Color(0xFF0C1210)
-    val carbon2 = Color(0xFF151D19)
-    val carbon3 = Color(0xFF1E2823)
-    val carbonLine = Color(0xFF24302A)
-    val onCarbon = Color(0xFFEEF3EF)
-    val onCarbonMuted = Color(0xFF9AA8A0)
-    val onCarbonFaint = Color(0xFF66736B)
+    val carbon = Color(0xFF165C2E)
+    val carbon2 = Color(0xFF1B6E37)
+    val carbon3 = Color(0xFF247D43)
+    val carbonLine = Color(0xFF2E8A4F)
+    val onCarbon = Color(0xFFFFFFFF)
+    val onCarbonMuted = Color(0xFFCFE6D5)
+    val onCarbonFaint = Color(0xFF9CC5A8)
 
-    val bg = Color(0xFFF3F4F0)
+    val bg = Color(0xFFF5F7F4)
     val surface = Color(0xFFFFFFFF)
-    val surface2 = Color(0xFFF1F3EE)
-    val surface3 = Color(0xFFE8EBE4)
-    val border = Color(0xFFE3E6DE)
-    val borderStrong = Color(0xFFCFD4C8)
+    val surface2 = Color(0xFFF2F5F1)
+    val surface3 = Color(0xFFE9EEE8)
+    val border = Color(0xFFE2E8E0)
+    val borderStrong = Color(0xFFCCD6CA)
     val ink = Color(0xFF0E1410)
     val inkMuted = Color(0xFF545E57)
     val inkFaint = Color(0xFF879089)
 
-    val primary = Color(0xFF0F6B43)
-    val primaryStrong = Color(0xFF0A5232)
-    val primaryTint = Color(0xFFE2F3E8)
-    val accent = Color(0xFFC4F25C)
-    val accentDeep = Color(0xFF7FD66A)
-    val accentInk = Color(0xFF172400)
+    val primary = Color(0xFF1B6E37)
+    val primaryStrong = Color(0xFF145A2C)
+    val primaryTint = Color(0xFFE6F3E9)
+    val accent = Color(0xFF9EE29A)
+    val accentDeep = Color(0xFF5CBF6A)
+    val accentInk = Color(0xFF0D3B1C)
 
     val good = Color(0xFF13824C)
     val warning = Color(0xFFA8620A)
+    /** Warning on the green frame (offline in the status header). */
+    val warningBright = Color(0xFFF2B84B)
     val warningTint = Color(0xFFFDF2DE)
     val critical = Color(0xFFC2412D)
     val criticalTint = Color(0xFFFCE9E5)
@@ -145,7 +149,7 @@ fun MorbeezTheme(darkBars: Boolean = false, content: @Composable () -> Unit) {
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
             window.statusBarColor = (if (darkBars) Fresh.carbon else Fresh.bg).toArgb()
             window.navigationBarColor = (if (darkBars) Fresh.carbon else Fresh.bg).toArgb()
             WindowCompat.getInsetsController(window, view).apply {

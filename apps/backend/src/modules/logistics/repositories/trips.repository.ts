@@ -4,16 +4,25 @@ import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
 import { TripRecord, TripStatus } from '../entities/trip.entity';
+import { dateOnly } from '../../../common/persistence/date-only';
 
 interface TripRow {
   id: string;
   tenant_id: string;
+  number: string;
+  route_id: string | null;
   vehicle_id: string;
   driver_employee_id: string;
+  packer_employee_id: string | null;
+  loader_employee_id: string | null;
   status: TripStatus;
-  planned_date: string | null;
+  planned_date: string | Date | null;
   advance_amount: string;
   started_at: Date | null;
+  opening_km: string | null;
+  start_latitude: string | null;
+  start_longitude: string | null;
+  delivery_started_at: Date | null;
   completed_at: Date | null;
   submitted_by: string | null;
   cash_declared: string | null;
@@ -29,12 +38,20 @@ function toRecord(row: TripRow): TripRecord {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    number: row.number,
+    routeId: row.route_id ?? null,
     vehicleId: row.vehicle_id,
     driverEmployeeId: row.driver_employee_id,
+    packerEmployeeId: row.packer_employee_id ?? null,
+    loaderEmployeeId: row.loader_employee_id ?? null,
     status: row.status,
-    plannedDate: row.planned_date,
+    plannedDate: dateOnly(row.planned_date),
     advanceAmount: row.advance_amount,
     startedAt: row.started_at,
+    openingKm: row.opening_km ?? null,
+    startLatitude: row.start_latitude ?? null,
+    startLongitude: row.start_longitude ?? null,
+    deliveryStartedAt: row.delivery_started_at ?? null,
     completedAt: row.completed_at,
     submittedBy: row.submitted_by ?? null,
     cashDeclared: row.cash_declared ?? null,
@@ -129,36 +146,88 @@ export class TripsRepository {
     client: PoolClient,
     tenantId: string,
     createdBy: string,
-    fields: { vehicleId: string; driverEmployeeId: string; plannedDate: string | null; advanceAmount: number },
+    fields: {
+      number: string;
+      routeId?: string | null;
+      vehicleId: string;
+      driverEmployeeId: string;
+      packerEmployeeId?: string | null;
+      loaderEmployeeId?: string | null;
+      plannedDate: string | null;
+      advanceAmount: number;
+    },
   ): Promise<TripRecord> {
     const result = await client.query<TripRow>(
-      `INSERT INTO fulfilment.trip (tenant_id, vehicle_id, driver_employee_id, planned_date, advance_amount, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO fulfilment.trip
+         (tenant_id, vehicle_id, driver_employee_id, planned_date, advance_amount, created_by, number, route_id, packer_employee_id, loader_employee_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [tenantId, fields.vehicleId, fields.driverEmployeeId, fields.plannedDate, fields.advanceAmount, createdBy],
+      [
+        tenantId,
+        fields.vehicleId,
+        fields.driverEmployeeId,
+        fields.plannedDate,
+        fields.advanceAmount,
+        createdBy,
+        fields.number,
+        fields.routeId ?? null,
+        fields.packerEmployeeId ?? null,
+        fields.loaderEmployeeId ?? null,
+      ],
     );
     return toRecord(result.rows[0]);
   }
 
-  async startWithClient(client: PoolClient, id: string, expectedVersion: number): Promise<TripRecord> {
+  /** [readings]: the odometer and the phone's position when the day started, when the driver gave them. */
+  /** Start Trip (driver app D3): the delivery run set off — the first time only. */
+  async startDeliveriesWithClient(client: PoolClient, id: string): Promise<TripRecord | null> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET delivery_started_at = COALESCE(delivery_started_at, now()), updated_at = now()
+       WHERE id = $1 AND status = 'in_progress'
+       RETURNING *`,
+      [id],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
+  async startWithClient(
+    client: PoolClient,
+    id: string,
+    expectedVersion: number,
+    readings: { openingKm: number | null; latitude: number | null; longitude: number | null; accuracyMeters: number | null } = {
+      openingKm: null,
+      latitude: null,
+      longitude: null,
+      accuracyMeters: null,
+    },
+  ): Promise<TripRecord> {
     const result = await client.query<TripRow>(
       `UPDATE fulfilment.trip SET
          status = 'in_progress',
          started_at = now(),
+         opening_km = $3,
+         start_latitude = $4,
+         start_longitude = $5,
+         start_accuracy_m = $6,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2 AND status = 'planned'
        RETURNING *`,
-      [id, expectedVersion],
+      [id, expectedVersion, readings.openingKm, readings.latitude, readings.longitude, readings.latitude === null ? null : readings.accuracyMeters],
     );
     if (result.rowCount === 0) throw new OptimisticLockException('Trip', id);
     return toRecord(result.rows[0]);
   }
 
-  /** A planned trip handed to another driver (owner day-off, backup driver). */
+  /**
+   * A planned trip handed to another driver (owner day-off, backup driver).
+   * If they were its packer or loader, they're the driver now instead.
+   */
   async assignDriverWithClient(client: PoolClient, id: string, driverEmployeeId: string): Promise<TripRecord | null> {
     const result = await client.query<TripRow>(
-      `UPDATE fulfilment.trip SET driver_employee_id = $2, version = version + 1, updated_at = now()
+      `UPDATE fulfilment.trip SET driver_employee_id = $2,
+         packer_employee_id = NULLIF(packer_employee_id, $2), loader_employee_id = NULLIF(loader_employee_id, $2),
+         version = version + 1, updated_at = now()
        WHERE id = $1 AND status = 'planned'
        RETURNING *`,
       [id, driverEmployeeId],

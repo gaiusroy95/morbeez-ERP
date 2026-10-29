@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { DashboardAlerts, DashboardKpis, DashboardOperations, DashboardProfit } from '@morbeez/shared-types';
+import type { DashboardAlerts, DashboardHome, DashboardKpis, DashboardOperations, DashboardProfit, HomePeriodName } from '@morbeez/shared-types';
 import { apiGet } from '../api/client';
 
 // Alerts and the operations board change through the working day; poll
@@ -38,6 +38,16 @@ export function useDashboardOperations() {
   return useQuery({
     queryKey: ['dashboard', 'operations'],
     queryFn: () => apiGet<DashboardOperations>('dashboard/operations'),
+    refetchInterval: LIVE_REFRESH_MS,
+  });
+}
+
+/** The Home screen in one call. */
+export function useDashboardHome(period: HomePeriodName) {
+  return useQuery({
+    queryKey: ['dashboard', 'home', period],
+    queryFn: () => apiGet<DashboardHome>('dashboard/home', { period }),
+    placeholderData: (previous) => previous,
     refetchInterval: LIVE_REFRESH_MS,
   });
 }

@@ -1,9 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { ALERT_THRESHOLDS, DashboardService, subtractMoney } from './dashboard.service';
+import { ALERT_THRESHOLDS, DashboardService, percentChange, percentOf, subtractMoney } from './dashboard.service';
 import { AlertRow, DashboardRepository, PeriodFlows, ResolvedPeriod } from './repositories/dashboard.repository';
 import { DatabaseService } from '../../infra/database/database.service';
+import { AccountingService } from '../accounting/accounting.service';
 
 const fakeClient = {} as PoolClient;
 
@@ -62,8 +63,11 @@ describe('DashboardService', () => {
             profitByProduct: jest.fn(),
             alerts: jest.fn(),
             operations: jest.fn(),
+            cashBalance: jest.fn().mockResolvedValue('11714.49'),
+            productProfit: jest.fn().mockResolvedValue([]),
           },
         },
+        { provide: AccountingService, useValue: { getProfitAndLoss: jest.fn() } },
         { provide: DatabaseService, useValue: { withTenant: jest.fn((_t, work) => work(fakeClient)) } },
       ],
     }).compile();
@@ -210,6 +214,91 @@ describe('DashboardService', () => {
     expect(ops.trips.inProgress).toBe(2);
     expect(ops.orders.deliveredToday).toBe(7);
     expect(ops.stock.lotsUngraded).toBe(2);
+  });
+});
+
+describe('DashboardService — Finance hub and Profit & Insights', () => {
+  let service: DashboardService;
+  let repo: jest.Mocked<DashboardRepository>;
+  let accounting: { getProfitAndLoss: jest.Mock };
+  const today: ResolvedPeriod = { ...period, fromDate: '2026-10-28', toDate: '2026-10-28' };
+
+  beforeEach(async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        DashboardService,
+        {
+          provide: DashboardRepository,
+          useValue: {
+            resolvePeriod: jest.fn().mockResolvedValue(today),
+            balances: jest.fn().mockResolvedValue({ stock_on_hand_value: '0.00', receivables_outstanding: '6143.99', farmer_payables_outstanding: '4221.00' }),
+            cashBalance: jest.fn().mockResolvedValue('11714.49'),
+            productProfit: jest.fn().mockResolvedValue([
+              { product_id: 'p-ginger', product: 'Ginger', revenue: '1000.00', cost: '720.00' },
+              { product_id: 'p-free', product: 'Gift', revenue: '0.00', cost: '0.00' },
+            ]),
+          },
+        },
+        {
+          provide: AccountingService,
+          useValue: {
+            getProfitAndLoss: jest.fn().mockResolvedValue({
+              currency: 'INR',
+              from: '2026-10-01',
+              to: '2026-10-28',
+              sections: [],
+              figures: { netSales: '4823.00', costOfSales: '0.00', grossProfit: '0.00', operatingExpenses: '300.00', operatingProfit: '0.00', otherIncome: '0.00', financeCosts: '20.00', otherExpenses: '5.00', netProfit: '1248.50' },
+              previous: { from: '2026-09-03', to: '2026-09-30', figures: { netSales: '4306.25', costOfSales: '0.00', grossProfit: '0.00', operatingExpenses: '300.00', operatingProfit: '0.00', otherIncome: '0.00', financeCosts: '20.00', otherExpenses: '5.00', netProfit: '0.00' } },
+            }),
+          },
+        },
+        { provide: DatabaseService, useValue: { withTenant: jest.fn((_t, work) => work(fakeClient)) } },
+      ],
+    }).compile();
+    service = module.get(DashboardService);
+    repo = module.get(DashboardRepository);
+    accounting = module.get(AccountingService);
+  });
+
+  it('this month runs from the 1st to today, in the business\'s timezone', async () => {
+    await service.getFinanceSummary('tenant-1', { period: 'month' });
+    expect(repo.resolvePeriod).toHaveBeenLastCalledWith(fakeClient, '2026-10-01', '2026-10-28', 1);
+    expect(accounting.getProfitAndLoss).toHaveBeenCalledWith('tenant-1', { from: today.fromDate, to: today.toDate });
+  });
+
+  it('the last 7 days end today; a custom period needs both dates', async () => {
+    await service.getFinanceSummary('tenant-1', { period: 'week' });
+    expect(repo.resolvePeriod).toHaveBeenLastCalledWith(fakeClient, '2026-10-22', '2026-10-28', 1);
+    await expect(service.getInsights('tenant-1', { period: 'custom', from: '2026-10-01' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('Finance: balances as they stand, and expenses as every cost but the goods sold', async () => {
+    const summary = await service.getFinanceSummary('tenant-1', { period: 'today' });
+    expect(summary).toEqual(
+      expect.objectContaining({ receivables: '6143.99', payables: '4221.00', cashBalance: '11714.49', expenses: '325.00' }),
+    );
+    expect(summary.range.name).toBe('today');
+  });
+
+  it('Profit: revenue − total cost = net profit, the margin on revenue, and the change on the period before', async () => {
+    const insights = await service.getInsights('tenant-1', { period: 'month' });
+    expect(insights.revenue).toBe('4823.00');
+    expect(insights.totalCost).toBe('3574.50');
+    expect(insights.netProfit).toBe('1248.50');
+    expect(insights.marginPercent).toBe('25.9');
+    expect(insights.revenueChangePercent).toBe('12.0');
+    expect(insights.netProfitChangePercent).toBeNull();
+    expect(insights.products).toEqual([
+      { productId: 'p-ginger', product: 'Ginger', revenue: '1000.00', costOfGoods: '720.00', profit: '280.00', marginPercent: '28.0' },
+      { productId: 'p-free', product: 'Gift', revenue: '0.00', costOfGoods: '0.00', profit: '0.00', marginPercent: null },
+    ]);
+  });
+
+  it('percentages: change against nothing, and a share of nothing, are not numbers', () => {
+    expect(percentChange('10.00', '0.00')).toBeNull();
+    expect(percentChange('-5.00', '10.00')).toBe('-150.0');
+    expect(percentOf('1.00', '0.00')).toBeNull();
+    expect(percentOf('-50.00', '200.00')).toBe('-25.0');
   });
 });
 

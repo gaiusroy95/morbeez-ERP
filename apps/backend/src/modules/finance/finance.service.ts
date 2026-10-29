@@ -9,6 +9,8 @@ import { FinanceRepository, ResolvedRange, TenantMoneyContext } from './reposito
 import { ReceivablesService } from './receivables.service';
 import { CashFlowReport, PayableLot, PayablesReport, ReceivablesReport, TripCashReport } from './entities/finance.entity';
 import { CustomerCreditStatus, CustomerStatement, TrialBalance } from './entities/finance-engine.entity';
+import { CollectionsRepository } from './repositories/collections.repository';
+import { CollectionsBoard, CollectionsView } from './entities/collections.entity';
 
 const DEFAULT_PERIOD_DAYS = 30;
 const MAX_PERIOD_DAYS = 366;
@@ -32,7 +34,29 @@ export class FinanceService {
     private readonly finance: FinanceRepository,
     private readonly receivables: ReceivablesService,
     private readonly customers: CustomersService,
+    private readonly collections: CollectionsRepository,
   ) {}
+
+  /**
+   * The owner's Collections (redesign V1.1, screen 14): payments received
+   * today, customers whose money has fallen due and isn't in (pending), or
+   * every payment, newest first — each with what the customer owes now.
+   */
+  getCollections(tenantId: string, view: CollectionsView, q: string | null, page: number, pageSize: number): Promise<CollectionsBoard> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const counts = await this.collections.countsWithClient(client, q);
+      const items = await this.collections.itemsWithClient(client, view, q, pageSize, (page - 1) * pageSize);
+      return {
+        view,
+        counts: { today: counts.today, pending: counts.pending, all: counts.all },
+        totals: { collectedToday: counts.collected_today, dueNow: counts.due_now },
+        items,
+        total: counts[view],
+        page,
+        pageSize,
+      };
+    });
+  }
 
   getReceivables(tenantId: string): Promise<ReceivablesReport> {
     return this.db.withTenant(tenantId, async (client) => {

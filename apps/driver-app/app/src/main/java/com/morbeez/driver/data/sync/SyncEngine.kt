@@ -11,6 +11,7 @@ import com.morbeez.driver.data.remote.dto.RecordDepositRequest
 import com.morbeez.driver.data.remote.dto.RecordExpenseRequest
 import com.morbeez.driver.data.remote.dto.ReportProblemRequest
 import com.morbeez.driver.data.remote.dto.SkipStopRequest
+import com.morbeez.driver.data.remote.dto.StartTripRequest
 import com.morbeez.driver.data.remote.dto.SubmitTripRequest
 import com.morbeez.driver.data.repository.TripRepository
 import com.squareup.moshi.Moshi
@@ -75,11 +76,7 @@ class SyncEngine @Inject constructor(
                 // the business subscribes.
                 return false
             } else {
-                pendingOperationDao.markFailed(
-                    operation.idempotencyKey,
-                    "failed_needs_review",
-                    outcome.exceptionOrNull()?.message ?: "sync failed",
-                )
+                pendingOperationDao.markFailed(operation.idempotencyKey, "failed_needs_review", reasonOf(outcome.exceptionOrNull()))
                 return false
             }
         }
@@ -90,7 +87,20 @@ class SyncEngine @Inject constructor(
         when (PendingOperationType.valueOf(operation.operationType)) {
             PendingOperationType.COMPLETE_PICKUP_STOP -> {
                 val payload = parse<CompletePickupPayload>(operation.payloadJson)
-                api.completePickupStop(operation.tripId, payload.stopId, CompletePickupRequest(payload.weights))
+                // The farm's photos first: the owner sees the load and the rejections with the stop.
+                if (!pushPhotos(payload.stopId)) error("The farm's photos haven't uploaded yet")
+                api.completePickupStop(
+                    operation.tripId,
+                    payload.stopId,
+                    CompletePickupRequest(payload.weights, payload.lines, payload.packerEmployeeId, payload.loaderEmployeeId),
+                )
+            }
+            PendingOperationType.START_DELIVERIES -> {
+                api.startDeliveries(operation.tripId)
+            }
+            PendingOperationType.ARRIVE_STOP -> {
+                val payload = parse<ArriveStopPayload>(operation.payloadJson)
+                api.arriveAtStop(operation.tripId, payload.stopId)
             }
             PendingOperationType.COMPLETE_DELIVERY_STOP -> {
                 val payload = parse<CompleteDeliveryPayload>(operation.payloadJson)
@@ -100,7 +110,15 @@ class SyncEngine @Inject constructor(
                 api.completeDeliveryStop(
                     operation.tripId,
                     payload.stopId,
-                    CompleteDeliveryRequest(payload.recipientName, payload.signatureData, payload.lines),
+                    CompleteDeliveryRequest(
+                        payload.recipientName,
+                        payload.signatureData,
+                        payload.lines,
+                        payload.qrToken,
+                        payload.qrNote,
+                        payload.allUnloaded,
+                        payload.crates,
+                    ),
                 )
             }
             PendingOperationType.SKIP_STOP -> {
@@ -136,6 +154,18 @@ class SyncEngine @Inject constructor(
                 val payload = parse<ReportProblemPayload>(operation.payloadJson)
                 api.reportProblem(operation.tripId, ReportProblemRequest(payload.kind, payload.note), operation.idempotencyKey)
             }
+            PendingOperationType.START_TRIP -> {
+                val payload = parse<StartTripPayload>(operation.payloadJson)
+                // Only a trip still planned: one already on the road (a pass
+                // that timed out after the server had it) needs nothing more.
+                val trip = api.getTrip(operation.tripId)
+                if (trip.status == "planned") {
+                    api.startTrip(
+                        operation.tripId,
+                        StartTripRequest(trip.version, payload.openingKm, payload.latitude, payload.longitude, payload.accuracyMeters),
+                    )
+                }
+            }
             PendingOperationType.SUBMIT_TRIP -> {
                 val payload = parse<SubmitTripPayload>(operation.payloadJson)
                 // The server's current version: the owner may have returned
@@ -160,7 +190,8 @@ class SyncEngine @Inject constructor(
                 val body = file.asRequestBody(mediaType)
                 val part = MultipartBody.Part.createFormData("file", file.name, body)
                 val photoTypeBody = photo.photoType.toRequestBody("text/plain".toMediaTypeOrNull())
-                api.uploadPhoto(photo.tripId, photo.stopId, photoTypeBody, part)
+                val productBody = photo.productId?.toRequestBody("text/plain".toMediaTypeOrNull())
+                api.uploadPhoto(photo.tripId, photo.stopId, photoTypeBody, part, productBody)
             }
             if (outcome.isSuccess) {
                 pendingPhotoDao.delete(photo.id)
@@ -172,6 +203,16 @@ class SyncEngine @Inject constructor(
             }
         }
         return true
+    }
+
+    /** The server's own words for a refusal ("Opening KM … is below …"), not just "HTTP 400". */
+    private fun reasonOf(error: Throwable?): String {
+        if (error is retrofit2.HttpException) {
+            val body = runCatching { error.response()?.errorBody()?.string() }.getOrNull()
+            val message = body?.let { runCatching { org.json.JSONObject(it).optJSONObject("error")?.optString("message") }.getOrNull() }
+            if (!message.isNullOrBlank()) return message
+        }
+        return error?.message ?: "sync failed"
     }
 
     private fun isReadOnlyAccount(error: Throwable?): Boolean =

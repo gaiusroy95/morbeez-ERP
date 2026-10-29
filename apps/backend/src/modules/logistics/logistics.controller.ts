@@ -50,6 +50,9 @@ import { SkipStopDto } from './dto/skip-stop.dto';
 import { CompletePickupStopDto } from './dto/complete-pickup-stop.dto';
 import { ReportProblemDto } from './dto/report-problem.dto';
 import { Authority } from './delegation';
+import { TripPlanQueryDto, TripsBoardQueryDto } from './dto/trip-planning.dto';
+import { DriverDay, TripPlan, TripQuantities, TripsBoard, TripVehicleStock } from './entities/trip-planning.entity';
+import { StartTripDto } from './dto/start-trip.dto';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
@@ -85,6 +88,27 @@ export class LogisticsController {
     return this.logisticsService.listMyTrips(user.tenantId, user.userId, query.status, query.page ?? 1, query.pageSize ?? 25);
   }
 
+  /** The driver's day: today's trip, its vehicle and last odometer reading, this week's earnings, vehicle stock (driver app D1). */
+  @Get('mine/day')
+  @RequirePermissions('logistics:read')
+  myDay(@CurrentUser() user: AuthContext): Promise<DriverDay> {
+    return this.logisticsService.getDriverDay(user.tenantId, user.userId);
+  }
+
+  /** The owner's Trips list: Today / Tomorrow / All, with search (redesign V1.1). */
+  @Get('board')
+  @RequirePermissions('logistics:dispatch')
+  board(@CurrentUser() user: AuthContext, @Query() query: TripsBoardQueryDto): Promise<TripsBoard> {
+    return this.logisticsService.getBoard(user.tenantId, query.day ?? 'today', query.q ?? null, query.page ?? 1, query.pageSize ?? 50);
+  }
+
+  /** "Create Trip": what a trip on a day along a route could carry, and the vehicle's capacity and stock. */
+  @Get('plan')
+  @RequirePermissions('logistics:dispatch')
+  plan(@CurrentUser() user: AuthContext, @Query() query: TripPlanQueryDto): Promise<TripPlan> {
+    return this.logisticsService.getPlan(user.tenantId, query.date, query.routeId ?? null, query.vehicleId ?? null);
+  }
+
   @Get(':id')
   @RequirePermissions('logistics:read')
   getTrip(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<TripRecord> {
@@ -102,7 +126,7 @@ export class LogisticsController {
   startTrip(
     @CurrentUser() user: AuthContext,
     @Param('id') id: string,
-    @Body() dto: VersionDto,
+    @Body() dto: StartTripDto,
   ): Promise<TripRecord> {
     return this.logisticsService.startTrip(user.tenantId, user.userId, isDispatcher(user), id, dto);
   }
@@ -129,6 +153,20 @@ export class LogisticsController {
   }
 
   // ---- Route: stops ----
+
+  /** Product by product: loaded, picked up, delivered, came back, and what should be on the vehicle. */
+  @Get(':id/quantities')
+  @RequirePermissions('logistics:read')
+  quantities(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<TripQuantities> {
+    return this.logisticsService.getQuantities(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** What's on the trip's vehicle now, against what its pending deliveries need. */
+  @Get(':id/vehicle-stock')
+  @RequirePermissions('logistics:read')
+  vehicleStock(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<TripVehicleStock> {
+    return this.logisticsService.getVehicleStock(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
 
   @Get(':id/stops')
   @RequirePermissions('logistics:read')
@@ -174,7 +212,21 @@ export class LogisticsController {
     @Param('stopId') stopId: string,
     @Body() dto: CompletePickupStopDto,
   ): Promise<TripStopRecord> {
-    return this.logisticsService.completePickupStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto?.weights ?? []);
+    return this.logisticsService.completePickupStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto ?? {});
+  }
+
+  /** Start Trip (driver app D3): the delivery run sets off. */
+  @Post(':id/start-deliveries')
+  @RequirePermissions('logistics:write')
+  startDeliveries(@CurrentUser() user: AuthContext, @Param('id') tripId: string): Promise<TripRecord> {
+    return this.logisticsService.startDeliveries(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** The driver reached the stop (driver app D2: Start pickup). */
+  @Post(':id/stops/:stopId/arrive')
+  @RequirePermissions('logistics:write')
+  arriveAtStop(@CurrentUser() user: AuthContext, @Param('id') tripId: string, @Param('stopId') stopId: string): Promise<TripStopRecord> {
+    return this.logisticsService.arriveAtStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId);
   }
 
   @Post(':id/stops/:stopId/complete-delivery')
@@ -240,6 +292,7 @@ export class LogisticsController {
       stopId,
       dto.photoType,
       file,
+      dto.productId ?? null,
     );
   }
 

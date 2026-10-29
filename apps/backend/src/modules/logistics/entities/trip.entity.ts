@@ -10,12 +10,25 @@ export type TripStatus = 'planned' | 'in_progress' | 'completed' | 'on_hold' | '
 export interface TripRecord {
   id: string;
   tenantId: string;
+  /** "T-20261028-001": the day's running number, per business. */
+  number: string;
+  /** The route it runs, when planned by route. */
+  routeId: string | null;
   vehicleId: string;
   driverEmployeeId: string;
+  /** The crew beside the driver. */
+  packerEmployeeId: string | null;
+  loaderEmployeeId: string | null;
   status: TripStatus;
   plannedDate: string | null; // date as ISO string
   advanceAmount: string; // numeric as string — Constitution III.2
   startedAt: Date | null;
+  /** The odometer when the day started (driver app Start Day), and where the phone was. */
+  openingKm: string | null;
+  startLatitude: string | null;
+  startLongitude: string | null;
+  /** Start Trip in the driver app (D3): when the delivery run set off. */
+  deliveryStartedAt: Date | null;
   completedAt: Date | null;
   /** Who submitted the trip for reconciliation, and the cash they said they were handing over. */
   submittedBy: string | null;

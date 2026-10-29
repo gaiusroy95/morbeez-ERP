@@ -6,12 +6,17 @@ import { CustomersRepository } from './repositories/customers.repository';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { CustomerRecord } from './entities/customer.entity';
+import { RoutesService } from '../routes/routes.service';
+import { CustomerInsightsRepository } from './repositories/customer-insights.repository';
 
 const mockCustomer: CustomerRecord = {
   id: 'customer-1',
   tenantId: 'tenant-1',
   name: 'Test Restaurant',
   contact: {},
+  place: null,
+  address: null,
+  routeId: null,
   preferredLanguage: 'en',
   creditLimit: '0.00',
   paymentTermsDays: 0,
@@ -20,6 +25,8 @@ const mockCustomer: CustomerRecord = {
   financeChargeGraceDays: 0,
   creditHold: false,
   creditHoldReason: null,
+  isWalkIn: false,
+  qrToken: 'QR0000000000TEST',
   status: 'active',
   version: 1,
   createdAt: new Date(),
@@ -55,6 +62,8 @@ describe('CustomersService', () => {
           useValue: { withTenant: jest.fn((_tenantId, work) => work(fakeClient)) },
         },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: RoutesService, useValue: { assertUsable: jest.fn(), placeWithClient: jest.fn() } },
+        { provide: CustomerInsightsRepository, useValue: { figuresWithClient: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

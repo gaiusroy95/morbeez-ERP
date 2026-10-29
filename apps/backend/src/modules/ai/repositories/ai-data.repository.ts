@@ -59,10 +59,11 @@ export class AiDataRepository {
   /** Free stock (available, not reserved) and its weighted unit cost. */
   async freeStock(client: PoolClient): Promise<Map<string, { qty: string; unitCost: string | null }>> {
     const r = await client.query(
-      `SELECT product_id, SUM(current_quantity)::text AS qty,
-              CASE WHEN SUM(current_quantity) > 0 THEN ROUND(SUM(current_quantity * unit_cost) / SUM(current_quantity), 2)::text END AS unit_cost
-       FROM commerce.lot WHERE status = 'available' AND current_quantity > 0 AND unit_cost IS NOT NULL
-       GROUP BY product_id`,
+      `SELECT b.product_id, SUM(b.quantity - b.reserved_quantity)::text AS qty,
+              ROUND(SUM((b.quantity - b.reserved_quantity) * l.unit_cost) / SUM(b.quantity - b.reserved_quantity), 2)::text AS unit_cost
+       FROM stock.lot_balance b JOIN commerce.lot l ON l.id = b.lot_id
+       WHERE l.status = 'available' AND b.quantity > b.reserved_quantity AND l.unit_cost IS NOT NULL
+       GROUP BY b.product_id`,
     );
     return new Map(r.rows.map((x) => [x.product_id as string, { qty: x.qty as string, unitCost: x.unit_cost as string | null }]));
   }
@@ -330,19 +331,20 @@ export class AiDataRepository {
     return r.rows;
   }
 
-  /** Invoiced sale lines priced below the cost of the lots that filled them. */
+  /** Invoiced sale lines priced below the cost of the kilos that filled them. */
   async salesBelowCost(client: PoolClient, since: Date): Promise<Row[]> {
     const r = await client.query(
       `SELECT i.id AS invoice_id, i.invoice_number, i.customer_id, c.name AS customer_name, l.product_id, l.description,
-              l.quantity::text, l.unit_price::text, ROUND(SUM(lot.accepted_quantity * lot.unit_cost) / NULLIF(SUM(lot.accepted_quantity), 0), 2)::text AS unit_cost,
+              l.quantity::text, l.unit_price::text, ROUND(SUM(a.delivered_quantity * lot.unit_cost) / NULLIF(SUM(a.delivered_quantity), 0), 2)::text AS unit_cost,
               i.issued_at
        FROM money.invoice i
        JOIN money.invoice_line l ON l.invoice_id = i.id
        JOIN trading_partners.customer c ON c.id = i.customer_id
-       JOIN commerce.lot lot ON lot.reserved_for_order_line_id = l.order_line_id AND lot.unit_cost IS NOT NULL
+       JOIN commerce.lot_allocation a ON a.order_line_id = l.order_line_id AND a.delivered_quantity > 0
+       JOIN commerce.lot lot ON lot.id = a.lot_id AND lot.unit_cost IS NOT NULL
        WHERE i.kind = 'sale' AND i.issued_at >= $1 AND l.order_line_id IS NOT NULL
        GROUP BY i.id, i.invoice_number, i.customer_id, c.name, l.id, l.product_id, l.description, l.quantity, l.unit_price, i.issued_at
-       HAVING l.unit_price < ROUND(SUM(lot.accepted_quantity * lot.unit_cost) / NULLIF(SUM(lot.accepted_quantity), 0), 2)`,
+       HAVING l.unit_price < ROUND(SUM(a.delivered_quantity * lot.unit_cost) / NULLIF(SUM(a.delivered_quantity), 0), 2)`,
       [since],
     );
     return r.rows;

@@ -1,17 +1,15 @@
-// 'reserved' added for Orders — a whole available lot is claimed for one
-// order line at a time (no partial-lot splitting; consistent with specific
-// lot costing, Accounting Engine LOT.2). Anticipated in this table's own
-// original migration comment: "reserved/... are transitions later modules
-// (Orders, ...) will add once they exist."
-// 'delivered' is terminal: the order a lot was reserved for has reached the
-// customer. It keeps reservedForOrderLineId — cost of goods reads it.
-export type LotStatus = 'received_ungraded' | 'available' | 'reserved' | 'delivered' | 'rejected';
+// A lot is sold by the kilo (driver app D0): its kilos sit in one or more
+// places (stock.lot_balance — the store, a warehouse, a vehicle) and order
+// lines hold or take them (commerce.lot_allocation). 'delivered' is
+// terminal: everything in the lot has been sold.
+export type LotStatus = 'received_ungraded' | 'available' | 'delivered' | 'rejected';
 
 export interface ProductStockRow {
   productId: string;
   available: string;
   reserved: string;
   physical: string;
+  onVehicles: string;
   valueAtCost: string;
   availableLots: number;
   ungradedLots: number;
@@ -33,12 +31,13 @@ export interface LotRecord {
   rejectionReason: string | null;
   unitCost: string | null;
   status: LotStatus;
-  reservedForOrderLineId: string | null;
   // Set once, at grading, to acceptedQuantity — then the Inventory Engine's
-  // running balance: reduced by shrinkage/rejectionPostAcceptance, never by
-  // reservation (a whole-lot claim doesn't shrink the lot, it just flags
-  // it). null until graded, same as acceptedQuantity.
+  // running balance: what's left of the lot wherever it is, reduced by
+  // sales and write-offs. null until graded, same as acceptedQuantity.
   currentQuantity: string | null;
+  /** Kilos of it held for orders. */
+  reservedQuantity: string;
+  /** Its place when all of it is in one warehouse or vehicle; null in the store or split. */
   currentLocationId: string | null;
   receivedAt: Date;
   gradedAt: Date | null;

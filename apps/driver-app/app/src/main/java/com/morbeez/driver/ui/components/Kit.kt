@@ -2,7 +2,11 @@ package com.morbeez.driver.ui.components
 
 import androidx.compose.ui.res.stringResource
 import com.morbeez.driver.R
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,6 +20,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,6 +45,13 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,20 +65,32 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.morbeez.driver.ui.theme.Fresh
+import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
 // Line icons, on a 24-unit grid with round caps: the same set and weight as
 // the owner web app (apps/owner-app/src/components/ui/Icon.tsx).
 // ---------------------------------------------------------------------------
 
-enum class Glyph { Truck, Leaf, Back, Arrow, Sync, Camera, Rupee, Check, Warning, Pin, Box, Fuel, Pen, User, Lock, Tower, Logout }
+enum class Glyph {
+    Truck, Leaf, Back, Arrow, Sync, Camera, Rupee, Check, Warning, Pin, Box, Fuel, Pen, User, Lock, Tower, Logout,
+    Menu, Phone, Navigate, Clock, Wallet, File, Shield, Car, Help, Globe, Home, Gauge, Chevrons, ChevronRight, Qr,
+}
 
 @Composable
 fun GlyphIcon(glyph: Glyph, tint: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -120,6 +144,51 @@ private fun DrawScope.drawGlyph(glyph: Glyph, c: Color, u: Float, stroke: Stroke
             }
         }
         Glyph.Logout -> p { m(15f, 4f); l(18f, 4f); l(19f, 5f); l(19f, 19f); l(18f, 20f); l(15f, 20f); m(10f, 16f); l(14f, 12f); l(10f, 8f); m(14f, 12f); l(4f, 12f) }
+        Glyph.Menu -> p { m(4f, 7f); l(20f, 7f); m(4f, 12f); l(20f, 12f); m(4f, 17f); l(20f, 17f) }
+        Glyph.Phone -> p {
+            m(5f, 4f); l(9f, 4f); l(10.5f, 8.5f); l(8.5f, 10f)
+            cubicTo(9.5f * u, 12.5f * u, 11.5f * u, 14.5f * u, 14f * u, 15.5f * u)
+            l(15.5f, 13.5f); l(20f, 15f); l(20f, 19f)
+            cubicTo(20f * u, 20.1f * u, 19.1f * u, 21f * u, 18f * u, 21f * u)
+            cubicTo(10f * u, 20.5f * u, 3.5f * u, 14f * u, 3f * u, 6f * u)
+            cubicTo(3f * u, 4.9f * u, 3.9f * u, 4f * u, 5f * u, 4f * u)
+            close()
+        }
+        Glyph.Navigate -> p { m(3f, 11f); l(21f, 3f); l(13f, 21f); l(11f, 13f); close() }
+        Glyph.Clock -> { circle(12f, 12f, 8.5f); p { m(12f, 7.5f); l(12f, 12f); l(15f, 14f) } }
+        Glyph.Wallet -> p { m(3f, 8f); l(21f, 8f); l(21f, 20f); l(3f, 20f); close(); m(3f, 8f); l(16f, 4f); l(17f, 8f); m(16f, 14f); l(17.5f, 14f) }
+        Glyph.File -> p { m(6f, 3f); l(14f, 3f); l(19f, 8f); l(19f, 21f); l(6f, 21f); close(); m(14f, 3f); l(14f, 8f); l(19f, 8f); m(9f, 13f); l(16f, 13f); m(9f, 17f); l(16f, 17f) }
+        Glyph.Shield -> p {
+            m(12f, 3f); l(20f, 6f); l(20f, 11f)
+            cubicTo(20f * u, 16f * u, 16.5f * u, 19.5f * u, 12f * u, 21f * u)
+            cubicTo(7.5f * u, 19.5f * u, 4f * u, 16f * u, 4f * u, 11f * u)
+            l(4f, 6f); close(); m(8.5f, 12f); l(11f, 14.5f); l(15.5f, 9.5f)
+        }
+        Glyph.Car -> {
+            p { m(5f, 11f); l(7f, 6f); l(17f, 6f); l(19f, 11f); m(3f, 11f); l(21f, 11f); l(21f, 17f); l(3f, 17f); close(); m(7f, 14f); l(8f, 14f); m(16f, 14f); l(17f, 14f) }
+            p { m(5f, 17f); l(5f, 19.5f); m(19f, 17f); l(19f, 19.5f) }
+        }
+        Glyph.Help -> {
+            circle(12f, 12f, 9f)
+            p { m(9.5f, 9.5f); cubicTo(9.5f * u, 6.5f * u, 14.5f * u, 6.5f * u, 14.5f * u, 9.5f * u); cubicTo(14.5f * u, 11.5f * u, 12f * u, 11.5f * u, 12f * u, 14f * u); m(12f, 17f); l(12f, 17.01f) }
+        }
+        Glyph.Globe -> {
+            circle(12f, 12f, 9f)
+            drawOval(c, Offset(8f * u, 3f * u), Size(8f * u, 18f * u), style = stroke)
+            p { m(3f, 12f); l(21f, 12f) }
+        }
+        Glyph.Home -> p { m(4f, 11f); l(12f, 4f); l(20f, 11f); m(6f, 9.5f); l(6f, 20f); l(18f, 20f); l(18f, 9.5f); m(10f, 20f); l(10f, 14f); l(14f, 14f); l(14f, 20f) }
+        Glyph.Gauge -> {
+            drawArc(c, 150f, 240f, false, Offset(4f * u, 5f * u), Size(16f * u, 16f * u), style = stroke)
+            p { m(12f, 13f); l(15.5f, 9.5f) }
+        }
+        Glyph.Chevrons -> p { m(6f, 7f); l(11f, 12f); l(6f, 17f); m(13f, 7f); l(18f, 12f); l(13f, 17f) }
+        Glyph.ChevronRight -> p { m(9f, 6f); l(15f, 12f); l(9f, 18f) }
+        Glyph.Qr -> {
+            // Three finder squares and a scatter of modules, like a printed QR.
+            p { m(3f, 3f); l(10f, 3f); l(10f, 10f); l(3f, 10f); close(); m(14f, 3f); l(21f, 3f); l(21f, 10f); l(14f, 10f); close(); m(3f, 14f); l(10f, 14f); l(10f, 21f); l(3f, 21f); close() }
+            p { m(14f, 14f); l(17f, 14f); m(20f, 14f); l(21f, 14f); m(14f, 17.5f); l(14f, 21f); m(17.5f, 17.5f); l(21f, 17.5f); m(18f, 21f); l(21f, 21f) }
+        }
     }
 }
 
@@ -314,6 +383,117 @@ fun PrimaryAction(
                 GlyphIcon(glyph, if (danger) Color.White else if (enabled) Fresh.accentInk else Fresh.inkFaint, size = 16.dp)
             }
         }
+    }
+}
+
+/**
+ * An action a slip of the thumb mustn't take (Start Day, completing a stop):
+ * press and hold until the bar fills; letting go early cancels. TalkBack
+ * users activate it like any button.
+ */
+@Composable
+fun HoldToConfirm(
+    text: String,
+    onConfirm: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    holdMillis: Int = 1200,
+) {
+    val progress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val confirm by rememberUpdatedState(onConfirm)
+    var fired by remember { mutableStateOf(false) }
+    LaunchedEffect(enabled) {
+        if (!enabled) {
+            fired = false
+            progress.snapTo(0f)
+        }
+    }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(62.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (enabled) Fresh.carbon else Fresh.surface3)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                if (!enabled) disabled()
+                onClick(label = text) {
+                    if (enabled && !fired) {
+                        fired = true
+                        confirm()
+                    }
+                    enabled
+                }
+            }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(onPress = {
+                    if (fired) return@detectTapGestures
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    val filling = scope.launch {
+                        val left = ((1f - progress.value) * holdMillis).toInt().coerceAtLeast(1)
+                        progress.animateTo(1f, tween(left, easing = LinearEasing))
+                        fired = true
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        confirm()
+                    }
+                    tryAwaitRelease()
+                    if (!fired) {
+                        filling.cancel()
+                        scope.launch { progress.animateTo(0f, tween(250)) }
+                    }
+                })
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(progress.value).background(Fresh.primary))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(if (enabled) Fresh.accent else Fresh.border),
+                contentAlignment = Alignment.Center,
+            ) {
+                GlyphIcon(Glyph.Chevrons, if (enabled) Fresh.accentInk else Fresh.inkFaint, size = 22.dp)
+            }
+            Text(
+                text,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (enabled) Fresh.onCarbon else Fresh.inkFaint,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(46.dp))
+        }
+    }
+}
+
+/** A small tinted action beside others on a card (Call, Navigate, Edit); labels wrap rather than lose words. */
+@Composable
+fun TonalAction(
+    text: String,
+    glyph: Glyph?,
+    background: Color,
+    ink: Color,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier
+            .heightIn(min = 42.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (enabled) background else Fresh.surface2)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (glyph != null) {
+            GlyphIcon(glyph, if (enabled) ink else Fresh.inkFaint, size = 16.dp)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(text, style = MaterialTheme.typography.labelLarge, color = if (enabled) ink else Fresh.inkFaint, maxLines = 2, textAlign = TextAlign.Center)
     }
 }
 

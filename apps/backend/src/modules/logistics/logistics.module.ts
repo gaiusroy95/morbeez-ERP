@@ -8,6 +8,9 @@ import { TripStopsRepository } from './repositories/trip-stops.repository';
 import { TripExpensesRepository } from './repositories/trip-expenses.repository';
 import { TripReconciliationsRepository } from './repositories/trip-reconciliations.repository';
 import { TripStopPhotosRepository } from './repositories/trip-stop-photos.repository';
+import { FarmStopsRepository } from './repositories/farm-stops.repository';
+import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
+import { CratesModule } from '../crates/crates.module';
 import { TripStopPodsRepository } from './repositories/trip-stop-pods.repository';
 import { CustomerCollectionsRepository } from './repositories/customer-collections.repository';
 import { TripCashDepositsRepository } from './repositories/trip-cash-deposits.repository';
@@ -21,6 +24,8 @@ import { WorkforceModule } from '../workforce/workforce.module';
 import { ProcurementModule } from '../procurement/procurement.module';
 import { OrdersModule } from '../orders/orders.module';
 import { FinanceModule } from '../finance/finance.module';
+import { RoutesModule } from '../routes/routes.module';
+import { TripPlanningRepository } from './repositories/trip-planning.repository';
 
 // Bounded context: Logistics — trip planning (vehicle, driver, route),
 // stop execution (a Procurement pickup or a customer delivery), photos,
@@ -32,7 +37,7 @@ import { FinanceModule } from '../finance/finance.module';
 // their public service APIs only (Constitution I.3-I.4). A collection is
 // also recorded as a Finance customer payment, in the same transaction.
 @Module({
-  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule],
+  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule, RoutesModule, CratesModule],
   controllers: [LogisticsController, PinsController, DelegationController],
   providers: [
     LogisticsService,
@@ -42,12 +47,15 @@ import { FinanceModule } from '../finance/finance.module';
     TripExpensesRepository,
     TripReconciliationsRepository,
     TripStopPhotosRepository,
+    FarmStopsRepository,
+    DeliveryStopsRepository,
     TripStopPodsRepository,
     CustomerCollectionsRepository,
     TripCashDepositsRepository,
     DelegationsRepository,
     DelegationService,
     DeliveryMeasuresRepository,
+    TripPlanningRepository,
   ],
   exports: [LogisticsService, DelegationService],
 })

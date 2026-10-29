@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type {
+  AgentRecord,
   CreatePurchaseOrderBody,
   FarmerPaymentRecord,
   GradeLotBody,
@@ -9,23 +10,26 @@ import type {
   LotRecord,
   PaymentMethod,
   PickupRecord,
+  ProcurementBoardDay,
+  ProcurementCard,
+  ProcurementStage,
   PurchaseOrderRecord,
   PurchaseOrderStatus,
   ReceiveGoodsBody,
   SchedulePickupBody,
   SettleLotBody,
 } from '@morbeez/shared-types';
-import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
+import { ErrorState, SkeletonLines } from '@/components/ui/Panel';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { EmptyRow, FilterTabs, PageHeader, Pager, SelectableRow } from '@/components/ui/ListControls';
+import { EmptyRow } from '@/components/ui/ListControls';
 import { DetailPanel, KeyValues } from '@/components/ui/DetailPanel';
 import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
 import { ApprovalGate } from '@/components/forms/ApprovalGate';
-import { emptyLine, LinesEditor, parseLines, type LineDraft } from '@/components/forms/LinesEditor';
+import { emptyLine, LinesEditor, parseLines, withProduct, type LineDraft } from '@/components/forms/LinesEditor';
 import { METHOD_LABEL } from '@/components/forms/PaymentDialogs';
 import { apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
-import { usePurchaseOrder, usePurchaseOrders } from '@/lib/hooks/use-modules';
+import { usePurchaseOrder } from '@/lib/hooks/use-modules';
 import {
   useActiveDrivers,
   useActiveFarmers,
@@ -40,7 +44,10 @@ import {
   useVehicleName,
 } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
-import { formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
+import { QuickAddFarmer, QuickAddProduct, useCanAdd } from '@/components/forms/QuickAdd';
+import { SearchSelect } from '@/components/forms/SearchSelect';
+import { useT } from '@/lib/i18n';
+import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, todayIn } from '@/lib/format';
 import {
   firstError,
   localDateTimeToIso,
@@ -49,16 +56,9 @@ import {
   parseQuantity,
   type Parsed,
 } from '@/lib/parse';
-
-const FILTERS = [
-  { value: 'all' as const, label: 'All' },
-  { value: 'placed' as const, label: 'To confirm' },
-  { value: 'confirmed' as const, label: 'Awaiting produce' },
-  { value: 'received' as const, label: 'To grade' },
-  { value: 'graded' as const, label: 'Graded' },
-  { value: 'closed' as const, label: 'Closed' },
-  { value: 'cancelled' as const, label: 'Cancelled' },
-];
+import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { formatPoNumber, useAgents, useProcurementBoard } from '@/lib/hooks/use-procurement';
+import { CreateBar, DayTabs, ListCard, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 
 // Purchase-order statuses read differently from order statuses — 'placed'
 // here is waiting on the farmer's confirmation, 'confirmed' is waiting on
@@ -84,17 +84,47 @@ function val<T>(parsed: Parsed<T>): T {
 
 // ---- New purchase order ----
 
+/**
+ * "Create Procurement" (client design V1.1, screen 4): farmer, pickup date
+ * and time, driver and vehicle, products by the kilo or the bag, an
+ * optional agent with a commission per kg, notes. Saving confirms the
+ * order and schedules the pickup in one go; an order over the approval
+ * limit waits for approval and its pickup is scheduled once approved.
+ */
 function NewPurchaseOrderDialog({
   onClose,
   onCreated,
+  initialFarmerId = '',
 }: {
   onClose: () => void;
   onCreated: (po: PurchaseOrderRecord) => void;
+  /** "New Procurement" on a farmer's profile: who it's from. */
+  initialFarmerId?: string;
 }) {
+  const t = useT();
   const farmers = useActiveFarmers();
   const products = useActiveProducts();
+  const drivers = useActiveDrivers();
+  const vehicles = useActiveVehicles();
+  const agents = useAgents();
   const currency = useCurrency();
-  const [farmerId, setFarmerId] = useState('');
+  const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
+  const [form, setForm] = useState({
+    farmerId: initialFarmerId,
+    date: todayIn(timeZone),
+    time: '',
+    driverId: '',
+    vehicleId: '',
+    agentId: '',
+    commission: '',
+    notes: '',
+  });
+  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const [addingFarmer, setAddingFarmer] = useState<string | null>(null);
+  const [addingAgent, setAddingAgent] = useState<string | null>(null);
+  const canAddFarmer = useCanAdd('farmers');
+  const [addingProduct, setAddingProduct] = useState<{ lineKey: number; name: string } | null>(null);
+  const canAddProduct = useCanAdd('products');
   const [lines, setLines] = useState<LineDraft[]>(() => [emptyLine()]);
   const [problem, setProblem] = useState<string | null>(null);
   const create = useAction(
@@ -102,58 +132,235 @@ function NewPurchaseOrderDialog({
     PO_EFFECTS,
     onCreated,
   );
+  const farmer = farmers.records.find((f) => f.id === form.farmerId);
+  const activeAgents = (agents.data ?? []).filter((a) => a.status === 'active');
 
   const submit = () => {
-    if (!farmerId) return setProblem('Choose the farmer.');
+    if (!form.farmerId) return setProblem(t('Choose the farmer.'));
+    if (!form.date) return setProblem(t('Choose the pickup date.'));
+    if (!form.driverId || !form.vehicleId) return setProblem(t('Choose the driver and the vehicle.'));
     const parsed = parseLines(lines, false, products.records);
     if (!parsed.ok) return setProblem(parsed.error);
+    let commission: number | undefined;
+    if (form.agentId && form.commission.trim()) {
+      const c = parseMoney(form.commission, 'the commission');
+      if (!c.ok) return setProblem(c.error);
+      commission = c.value;
+    }
     setProblem(null);
     create.mutate({
-      farmerId,
+      farmerId: form.farmerId,
+      pickupDate: form.date,
+      pickupTime: form.time || undefined,
+      driverEmployeeId: form.driverId,
+      vehicleId: form.vehicleId,
+      agentId: form.agentId || undefined,
+      commissionPerKg: commission,
+      notes: optionalText(form.notes),
+      confirm: true,
       lines: parsed.value.map((line) => ({
         productId: line.productId,
         expectedQuantity: line.quantity,
         indicativePrice: line.price ?? 0,
+        ...(line.bags !== undefined ? { bags: line.bags, kgPerBag: line.kgPerBag } : {}),
       })),
     });
   };
 
   return (
-    <FormDialog
-      title="New purchase order"
-      description={<p>The rate is indicative — what the farmer is actually paid is fixed per lot at grading.</p>}
-      submitLabel="Raise purchase order"
-      size="wide"
-      pending={create.isPending}
-      error={problem ?? create.error}
-      onClose={onClose}
-      onSubmit={submit}
-    >
-      <Field label="Farmer" wide>
-        {(props) => (
-          <select {...props} value={farmerId} onChange={(e) => setFarmerId(e.target.value)}>
-            <option value="">{farmers.isPending ? 'Loading…' : 'Choose a farmer…'}</option>
-            {farmers.records.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+    <>
+      <FormDialog
+        title={t('Create Procurement')}
+        description={<p>{t('The rate is indicative — what the farmer is actually paid is fixed per lot at grading.')}</p>}
+        submitLabel={t('Save Procurement')}
+        size="wide"
+        pending={create.isPending}
+        error={problem ?? create.error}
+        onClose={onClose}
+        onSubmit={submit}
+      >
+        <Field label={t('Farmer')} wide>
+          {(props) => (
+            <SearchSelect
+              {...props}
+              value={form.farmerId}
+              onChange={(farmerId) => set({ farmerId })}
+              loading={farmers.isPending}
+              placeholder={t('Choose a farmer…')}
+              searchPlaceholder={t('Search by name or phone…')}
+              options={farmers.records.map((f) => ({ value: f.id, label: f.name, sub: f.place ?? f.contact?.phone }))}
+              createLabel={canAddFarmer ? t('Create new farmer') : undefined}
+              onCreate={canAddFarmer ? (typed) => setAddingFarmer(typed) : undefined}
+            />
+          )}
+        </Field>
+        {farmer && (
+          <div className="farmer-card form-wide">
+            <span className="list-card-badge" aria-hidden="true">
+              {farmer.name.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="farmer-card-text">
+              <strong>{farmer.name}</strong>
+              {farmer.place && <span>{farmer.place}</span>}
+              {farmer.contact?.phone && <span>{farmer.contact.phone}</span>}
+            </span>
+            <a className="button button-small" href="/farmers" target="_blank" rel="noopener noreferrer">
+              {t('View')}
+            </a>
+          </div>
         )}
-      </Field>
-      <LinesEditor
-        lines={lines}
-        onChange={setLines}
-        products={products.records}
-        currency={currency}
-        priceLabel="Indicative rate"
-        priceOptional={false}
-      />
-    </FormDialog>
+        <Field label={t('Pickup Date')}>
+          {(props) => <input {...props} type="date" value={form.date} onChange={(e) => set({ date: e.target.value })} />}
+        </Field>
+        <Field label={t('Pickup time (optional)')}>
+          {(props) => <input {...props} type="time" value={form.time} onChange={(e) => set({ time: e.target.value })} />}
+        </Field>
+        <Field label={t('Driver')}>
+          {(props) => (
+            <select {...props} value={form.driverId} onChange={(e) => set({ driverId: e.target.value })}>
+              <option value="">{drivers.isPending ? t('Loading…') : t('Choose a driver…')}</option>
+              {drivers.records.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <Field label={t('Vehicle')}>
+          {(props) => (
+            <select {...props} value={form.vehicleId} onChange={(e) => set({ vehicleId: e.target.value })}>
+              <option value="">{vehicles.isPending ? t('Loading…') : t('Choose a vehicle…')}</option>
+              {vehicles.records.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.registrationNumber}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <p className="form-section-title form-wide">{t('Products')}</p>
+        <LinesEditor
+          lines={lines}
+          onChange={setLines}
+          products={products.records}
+          onAddProduct={canAddProduct ? (lineKey, name) => setAddingProduct({ lineKey, name }) : undefined}
+          currency={currency}
+          priceLabel={t('Rate (₹/kg)')}
+          priceOptional={false}
+          bags
+        />
+        <Field label={t('Agent (optional)')}>
+          {(props) => (
+            <SearchSelect
+              {...props}
+              value={form.agentId}
+              onChange={(agentId) => {
+                const agent = activeAgents.find((a) => a.id === agentId);
+                set({ agentId, commission: agent && Number(agent.defaultCommissionPerKg) > 0 ? agent.defaultCommissionPerKg : form.commission });
+              }}
+              loading={agents.isPending}
+              placeholder={t('Select Agent')}
+              searchPlaceholder={t('Search agents…')}
+              options={[{ value: '', label: t('No agent') }, ...activeAgents.map((a) => ({ value: a.id, label: a.name, sub: a.phone }))]}
+              createLabel={t('Create new agent')}
+              onCreate={(typed) => setAddingAgent(typed)}
+            />
+          )}
+        </Field>
+        <Field label={t('Commission (₹/kg)')} hint={form.agentId ? undefined : t('Choose an agent first')}>
+          {(props) => (
+            <input
+              {...props}
+              inputMode="decimal"
+              disabled={!form.agentId}
+              placeholder="0.00"
+              value={form.commission}
+              onChange={(e) => set({ commission: e.target.value })}
+            />
+          )}
+        </Field>
+        <Field label={t('Notes (optional)')} wide>
+          {(props) => <textarea {...props} maxLength={500} placeholder={t('Enter notes…')} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />}
+        </Field>
+      </FormDialog>
+      {addingProduct && (
+        <QuickAddProduct
+          initialName={addingProduct.name}
+          onClose={() => setAddingProduct(null)}
+          onAdded={(product) => {
+            setLines((current) => withProduct(current, addingProduct.lineKey, product));
+            setAddingProduct(null);
+          }}
+        />
+      )}
+      {addingFarmer !== null && (
+        <QuickAddFarmer
+          initialName={addingFarmer}
+          onClose={() => setAddingFarmer(null)}
+          onAdded={(f) => {
+            set({ farmerId: f.id });
+            setAddingFarmer(null);
+          }}
+        />
+      )}
+      {addingAgent !== null && (
+        <QuickAddAgent
+          initialName={addingAgent}
+          onClose={() => setAddingAgent(null)}
+          onAdded={(agent) => {
+            set({ agentId: agent.id, commission: Number(agent.defaultCommissionPerKg) > 0 ? agent.defaultCommissionPerKg : form.commission });
+            setAddingAgent(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
-// ---- Purchase-order level actions ----
+/** A new agent from inside the form: name, phone, usual commission. */
+function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string; onClose: () => void; onAdded: (a: AgentRecord) => void }) {
+  const t = useT();
+  const [name, setName] = useState(initialName);
+  const [phone, setPhone] = useState('');
+  const [commission, setCommission] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const add = useAction(
+    (body: { name: string; phone?: string; defaultCommissionPerKg?: number }) => apiSend<AgentRecord>('POST', 'procurement/agents', body),
+    [['procurement', 'agents']],
+    onAdded,
+  );
+  return (
+    <FormDialog
+      title={t('Add an agent')}
+      submitLabel={t('Add agent')}
+      pending={add.isPending}
+      error={problem ?? add.error}
+      onClose={onClose}
+      onSubmit={() => {
+        if (name.trim().length < 2) return setProblem(t("Enter the agent's name."));
+        let c: number | undefined;
+        if (commission.trim()) {
+          const parsed = parseMoney(commission, 'the commission');
+          if (!parsed.ok) return setProblem(parsed.error);
+          c = parsed.value;
+        }
+        setProblem(null);
+        add.mutate({ name: name.trim(), phone: optionalText(phone), defaultCommissionPerKg: c });
+      }}
+    >
+      <Field label={t('Name')} wide>
+        {(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} />}
+      </Field>
+      <Field label={t('Phone (optional)')}>
+        {(p) => <input {...p} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />}
+      </Field>
+      <Field label={t('Usual commission (₹/kg)')}>
+        {(p) => <input {...p} inputMode="decimal" value={commission} onChange={(e) => setCommission(e.target.value)} />}
+      </Field>
+    </FormDialog>
+  );
+}
 
 function VehicleAndDriverFields({
   vehicleId,
@@ -619,12 +826,17 @@ function PickupRow({ pickup, canWrite }: { pickup: PickupRecord; canWrite: boole
 // ---- Detail ----
 
 function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
   const { data, error, isPending, refetch } = usePurchaseOrder(id);
   const currency = useCurrency();
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
   const farmerName = useFarmerName();
   const productName = useProductName();
   const productUom = useProductUom();
+  const employeeName = useEmployeeName();
+  const vehicleName = useVehicleName();
+  const agents = useAgents();
+  const agentName = (id: string) => agents.data?.find((a) => a.id === id)?.name ?? '—';
   const { data: session } = useSession();
   const canWrite = hasPermission(session, 'procurement:write');
   const canGrade = hasPermission(session, 'procurement:grade');
@@ -660,17 +872,32 @@ function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void 
   }
 
   const { order, lots, pickups, payments } = data;
+  const plan = [
+    order.pickupDate ? formatDate(order.pickupDate.slice(0, 10)) : null,
+    order.pickupTime,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const awaiting = order.status === 'placed' && order.approvalRequestId !== null;
   const priceOf = (productId: string) => order.lines?.find((l) => l.productId === productId)?.indicativePrice;
 
   return (
-    <DetailPanel title="Purchase order" onClose={onClose}>
+    <DetailPanel title={`${formatPoNumber(order.number)} · ${farmerName(order.farmerId)}`} onClose={onClose}>
       <KeyValues
         items={[
           ['Farmer', farmerName(order.farmerId)],
           ['Status', poBadge(order)],
           ['Raised', formatDateTime(order.createdAt, timeZone)],
-          ['Expected', order.expectedDeliveryDate ? formatDate(order.expectedDeliveryDate.slice(0, 10)) : '—'],
+          ['Pickup', plan || '—'],
+          ['Driver', order.plannedDriverId ? employeeName(order.plannedDriverId) : '—'],
+          ['Vehicle', order.plannedVehicleId ? vehicleName(order.plannedVehicleId) : '—'],
+          ...(order.agentId
+            ? ([
+                ['Agent', agentName(order.agentId)],
+                ['Commission', order.commissionPerKg ? `${formatMoney(order.commissionPerKg, currency)} / kg` : '—'],
+              ] as [string, string][])
+            : []),
+          ...(order.notes ? ([['Notes', order.notes]] as [string, string][]) : []),
         ]}
       />
       {awaiting && (
@@ -721,7 +948,14 @@ function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void 
             {(order.lines ?? []).map((line) => (
               <tr key={line.id}>
                 <td>{productName(line.productId)}</td>
-                <td className="align-right">{formatQuantity(line.expectedQuantity, productUom(line.productId))}</td>
+                <td className="align-right">
+                  {formatQuantity(line.expectedQuantity, productUom(line.productId))}
+                  {line.bags && line.kgPerBag && (
+                    <div className="cell-sub">
+                      {formatQuantity(line.bags)} {t('bags')} × {formatQuantity(line.kgPerBag)} kg
+                    </div>
+                  )}
+                </td>
                 <td className="align-right">{formatMoney(line.indicativePrice, currency)}</td>
               </tr>
             ))}
@@ -830,101 +1064,122 @@ function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void 
   );
 }
 
+const STAGE: Record<ProcurementStage, { label: string; tone: CardTone }> = {
+  pending: { label: 'Pending', tone: 'pending' },
+  awaiting_approval: { label: 'Awaiting approval', tone: 'pending' },
+  in_progress: { label: 'In Progress', tone: 'progress' },
+  completed: { label: 'Completed', tone: 'done' },
+  cancelled: { label: 'Cancelled', tone: 'bad' },
+};
+
+const STAGE_FILTER = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'awaiting_approval', label: 'Awaiting approval' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+/** "Ginger 500 kg", "Onion 10 bags (420 kg)", "+1 more". */
+function productSummary(card: ProcurementCard): string {
+  const first = card.products[0];
+  if (!first) return '';
+  const qty = first.bags
+    ? `${formatQuantity(first.bags)} bags (${formatQuantity(first.quantity)} ${first.uom})`
+    : `${formatQuantity(first.quantity)} ${first.uom}`;
+  return `${first.name} ${qty}${card.products.length > 1 ? ` · +${card.products.length - 1}` : ''}`;
+}
+
+/** The Procurement list (client design V1.1, screen 3). */
 export default function ProcurementPage() {
-  const [status, setStatus] = useState<PurchaseOrderStatus | 'all'>('all');
-  const [page, setPage] = useState(1);
+  const t = useT();
+  const [day, setDay] = useState<ProcurementBoardDay>('today');
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState('all');
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [forFarmer, setForFarmer] = useState('');
+  useOpenOnNew((params) => {
+    setForFarmer(params.get('farmer') ?? '');
+    setCreating(true);
+  });
   const { data: session } = useSession();
   const canWrite = hasPermission(session, 'procurement:write');
-  const { data, error, isPending, isPlaceholderData, refetch } = usePurchaseOrders(
-    status === 'all' ? undefined : status,
-    page,
-  );
-  const currency = useCurrency();
-  const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
-  const farmerName = useFarmerName();
+  const board = useProcurementBoard(day, query);
+  const cards = (board.data?.items ?? []).filter((c) => stage === 'all' || c.stage === stage);
+  const counts = board.data?.counts;
 
   return (
-    <div className="stack">
-      <PageHeader
-        title="Procurement"
-        subtitle="Purchase orders to farmers — from order, through pickup and grading, to payment."
-        actions={
-          canWrite && (
-            <button type="button" className="button button-primary" onClick={() => setCreating(true)}>
-              New purchase order
-            </button>
-          )
-        }
-      />
-      {creating && (
-        <NewPurchaseOrderDialog
-          onClose={() => setCreating(false)}
-          onCreated={(po) => {
-            setCreating(false);
-            setSelected(po.id);
+    <div className="list-split">
+      <div className="list-screen">
+        <h1 className="page-title visually-hidden">{t('Procurement')}</h1>
+        {creating && (
+          <NewPurchaseOrderDialog
+            initialFarmerId={forFarmer}
+            onClose={() => {
+              setCreating(false);
+              setForFarmer('');
+            }}
+            onCreated={(po) => {
+              setCreating(false);
+              setForFarmer('');
+              setSelected(po.id);
+            }}
+          />
+        )}
+        <DayTabs
+          label="Which day"
+          value={day}
+          onChange={(value) => {
+            setDay(value);
+            setSelected(null);
           }}
+          options={[
+            { value: 'today', label: 'Today', count: counts?.today },
+            { value: 'tomorrow', label: 'Tomorrow', count: counts?.tomorrow },
+            { value: 'all', label: 'All', count: counts?.all },
+          ]}
         />
-      )}
-      <div className="split" data-detail={selected ? 'open' : undefined}>
-        <Panel
-          title="Purchase orders"
-          meta={
-            <FilterTabs
-              label="Filter by status"
-              options={FILTERS}
-              value={status}
-              onChange={(value) => {
-                setStatus(value);
-                setPage(1);
-                setSelected(null);
-              }}
-            />
-          }
-        >
-          {isPending ? (
-            <SkeletonLines lines={6} />
-          ) : error ? (
-            <ErrorState error={error} onRetry={() => refetch()} />
-          ) : (
-            <div data-updating={isPlaceholderData || undefined} className="updating">
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Raised</th>
-                      <th>Farmer</th>
-                      <th>Status</th>
-                      <th className="align-right">Expected value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.items.length === 0 && <EmptyRow colSpan={4}>No purchase orders here.</EmptyRow>}
-                    {data.items.map((po) => (
-                      <SelectableRow
-                        key={po.id}
-                        selected={selected === po.id}
-                        onSelect={() => setSelected(po.id)}
-                        label={`Purchase order from ${farmerName(po.farmerId)}`}
-                      >
-                        <td>{formatDateTime(po.createdAt, timeZone)}</td>
-                        <td>{farmerName(po.farmerId)}</td>
-                        <td>{poBadge(po)}</td>
-                        <td className="align-right">
-                          {po.expectedValue ? formatMoney(po.expectedValue, currency) : '—'}
-                        </td>
-                      </SelectableRow>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />
-            </div>
-          )}
-        </Panel>
-        {selected && <PurchaseOrderDetail key={selected} id={selected} onClose={() => setSelected(null)} />}
+        <SearchFilter
+          value={query}
+          onChange={setQuery}
+          placeholder="Search farmer, product…"
+          filter={{ value: stage, options: STAGE_FILTER, onChange: setStage, label: 'Filter by status' }}
+        />
+        {board.isPending ? (
+          <SkeletonLines lines={5} height={64} />
+        ) : board.error ? (
+          <div className="panel">
+            <ErrorState error={board.error} onRetry={() => board.refetch()} />
+          </div>
+        ) : (
+          <div className="card-list" data-updating={board.isPlaceholderData || undefined}>
+            {cards.length === 0 && (
+              <div className="list-empty">{query || stage !== 'all' ? t('Nothing matches.') : t('No procurement for this day.')}</div>
+            )}
+            {cards.map((card) => (
+              <ListCard
+                key={card.id}
+                number={formatPoNumber(card.number)}
+                title={card.farmerName}
+                place={card.farmerPlace}
+                detail={productSummary(card)}
+                time={clock(card.pickupTime)}
+                status={STAGE[card.stage].label}
+                tone={STAGE[card.stage].tone}
+                person={card.driverName}
+                vehicle={card.vehicle}
+                initial={card.products[0]?.name ?? card.farmerName}
+                selected={selected === card.id}
+                onOpen={() => setSelected(card.id)}
+              />
+            ))}
+          </div>
+        )}
+        {canWrite && <CreateBar label="Create Procurement" onClick={() => setCreating(true)} />}
       </div>
+      {selected && <PurchaseOrderDetail key={selected} id={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

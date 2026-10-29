@@ -1,6 +1,6 @@
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
+import { MaxLength, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { FarmerContactDto } from './farmer-contact.dto';
 import { BankDetailsDto } from './bank-details.dto';
 
@@ -9,6 +9,12 @@ export class CreateFarmerDto {
   @IsString()
   @MinLength(2)
   name!: string;
+
+  @ApiPropertyOptional({ description: 'Village or town' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  place?: string | null;
 
   @ApiPropertyOptional({ type: FarmerContactDto })
   @IsOptional()

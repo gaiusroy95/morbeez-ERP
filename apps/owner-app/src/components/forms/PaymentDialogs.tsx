@@ -27,7 +27,8 @@ export const METHOD_LABEL: Record<PaymentMethod, string> = {
 
 // Money moved changes receivables/payables, cash flow, the customer or
 // farmer's own view, the purchase order's lot status, and the dashboard.
-const PAYMENT_EFFECTS = [KEYS.finance, KEYS.customers, KEYS.procurement, KEYS.dashboard];
+// Farmers too: their profile shows what they're owed and were paid.
+const PAYMENT_EFFECTS = [KEYS.finance, KEYS.customers, KEYS.procurement, KEYS.dashboard, ['farmers']];
 
 function MethodField({ value, onChange }: { value: PaymentMethod; onChange: (m: PaymentMethod) => void }) {
   const t = useT();

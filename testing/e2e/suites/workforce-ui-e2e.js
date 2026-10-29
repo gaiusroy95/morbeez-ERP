@@ -65,7 +65,7 @@ async function signIn(browser, email) {
     await dialog().getByLabel('Role').selectOption('warehouse');
     await submit(page, 'Add worker');
     await page.waitForSelector('.detail >> text=Meena Pawar');
-    await page.locator('.detail').getByRole('button', { name: 'Edit employment details' }).click();
+    await page.locator('.detail').getByRole('button', { name: 'Edit details' }).click();
     await dialog().getByLabel('Employment').selectOption('casual');
     await dialog().getByLabel('Joined on').fill(monthStart);
     await submit(page, 'Save');

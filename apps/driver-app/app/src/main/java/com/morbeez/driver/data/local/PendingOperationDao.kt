@@ -24,6 +24,10 @@ interface PendingOperationDao {
     @Query("UPDATE pending_operations SET status = :status, lastError = :error WHERE idempotencyKey = :key")
     suspend fun markFailed(key: String, status: String, error: String)
 
+    /** The driver corrected what the server refused (Start Day's opening KM): sent again, in its place in the queue. */
+    @Query("UPDATE pending_operations SET payloadJson = :payloadJson, status = 'pending', lastError = NULL WHERE idempotencyKey = :key")
+    suspend fun retryWith(key: String, payloadJson: String)
+
     @Query("DELETE FROM pending_operations WHERE idempotencyKey = :key")
     suspend fun delete(key: String)
 
