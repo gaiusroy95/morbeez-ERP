@@ -5,7 +5,8 @@ import { useState } from 'react';
 import type { CollectionCard, CollectionsView, CustomerRecord } from '@morbeez/shared-types';
 import { CreateBar, DayTabs, SearchFilter } from '@/components/redesign/ListCards';
 import { initialsOf } from '@/components/redesign/Party';
-import { CustomerPaymentDialog } from '@/components/forms/PaymentDialogs';
+import { CustomerPaymentDialog, FarmerPaymentDialog } from '@/components/forms/PaymentDialogs';
+import { useFarmersBoard } from '@/lib/hooks/use-parties';
 import { Field, FormDialog } from '@/components/ui/Form';
 import { ErrorState, SkeletonLines } from '@/components/ui/Panel';
 import { useCollections } from '@/lib/hooks/use-money-stock';
@@ -65,13 +66,18 @@ function PickCustomer({ onPick, onClose }: { onPick: (c: CustomerRecord) => void
 }
 
 /**
- * Collections (client design V1.1, screen 14): what came in today, who
- * owes money that has fallen due, and every payment — each with what the
- * customer still owes. Collect records a payment; Add Collection asks who
- * paid first.
+ * Collections & Payments (client design V1.1, screen 14; set 1 screen 21):
+ * Customer — what came in today, who owes money that has fallen due, and
+ * every payment, each with what the customer still owes (Collect records a
+ * payment; Add Collection asks who paid first); Farmer — the farmers owed
+ * money, with Pay.
  */
 export default function CollectionsPage() {
   const t = useT();
+  const [party, setParty] = useState<'customer' | 'farmer'>('customer');
+  const farmers = useFarmersBoard('pending', '', '');
+  const { data: me } = useSession();
+  const canSeeFarmers = hasPermission(me, 'farmers:read');
   const { lang } = useI18n();
   const currency = useCurrency();
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
@@ -105,6 +111,21 @@ export default function CollectionsPage() {
         />
       )}
       {paying && <CustomerPaymentDialog customerId={paying.id} customerName={paying.name} currency={currency} onClose={() => setPaying(null)} />}
+      {canSeeFarmers && (
+        <DayTabs
+          label="Customers or farmers"
+          value={party}
+          onChange={setParty}
+          options={[
+            { value: 'customer', label: 'Customer', count: board.data?.counts.pending },
+            { value: 'farmer', label: 'Farmer', count: farmers.data?.counts.pending ?? undefined },
+          ]}
+        />
+      )}
+      {party === 'farmer' ? (
+        <FarmerPayments />
+      ) : (
+        <>
       <DayTabs
         label="Which collections"
         value={view}
@@ -178,6 +199,62 @@ export default function CollectionsPage() {
         </div>
       )}
       {canCollect && <CreateBar label="Add Collection" onClick={() => setPicking(true)} />}
+        </>
+      )}
     </div>
+  );
+}
+
+/** The farmers owed money (set 1 screen 21, Farmer), each with Pay. */
+function FarmerPayments() {
+  const t = useT();
+  const currency = useCurrency();
+  const { data: session } = useSession();
+  const canPay = hasPermission(session, 'finance:pay');
+  const [query, setQuery] = useState('');
+  const [paying, setPaying] = useState<{ id: string; name: string } | null>(null);
+  const board = useFarmersBoard('pending', '', query);
+  return (
+    <>
+      {paying && <FarmerPaymentDialog farmerId={paying.id} farmerName={paying.name} currency={currency} onClose={() => setPaying(null)} />}
+      <SearchFilter value={query} onChange={setQuery} placeholder="Search farmer…" />
+      {board.isPending ? (
+        <SkeletonLines lines={5} height={64} />
+      ) : board.error ? (
+        <div className="panel">
+          <ErrorState error={board.error} onRetry={() => board.refetch()} />
+        </div>
+      ) : (
+        <div className="card-list" data-updating={board.isPlaceholderData || undefined}>
+          {board.data.items.length === 0 && <div className="list-empty">{query ? t('Nothing matches.') : t('No farmer is owed money.')}</div>}
+          {board.data.items.map((f) => (
+            <div key={f.id} className="collection-card">
+              <span className="party-avatar" aria-hidden="true">
+                {initialsOf(f.name)}
+              </span>
+              <span className="party-main">
+                <span className="party-name">{f.name}</span>
+                {(f.place || f.mainProduct) && <span className="party-sub">{[f.place, f.mainProduct].filter(Boolean).join(' · ')}</span>}
+                <span className="collection-amount">{formatMoney(f.owed ?? '0', currency)}</span>
+              </span>
+              <span className="collection-side">
+                <span className="list-card-status" data-tone="bad">
+                  {t('Due')}
+                </span>
+                {canPay ? (
+                  <button type="button" className="button button-small" onClick={() => setPaying({ id: f.id, name: f.name })}>
+                    {t('Pay')}
+                  </button>
+                ) : (
+                  <Link className="button button-small" href={`/farmers?open=${f.id}`}>
+                    {t('View')}
+                  </Link>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

@@ -21,8 +21,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PendingPhotoEntity::class,
         DriverDayEntity::class,
         StopDraftEntity::class,
+        BackhaulEntity::class,
+        ExpenseEntity::class,
+        ChatMessageEntity::class,
     ],
-    version = 7,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +35,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pendingPhotoDao(): PendingPhotoDao
     abstract fun driverDayDao(): DriverDayDao
     abstract fun stopDraftDao(): StopDraftDao
+    abstract fun backhaulDao(): BackhaulDao
+    abstract fun expenseDao(): ExpenseDao
+    abstract fun chatDao(): ChatDao
 
     companion object {
         /** Trip handover: the owner's review note and the driver's declared cash. Queued actions are kept. */
@@ -99,6 +105,68 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyQrToken TEXT")
                 db.execSQL("ALTER TABLE trip_stops ADD COLUMN deliveryJson TEXT")
                 db.execSQL("ALTER TABLE driver_day ADD COLUMN crateTypesJson TEXT")
+            }
+        }
+
+        /** Driver app V1 (D4): Return's closing KM, the trip's collections as the server last listed them. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE trips ADD COLUMN closingKm TEXT")
+                db.execSQL("ALTER TABLE trips ADD COLUMN returnedAt TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN collectionsJson TEXT")
+            }
+        }
+
+        /** Driver app V1 (D5): the trip's backhauls; a photo goes to a stop or a backhaul. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `backhauls` (`id` TEXT NOT NULL, `tripId` TEXT NOT NULL, `pickupPlace` TEXT NOT NULL, " +
+                        "`dropPlace` TEXT NOT NULL, `rent` TEXT NOT NULL, `hirerName` TEXT, `notes` TEXT, `offeredBy` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL, `skipReason` TEXT, `acceptedAt` TEXT, `pickupReachedAt` TEXT, `loadedAt` TEXT, " +
+                        "`dropReachedAt` TEXT, `completedAt` TEXT, `paymentMethod` TEXT, `amountReceived` TEXT, `paymentReference` TEXT, " +
+                        "`paidAt` TEXT, `loadPhotos` INTEGER NOT NULL, `dropPhotos` INTEGER NOT NULL, `paymentPhotos` INTEGER NOT NULL, " +
+                        "`createdAt` TEXT NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("ALTER TABLE pending_photos ADD COLUMN target TEXT NOT NULL DEFAULT 'stop'")
+            }
+        }
+
+        /** Driver app V1 (D6): the trip's expenses with their pump details; the driver's approvals, expenses, vehicle and profile as last read. */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `expenses` (`id` TEXT NOT NULL, `tripId` TEXT NOT NULL, `category` TEXT NOT NULL, " +
+                        "`amount` TEXT NOT NULL, `notes` TEXT, `recordedAt` TEXT NOT NULL, `odometerKm` INTEGER, `fuelType` TEXT, " +
+                        "`fullTank` INTEGER, `litres` TEXT, `ratePerLitre` TEXT, `needsApproval` INTEGER NOT NULL, `decision` TEXT, " +
+                        "`decisionNote` TEXT, `photos` INTEGER NOT NULL, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN approvalsJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN myExpensesJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN vehicleJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN profileJson TEXT")
+            }
+        }
+
+        /** Driver app V1 (D7): My Earnings (today, this week, this month) and the settlements, as last read. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN earningsTodayJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN earningsWeekJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN earningsMonthJson TEXT")
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN settlementsJson TEXT")
+            }
+        }
+
+        /** Driver app V1 (D9): the conversation with the office, and how far the driver has read it. */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chat_messages` (`id` TEXT NOT NULL, `side` TEXT NOT NULL, `senderName` TEXT NOT NULL, " +
+                        "`body` TEXT, `tripId` TEXT, `tripNumber` TEXT, `photo` TEXT NOT NULL, `localPhotoPath` TEXT, " +
+                        "`writtenAt` TEXT NOT NULL, `createdAt` TEXT, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("ALTER TABLE driver_day ADD COLUMN chatReadAt TEXT")
             }
         }
     }

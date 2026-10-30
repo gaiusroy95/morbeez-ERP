@@ -61,15 +61,19 @@ async function signIn(browser, email) {
   await step('fleet: fitness, what needs attention, ownership', async () => {
     await page.goto(`${BASE}/vehicles`);
     await page.waitForSelector('text=MH14HR7777');
-    const rows = await rowsText();
-    const main = rows.find((r) => /MH12AB4521/.test(r)) ?? '';
-    if (!/Fit for trips/.test(main) || !/PUC certificate expires/.test(main) || !/and 1 more/.test(main)) throw new Error(main);
-    if (!rows.some((r) => /MH12XY0001.*Disposed/.test(r))) throw new Error('disposed truck');
-    if (!rows.some((r) => /MH14HR7777.*Hired · Eicher Pro 2049.*₹1,800.*a trip/.test(r))) throw new Error(rows.find((r) => /MH14HR/.test(r)));
+    // The fleet as the client's cards (owner app Phase 7): status, what needs attention, ownership.
+    const cards = (await page.locator('.party-card').allTextContents()).map((r) => r.replace(/\s+/g, ' '));
+    const main = cards.find((r) => /MH12AB4521/.test(r)) ?? '';
+    if (!/PUC certificate expires/.test(main) || !/Available|On trip/.test(main)) throw new Error(main);
+    if (!cards.some((r) => /MH12XY0001.*Disposed/.test(r))) throw new Error('disposed truck');
+    if (!cards.some((r) => /MH14HR7777 \(Eicher Pro 2049\).*Hired/.test(r))) throw new Error(cards.find((r) => /MH14HR/.test(r)));
   });
 
   await step('the running vehicle: documents renewed, service overdue, fuel log', async () => {
-    await page.locator('.row-selectable', { hasText: 'MH12AB4521' }).click();
+    await page.locator('.party-card', { hasText: 'MH12AB4521' }).click();
+    // Vehicle details first (Overview), then its full record.
+    await page.waitForSelector('.detail >> text=Total trips');
+    await detail().getByRole('button', { name: 'Edit & record' }).click();
     await page.waitForSelector('.detail >> text=Documents');
     const t = await detailText();
     if (!/Maintenance overdue/.test(t) || !/Renewed/.test(t) || !/20,450 km/.test(t) || !/Oil and filters/.test(t) || !/No charge/.test(t)) throw new Error(t.slice(0, 400));
@@ -179,7 +183,8 @@ async function signIn(browser, email) {
     'accountant: keeps the books but does not record running costs',
     async () => {
       await acc.page.goto(`${BASE}/vehicles`);
-      await acc.page.locator('.row-selectable', { hasText: 'MH12AB4521' }).click();
+      await acc.page.locator('.party-card', { hasText: 'MH12AB4521' }).click();
+      await acc.page.locator('.detail').getByRole('button', { name: 'All details' }).click();
       await acc.page.waitForSelector('.detail >> text=Documents');
       const fuel = await acc.page.locator('.detail').getByRole('button', { name: 'Record fuel' }).count();
       const books = await acc.page.locator('.detail').getByRole('button', { name: 'Put on the books' }).count();

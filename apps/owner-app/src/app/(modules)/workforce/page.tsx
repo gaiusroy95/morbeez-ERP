@@ -5,7 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { FilterTabs, PageHeader } from '@/components/ui/ListControls';
 import { presetRange, RangeControls } from '@/components/accounting/RangeControls';
-import { AddWorkerDialog, WorkerPanel, WorkersTable } from '@/components/workforce/Workers';
+import { AddWorkerDialog, WorkerPanel } from '@/components/workforce/Workers';
+import { PeopleTabs, WorkerCards } from '@/components/people/People';
+import { useOnTheRoad } from '@/lib/hooks/use-admin';
 import { AssignmentsView } from '@/components/workforce/Assignments';
 import { AdvancesView, PayRunView, SettlementPanel, SettlementsView } from '@/components/workforce/Pay';
 import { IncentiveRulesView, MinimumWagesView, PayrollSettingsView } from '@/components/workforce/Rules';
@@ -100,6 +102,7 @@ function Workforce({ today, timeZone }: { today: string; timeZone: string }) {
     staleTime: Infinity,
   });
   const workers = useWorkers();
+  const road = useOnTheRoad(can('logistics:dispatch'));
   const assignments = useAssignments(section === 'assignments' ? workRange : null);
   const earnings = useEarnings(section === 'payrun' ? payRange : null);
   const settlements = useSettlements(status === 'all' ? null : status, section === 'settlements');
@@ -111,25 +114,28 @@ function Workforce({ today, timeZone }: { today: string; timeZone: string }) {
 
   return (
     <div className="stack">
-      <PageHeader
-        title="Workforce"
-        subtitle="Who works for you, what they did, and what they're paid."
-        actions={
-          can('workforce:write') &&
-          section === 'workers' && (
-            <button type="button" className="button button-primary" onClick={() => setAdding(true)}>
-              Add a worker
-            </button>
-          )
-        }
-      />
+      <h1 className="page-title visually-hidden">Workforce</h1>
+      <PeopleTabs active="workforce" />
       <FilterTabs label="Workforce section" options={sections} value={section} onChange={(v) => v !== 'all' && choose(v)} />
 
       {section === 'workers' && (
         <div className="split" data-detail={worker ? 'open' : undefined}>
-          <Loaded title="Workers" query={workers}>
-            {(data) => <WorkersTable workers={data} currency={currency} selected={worker} onSelect={setWorker} />}
-          </Loaded>
+          <div className="list-screen">
+            {workers.isPending ? (
+              <SkeletonLines lines={6} height={64} />
+            ) : workers.error || !workers.data ? (
+              <ErrorState error={workers.error} onRetry={() => workers.refetch()} />
+            ) : (
+              <WorkerCards
+                workers={workers.data}
+                onTheRoad={road.data ?? []}
+                currency={can('payroll:read') ? currency : undefined}
+                selected={worker}
+                onSelect={setWorker}
+                onAdd={can('workforce:write') ? () => setAdding(true) : undefined}
+              />
+            )}
+          </div>
           {worker && (
             <WorkerPanel
               key={worker}

@@ -177,3 +177,38 @@ export interface ProfitInsights {
   previous: { revenue: string; netProfit: string };
   products: ProductProfit[];
 }
+
+/** What waits for the owner in the Approvals & Exceptions inbox (redesign Phase 7, screen 17). */
+export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close';
+export type InboxTab = 'expense' | 'price' | 'other';
+
+export interface InboxItem {
+  key: string;
+  kind: InboxKind;
+  tab: InboxTab;
+  /** What it's about, in the data's own words: "Fuel — Raju", "P-00123 · Ramesh Farm". */
+  subject: string;
+  detail: string | null;
+  amount: string | null;
+  at: Date;
+  /** Who raised it, when known. */
+  by: string | null;
+  /** What the decision is made on. */
+  refs: {
+    tripId?: string;
+    expenseId?: string;
+    approvalRequestId?: string;
+    approvalVersion?: number;
+    purchaseOrderId?: string;
+    orderId?: string;
+    spotSaleId?: string;
+    recommendationId?: string;
+    disputeId?: string;
+    customerId?: string;
+  };
+}
+
+export interface ApprovalsInbox {
+  counts: { all: number; expense: number; price: number; other: number };
+  items: InboxItem[];
+}

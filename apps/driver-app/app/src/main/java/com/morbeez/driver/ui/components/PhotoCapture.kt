@@ -49,6 +49,13 @@ fun PhotoCaptureButton(
     modifier: Modifier = Modifier,
     captured: Boolean = false,
 ) {
+    val openCamera = rememberCamera(onCaptured)
+    PhotoButtonLook(label, captured, modifier, openCamera)
+}
+
+/** The camera alone, for a button of the caller's own (Chat's composer, D9): call it to take a photo. */
+@Composable
+fun rememberCamera(onCaptured: (localPath: String, mimeType: String) -> Unit): () -> Unit {
     val context = LocalContext.current
     var pendingFile: File? by remember { mutableStateOf(null) }
 
@@ -59,7 +66,7 @@ fun PhotoCaptureButton(
         }
     }
 
-    PhotoButtonLook(label, captured, modifier) {
+    return {
         val file = createCaptureFile(context)
         pendingFile = file
         val uri = FileProvider.getUriForFile(context, "com.morbeez.driver.fileprovider", file)

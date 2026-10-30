@@ -27,6 +27,10 @@ interface TripDao {
     @Query("UPDATE trips SET deliveryStartedAt = :at WHERE id = :tripId AND deliveryStartedAt IS NULL")
     suspend fun markDeliveriesStarted(tripId: String, at: String)
 
+    /** Return on this phone (D4): the closing KM at once; the server hears when there's signal. */
+    @Query("UPDATE trips SET closingKm = :closingKm, returnedAt = COALESCE(returnedAt, :at) WHERE id = :tripId")
+    suspend fun markReturned(tripId: String, closingKm: String, at: String)
+
     @Query("UPDATE trips SET openingKm = :openingKm WHERE id = :tripId")
     suspend fun setOpeningKm(tripId: String, openingKm: String)
 

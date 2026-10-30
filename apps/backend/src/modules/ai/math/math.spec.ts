@@ -1,5 +1,5 @@
 import { addDays, backtest, buyQuantity, DailySeries, forecastDemand } from './forecast';
-import { suggestPrice, worthSuggesting } from './pricing';
+import { costBuildUp, marginAt, priceStanding, suggestPrice, worthSuggesting } from './pricing';
 import { bestOrder, km, planLoads, tourKm } from './routing';
 import { highOutliers, median, robustZ } from './anomaly';
 import { adviseTerms, creditCost, profit } from './profitability';
@@ -129,5 +129,29 @@ describe('profitability', () => {
   it('advice: the lever with most money behind it', () => {
     expect(adviseTerms(profit(f, '12.00'))?.lever).toBe('order_size');
     expect(adviseTerms(profit({ ...f, deliveryCost: '100.00', receivableRupeeDays: '9000000.00' }, '12.00'))?.lever).toBe('payment_terms');
+  });
+});
+
+describe('the minimum sustainable price (requirements Part 15)', () => {
+  const b =costBuildUp({ unitCost: '20.00', shrinkRate: 0.1, deliveryPerUnit: '1.50', targetMarginPct: '20.00' });
+
+  it('cost, what spoilage takes (carried by what sells), delivery — then the target margin', () => {
+    expect(b).toEqual({ unitCost: '20.00', shrinkRate: 0.1, spoilage: '2.22', delivery: '1.50', sustainable: '23.72', target: '28.46' });
+  });
+
+  it("where today's price stands", () => {
+    expect(priceStanding('19.00', b)).toBe('below_cost');
+    expect(priceStanding('22.00', b)).toBe('below_sustainable');
+    expect(priceStanding('25.00', b)).toBe('below_target');
+    expect(priceStanding('30.00', b)).toBe('on_target');
+    expect(priceStanding('30.00', null)).toBe('no_cost');
+    expect(marginAt('25.00', b.sustainable)).toBe(5.1);
+  });
+
+  it('a product not sold by weight has no delivery per unit; spoilage is capped at half', () => {
+    const eggs = costBuildUp({ unitCost: '6.00', shrinkRate: 0.9, deliveryPerUnit: null, targetMarginPct: '10.00' });
+    expect(eggs.delivery).toBeNull();
+    expect(eggs.shrinkRate).toBe(0.5);
+    expect(eggs.sustainable).toBe('12.00');
   });
 });

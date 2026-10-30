@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { TripPlan, TripQuantities, TripsBoard, TripsBoardDay } from '@morbeez/shared-types';
+import type { BackhaulRecord, TripPlan, TripQuantities, TripsBoard, TripsBoardDay } from '@morbeez/shared-types';
 import { apiGet } from '../api/client';
 
 /** The owner's Trips list (redesign V1.1): cards for today, tomorrow or all days, searchable. */
@@ -21,6 +21,15 @@ export function useTripPlan(date: string, routeId: string, vehicleId: string, en
       apiGet<TripPlan>('logistics/trips/plan', { date, routeId: routeId || undefined, vehicleId: vehicleId || undefined }),
     enabled: enabled && /^\d{4}-\d{2}-\d{2}$/.test(date),
     placeholderData: (previous) => previous,
+  });
+}
+
+/** A trip's backhauls (driver app D5): offered, taken, skipped, run and paid. */
+export function useTripBackhauls(tripId: string | null) {
+  return useQuery({
+    queryKey: ['logistics', 'trip', tripId, 'backhauls'],
+    queryFn: () => apiGet<BackhaulRecord[]>(`logistics/trips/${tripId}/backhauls`),
+    enabled: tripId !== null,
   });
 }
 

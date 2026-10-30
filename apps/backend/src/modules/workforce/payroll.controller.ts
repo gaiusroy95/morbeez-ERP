@@ -31,6 +31,7 @@ import {
   AdvanceRecord,
   AssignmentRecord,
   EarningsPreview,
+  DriverIncentiveSettings,
   IncentiveRule,
   MinimumWageRate,
   PayrollSettings,
@@ -44,6 +45,7 @@ import {
   DraftSettlementsDto,
   EarningsQueryDto,
   EndRuleDto,
+  DriverIncentivesDto,
   IncentiveRuleDto,
   ListAssignmentsQueryDto,
   ListSettlementsQueryDto,
@@ -225,6 +227,19 @@ export class PayrollController {
   @RequirePermissions('payroll:configure')
   endIncentiveRule(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: EndRuleDto): Promise<void> {
     return this.payroll.endRule(user.tenantId, user.userId, 'incentive_rule', id, dto.effectiveTo);
+  }
+
+  /** The owner's incentive rules for drivers (driver app D7): each one on or off, its percentage of its base. */
+  @Get('payroll/driver-incentives')
+  @RequirePermissions('payroll:read')
+  getDriverIncentives(@CurrentUser() user: AuthContext): Promise<DriverIncentiveSettings> {
+    return this.payroll.getDriverIncentives(user.tenantId);
+  }
+
+  @Put('payroll/driver-incentives')
+  @RequirePermissions('payroll:configure')
+  saveDriverIncentives(@CurrentUser() user: AuthContext, @Body() dto: DriverIncentivesDto): Promise<DriverIncentiveSettings> {
+    return this.payroll.saveDriverIncentives(user.tenantId, user.userId, dto);
   }
 
   @Get('minimum-wages')

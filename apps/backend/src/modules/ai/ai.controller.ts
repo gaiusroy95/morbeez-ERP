@@ -6,7 +6,7 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { AiActor, AiService } from './ai.service';
-import { AiSettings, CustomerProfitReport, RecommendationRecord, RunSummary, Scorecard } from './entities/ai.entity';
+import { AiSettings, CallList, CustomerProfitReport, PricingBoard, RecommendationRecord, RunSummary, Scorecard } from './entities/ai.entity';
 import { AiSettingsDto, DecideRecommendationDto, ListRecommendationsQueryDto, ProfitQueryDto } from './dto/ai.dto';
 import { PaginatedResult } from '../../common/persistence/pagination';
 
@@ -71,6 +71,20 @@ export class AiController {
   @RequirePermissions('ai:read')
   scorecard(@CurrentUser() user: AuthContext): Promise<Scorecard> {
     return this.ai.scorecard(actor(user));
+  }
+
+  /** AI Pricing: each product's price against what it costs to sell, and the open price suggestions. */
+  @Get('pricing')
+  @RequirePermissions('ai:read')
+  pricing(@CurrentUser() user: AuthContext): Promise<PricingBoard> {
+    return this.ai.pricing(actor(user));
+  }
+
+  /** AI Calling: today's calls, for a person to make — with the customers' phones. Money due needs finance:read too. */
+  @Get('calls')
+  @RequirePermissions('ai:read', 'customers:read')
+  calls(@CurrentUser() user: AuthContext): Promise<CallList> {
+    return this.ai.calls(actor(user));
   }
 
   /** What each customer contributed — revenue and costs per customer, so finance data too. */

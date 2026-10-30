@@ -90,6 +90,7 @@ import kotlinx.coroutines.launch
 enum class Glyph {
     Truck, Leaf, Back, Arrow, Sync, Camera, Rupee, Check, Warning, Pin, Box, Fuel, Pen, User, Lock, Tower, Logout,
     Menu, Phone, Navigate, Clock, Wallet, File, Shield, Car, Help, Globe, Home, Gauge, Chevrons, ChevronRight, Qr,
+    Wrench, Parking, Dots, Plus, Chat, Send,
 }
 
 @Composable
@@ -189,6 +190,19 @@ private fun DrawScope.drawGlyph(glyph: Glyph, c: Color, u: Float, stroke: Stroke
             p { m(3f, 3f); l(10f, 3f); l(10f, 10f); l(3f, 10f); close(); m(14f, 3f); l(21f, 3f); l(21f, 10f); l(14f, 10f); close(); m(3f, 14f); l(10f, 14f); l(10f, 21f); l(3f, 21f); close() }
             p { m(14f, 14f); l(17f, 14f); m(20f, 14f); l(21f, 14f); m(14f, 17.5f); l(14f, 21f); m(17.5f, 17.5f); l(21f, 17.5f); m(18f, 21f); l(21f, 21f) }
         }
+        // A spanner: its handle, and the ring open towards the top right — a repair (D6).
+        Glyph.Wrench -> {
+            p { m(4.5f, 19.5f); l(13.2f, 10.8f) }
+            drawArc(c, 10f, 250f, false, Offset(12.5f * u, 3.5f * u), Size(8f * u, 8f * u), style = stroke)
+        }
+        // A "P" in a rounded square: parking.
+        Glyph.Parking -> p { m(5f, 4f); l(19f, 4f); l(19f, 20f); l(5f, 20f); close(); m(10f, 17f); l(10f, 8f); l(13f, 8f); cubicTo(16f * u, 8f * u, 16f * u, 13f * u, 13f * u, 13f * u); l(10f, 13f) }
+        Glyph.Dots -> { drawCircle(c, 1.6f * u, Offset(6f * u, 12f * u)); drawCircle(c, 1.6f * u, Offset(12f * u, 12f * u)); drawCircle(c, 1.6f * u, Offset(18f * u, 12f * u)) }
+        Glyph.Plus -> p { m(12f, 5f); l(12f, 19f); m(5f, 12f); l(19f, 12f) }
+        // A speech bubble with two lines of text: the chat with the office (D9).
+        Glyph.Chat -> p { m(4f, 5f); l(20f, 5f); l(20f, 16f); l(11f, 16f); l(6f, 20f); l(6.5f, 16f); l(4f, 16f); close(); m(8f, 9.5f); l(16f, 9.5f); m(8f, 12.5f); l(13f, 12.5f) }
+        // A paper plane: send.
+        Glyph.Send -> p { m(3f, 11f); l(21f, 3f); l(14f, 21f); l(11f, 13f); close(); m(11f, 13f); l(21f, 3f) }
     }
 }
 

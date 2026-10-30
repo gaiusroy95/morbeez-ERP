@@ -74,6 +74,14 @@ class DayLogicTest {
     }
 
     @Test
+    fun `a trip that set off with an opening KM comes back first, then hands over`() {
+        val stops = listOf(stop(1, "delivery", "completed"))
+        val started = trip("in_progress").copy(openingKm = "48650.0")
+        assertEquals(NextAction.Return, DayLogic.nextActionOf(started, stops))
+        assertEquals(NextAction.Handover, DayLogic.nextActionOf(started.copy(closingKm = "48842.0"), stops))
+    }
+
+    @Test
     fun `distance to the next stop is the straight line times the road factor`() {
         // Two points in Mysuru about 3.6 km apart in a straight line.
         val straight = DayLogic.haversineKm(12.3052, 76.6552, 12.2770, 76.6720)

@@ -2,7 +2,7 @@
 // endpoints) and the map pins under /logistics/pins. Money is a decimal string.
 import type { IsoDate, IsoDateTime } from '../common';
 
-export type AiRecommendationType = 'pricing' | 'procurement' | 'logistics_route' | 'logistics_load' | 'customer_terms' | 'exception';
+export type AiRecommendationType = 'pricing' | 'procurement' | 'logistics_route' | 'logistics_load' | 'customer_terms' | 'exception' | 'order';
 export type AiConfidence = 'solid' | 'rough_guide' | 'early_estimate';
 export type AiDecision = 'accepted' | 'modified' | 'dismissed' | 'expired';
 export type AiStatus = 'open' | AiDecision;
@@ -14,6 +14,7 @@ export const AI_DECIDE_PERMISSION: Record<AiRecommendationType, string> = {
   logistics_load: 'ai:decide:logistics',
   customer_terms: 'ai:decide:customers',
   exception: 'ai:decide:exceptions',
+  order: 'ai:decide:customers',
 };
 
 export interface AiEvidence {
@@ -110,6 +111,52 @@ export interface CustomerProfitReport {
   costOfCapitalPct: string;
   rows: CustomerProfitRow[];
   totals: { revenue: string; grossMargin: string; deliveryCost: string; creditCost: string; contribution: string };
+}
+
+// ---- AI Pricing and AI Calling (owner Phase 8) ----
+
+export type PriceStanding = 'no_price' | 'no_cost' | 'below_cost' | 'below_sustainable' | 'below_target' | 'on_target';
+
+export interface PricingRow {
+  productId: string;
+  name: string;
+  uom: string;
+  currentPrice: string | null;
+  stockQty: string | null;
+  unitCost: string | null;
+  buildUp: { shrinkRate: number; spoilage: string; delivery: string | null; sustainable: string; target: string } | null;
+  standing: PriceStanding;
+  marginPct: number | null;
+  realized: { low: string; high: string; average: string; lines: number } | null;
+  suggestionId: string | null;
+}
+
+export interface PricingBoard {
+  asOf: IsoDate;
+  currency: string;
+  targetMarginPct: string;
+  deliveryPerKg: string | null;
+  deliveryWindow: { from: IsoDate; to: IsoDate; cost: string; kg: string };
+  rows: PricingRow[];
+}
+
+export interface CallItem {
+  kind: 'payment' | 'order' | 'quantity';
+  customerId: string;
+  name: string;
+  phone: string | null;
+  place: string | null;
+  amount: string | null;
+  dueDate: IsoDate | null;
+  overdueDays: number | null;
+  recommendationId: string | null;
+  about: string | null;
+}
+
+export interface CallList {
+  voice: 'coming';
+  date: IsoDate;
+  calls: CallItem[];
 }
 
 export interface PlacePin {

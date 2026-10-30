@@ -52,6 +52,8 @@ export interface CollectionPaymentInput {
   collectedAt: Date;
   /** Cash the driver holds until handover goes to the trip float, not the cash drawer. */
   receivedInto?: LedgerAccount;
+  /** UPI or transfer: its reference (UTR). */
+  reference?: string | null;
 }
 
 /** Cash goes to the cash drawer; every other channel lands in the bank. */
@@ -249,7 +251,7 @@ export class ReceivablesService {
       amount: input.amount,
       fee: '0.00',
       method: input.method,
-      reference: null,
+      reference: input.reference ?? null,
       notes: input.notes,
       collectionId: input.collectionId,
       receivedAt: input.collectedAt,

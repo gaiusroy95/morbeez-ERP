@@ -8,15 +8,18 @@ import androidx.work.WorkManager
 import com.morbeez.driver.data.device.LocationReader
 import com.morbeez.driver.data.device.NetworkMonitor
 import com.morbeez.driver.data.device.Position
+import com.morbeez.driver.data.local.BackhaulEntity
 import com.morbeez.driver.data.local.DriverDayEntity
 import com.morbeez.driver.data.local.TripEntity
 import com.morbeez.driver.data.local.TripStopEntity
+import com.morbeez.driver.data.remote.dto.ApprovalCountsResponse
 import com.morbeez.driver.data.remote.dto.DeliveryOutcomeResponse
 import com.morbeez.driver.data.remote.dto.FarmStopOutcomeResponse
 import com.morbeez.driver.ui.screens.deliver.DeliveryLogic
 import com.morbeez.driver.ui.screens.deliver.StockLine
 import com.morbeez.driver.data.remote.dto.TripVehicleStockResponse
 import com.morbeez.driver.data.repository.AuthRepository
+import com.morbeez.driver.data.repository.ChatRepository
 import com.morbeez.driver.data.repository.LogoutResult
 import com.morbeez.driver.data.repository.TripRepository
 import com.morbeez.driver.data.sync.SyncWorker
@@ -55,6 +58,14 @@ data class HomeUiState(
     val deliveries: Map<String, DeliveryOutcomeResponse> = emptyMap(),
     /** What's on the vehicle now, by the phone's reckoning (D3). */
     val stockLines: List<StockLine> = emptyList(),
+    /** Customers delivered on the trip still owing (D4). */
+    val collectionsDue: Int = 0,
+    /** The trip's backhauls (D5). */
+    val backhauls: List<BackhaulEntity> = emptyList(),
+    /** What waits on the owner and what they decided, as last read (D6). */
+    val approvalCounts: ApprovalCountsResponse? = null,
+    /** What the office wrote that the driver hasn't read (D9). */
+    val chatUnread: Int = 0,
 )
 
 /**
@@ -68,6 +79,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val trips: TripRepository,
+    chat: ChatRepository,
     private val auth: AuthRepository,
     private val location: LocationReader,
     network: NetworkMonitor,
@@ -84,18 +96,29 @@ class HomeViewModel @Inject constructor(
 
     private val tripWithStops = trips.observeActiveTrip().flatMapLatest { trip ->
         if (trip == null) {
-            flowOf<Pair<TripEntity?, List<TripStopEntity>>>(null to emptyList())
+            flowOf(TripView(null, emptyList(), emptyList()))
         } else {
-            trips.observeStops(trip.id).map<List<TripStopEntity>, Pair<TripEntity?, List<TripStopEntity>>> { trip to it }
+            combine(trips.observeStops(trip.id), trips.observeBackhauls(trip.id)) { stops, backhauls -> TripView(trip, stops, backhauls) }
         }
     }
 
-    val state: StateFlow<HomeUiState> = combine(trips.observeDay(), tripWithStops, link, position) { day, (trip, stops), link, position ->
+    private val collections = com.morbeez.driver.ui.screens.collect.collectionsOf(trips).map { it.pending.first }
+
+    /** Customers owing, and the office's unread messages (D9). */
+    private val counts = combine(collections, chat.observeUnread()) { due, unread -> due to unread }
+
+    val state: StateFlow<HomeUiState> = combine(trips.observeDay(), tripWithStops, link, position, counts) { day, (trip, stops, backhauls), link, position, (due, unread) ->
         val farms = stops.mapNotNull { s -> trips.farmOf(s)?.let { s.id to it } }.toMap()
         val deliveries = stops.mapNotNull { s -> trips.deliveryOf(s)?.let { s.id to it } }.toMap()
         val stock = trips.stockOf(day)
-        HomeUiState(day, trip, stops, stock, link, position, farms, deliveries, DeliveryLogic.stockOf(stock, stops, farms, deliveries) { trips.itemsOf(it) })
+        HomeUiState(
+            day, trip, stops, stock, link, position, farms, deliveries, DeliveryLogic.stockOf(stock, stops, farms, deliveries) { trips.itemsOf(it) }, due, backhauls,
+            approvalCounts = trips.approvalsOf(day)?.counts,
+            chatUnread = unread,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+
+    private data class TripView(val trip: TripEntity?, val stops: List<TripStopEntity>, val backhauls: List<BackhaulEntity>)
 
     /** Where the phone is, for the distance to the next stop; quietly nothing without permission. */
     fun refreshPosition() {

@@ -22,6 +22,32 @@ export interface TripCard {
   stopsDone: number;
 }
 
+/** A trip on the road now, with its crew (Workforce & Vehicles, redesign Phase 7). */
+export interface OnTheRoad {
+  tripId: string;
+  number: string;
+  vehicleId: string;
+  driverEmployeeId: string;
+  packerEmployeeId: string | null;
+  loaderEmployeeId: string | null;
+  startedAt: Date | null;
+  routeName: string | null;
+}
+
+/** A vehicle's trips (Vehicle details, redesign Phase 7). */
+export interface VehicleTrips {
+  vehicleId: string;
+  /** Trips it has set off on (not cancelled). */
+  trips: number;
+  /** Kilometres recorded on them: closing − opening KM where both were taken. */
+  km: string;
+  /** The trip it's on now, if any. */
+  current: string | null;
+  /** Who drove and packed its latest trip. */
+  crew: { driverName: string; driverPhone: string | null; packerName: string | null } | null;
+  recent: { id: string; number: string; status: TripStatus; day: string; routeName: string | null; km: string | null; driverName: string }[];
+}
+
 export interface TripsBoard {
   day: TripsBoardDay;
   counts: { today: number; tomorrow: number; all: number };

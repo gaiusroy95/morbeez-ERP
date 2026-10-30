@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { PlanOrder, PlanPickup, QuantityRow, TripCard, TripPlan, TripsBoard, TripsBoardDay } from '../entities/trip-planning.entity';
+import { OnTheRoad, PlanOrder, PlanPickup, QuantityRow, TripCard, TripPlan, TripsBoard, TripsBoardDay, VehicleTrips } from '../entities/trip-planning.entity';
 
 // The raw rows of the plan queries (pg returns plain objects).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,6 +112,72 @@ export class TripPlanningRepository {
           stopsDone: r.stops_done,
         }),
       ),
+    };
+  }
+
+  /** Trips on the road now, with their crew: who is "On trip" and which vehicles are out (redesign Phase 7). */
+  async onTheRoadWithClient(client: PoolClient): Promise<OnTheRoad[]> {
+    const result = await client.query<{
+      id: string; number: string; vehicle_id: string; driver_employee_id: string;
+      packer_employee_id: string | null; loader_employee_id: string | null; started_at: Date | null; route_name: string | null;
+    }>(
+      `SELECT t.id, t.number, t.vehicle_id, t.driver_employee_id, t.packer_employee_id, t.loader_employee_id, t.started_at, r.name AS route_name
+         FROM fulfilment.trip t LEFT JOIN trading_partners.route r ON r.id = t.route_id
+        WHERE t.status = 'in_progress'
+        ORDER BY t.started_at`,
+    );
+    return result.rows.map((r) => ({
+      tripId: r.id,
+      number: r.number,
+      vehicleId: r.vehicle_id,
+      driverEmployeeId: r.driver_employee_id,
+      packerEmployeeId: r.packer_employee_id,
+      loaderEmployeeId: r.loader_employee_id,
+      startedAt: r.started_at,
+      routeName: r.route_name,
+    }));
+  }
+
+  /**
+   * A vehicle's trips (Vehicle details, redesign Phase 7): how many it has
+   * made and the kilometres recorded on them (closing − opening KM), who
+   * drove and packed its latest, and the latest twenty.
+   */
+  async vehicleTripsWithClient(client: PoolClient, vehicleId: string): Promise<VehicleTrips> {
+    const totals = await client.query<{ trips: number; km: string }>(
+      `SELECT count(*) FILTER (WHERE started_at IS NOT NULL)::int AS trips,
+              COALESCE(SUM(closing_km - opening_km) FILTER (WHERE closing_km IS NOT NULL AND opening_km IS NOT NULL), 0)::numeric(12,1)::text AS km
+         FROM fulfilment.trip WHERE vehicle_id = $1 AND status <> 'cancelled'`,
+      [vehicleId],
+    );
+    const recent = await client.query<{
+      id: string; number: string; status: TripCard['status']; day: string; route_name: string | null; km: string | null;
+      driver_name: string; driver_phone: string | null; packer_name: string | null;
+    }>(
+      `SELECT t.id, t.number, t.status,
+              COALESCE(t.planned_date, (t.created_at AT TIME ZONE tn.timezone)::date)::text AS day,
+              r.name AS route_name,
+              CASE WHEN t.closing_km IS NOT NULL AND t.opening_km IS NOT NULL THEN (t.closing_km - t.opening_km)::numeric(12,1)::text END AS km,
+              d.name AS driver_name, dp.phone AS driver_phone, p.name AS packer_name
+         FROM fulfilment.trip t
+         JOIN tenant.tenant tn ON tn.id = t.tenant_id
+         JOIN trading_partners.employee d ON d.id = t.driver_employee_id
+         LEFT JOIN workforce.worker_profile dp ON dp.employee_id = d.id
+         LEFT JOIN trading_partners.employee p ON p.id = t.packer_employee_id
+         LEFT JOIN trading_partners.route r ON r.id = t.route_id
+        WHERE t.vehicle_id = $1 AND t.status <> 'cancelled'
+        ORDER BY day DESC, t.number DESC
+        LIMIT 20`,
+      [vehicleId],
+    );
+    const latest = recent.rows[0];
+    return {
+      vehicleId,
+      trips: totals.rows[0].trips,
+      km: totals.rows[0].km,
+      current: recent.rows.find((r) => r.status === 'in_progress')?.number ?? null,
+      crew: latest ? { driverName: latest.driver_name, driverPhone: latest.driver_phone, packerName: latest.packer_name } : null,
+      recent: recent.rows.map((r) => ({ id: r.id, number: r.number, status: r.status, day: r.day, routeName: r.route_name, km: r.km, driverName: r.driver_name })),
     };
   }
 
@@ -349,13 +415,16 @@ export class TripPlanningRepository {
     return r.rows[0]?.id ?? null;
   }
 
-  /** The vehicle's highest odometer reading on record: fuel fills, maintenance, and the day's opening KM. */
+  /** The vehicle's highest odometer reading on record: fuel fills (the fuel log and on trips), maintenance, and trips' opening and closing KM. */
   async lastOdometerWithClient(client: PoolClient, vehicleId: string, exceptTripId: string | null = null): Promise<string | null> {
     const r = await client.query<{ km: string | null }>(
       `SELECT GREATEST(
          (SELECT max(odometer_km) FROM fleet.fuel_log WHERE vehicle_id = $1),
          (SELECT max(odometer_km) FROM fleet.maintenance_record WHERE vehicle_id = $1),
-         (SELECT max(opening_km) FROM fulfilment.trip WHERE vehicle_id = $1 AND ($2::uuid IS NULL OR id <> $2))
+         (SELECT max(opening_km) FROM fulfilment.trip WHERE vehicle_id = $1 AND ($2::uuid IS NULL OR id <> $2)),
+         (SELECT max(closing_km) FROM fulfilment.trip WHERE vehicle_id = $1 AND ($2::uuid IS NULL OR id <> $2)),
+         (SELECT max(e.odometer_km) FROM fulfilment.trip_expense e JOIN fulfilment.trip t ON t.id = e.trip_id
+            WHERE t.vehicle_id = $1 AND ($2::uuid IS NULL OR t.id <> $2))
        )::numeric(10,1)::text AS km`,
       [vehicleId, exceptTripId],
     );

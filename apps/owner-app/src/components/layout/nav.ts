@@ -9,6 +9,8 @@ export interface NavItem {
   label: string;
   icon: IconName;
   permission?: string;
+  /** A count beside it: the drivers' messages this owner hasn't read (D9). */
+  badge?: 'chat';
 }
 
 export interface NavGroup {
@@ -74,6 +76,9 @@ export const NAV: NavGroup[] = [
       { href: '/customers', icon: 'users', label: 'Customers', permission: 'customers:read' },
       { href: '/farmers', icon: 'sprout', label: 'Farmers', permission: 'farmers:read' },
       { href: '/collections', icon: 'rupee', label: 'Collections', permission: 'finance:read' },
+      { href: '/chat', icon: 'chat', label: 'Chat with drivers', permission: 'logistics:dispatch', badge: 'chat' },
+      // Owner Phase 8 (set 1, screen 24): each driver's phone, as it last synced.
+      { href: '/sync', icon: 'sync', label: 'Driver phones', permission: 'logistics:dispatch' },
       { href: '/delegation', icon: 'key', label: 'Delegation', permission: 'logistics:dispatch' },
       { href: '/spot-sales', icon: 'bolt', label: 'Spot sales', permission: 'spot_sales:read' },
       { href: '/crates', icon: 'crate', label: 'Crates', permission: 'crates:read' },
@@ -90,7 +95,13 @@ export const NAV: NavGroup[] = [
   },
   {
     label: 'AI',
-    items: [{ href: '/ai', icon: 'sparkles', label: 'Suggestions', permission: 'ai:read' }],
+    items: [
+      { href: '/ai', icon: 'sparkles', label: 'Suggestions', permission: 'ai:read' },
+      // Owner Phase 8 (set 1, screens 16, 23): orders, prices and calls.
+      { href: '/ai/orders', icon: 'receipt', label: 'AI Orders', permission: 'ai:read' },
+      { href: '/ai/pricing', icon: 'rupee', label: 'AI Pricing', permission: 'ai:read' },
+      { href: '/ai/calling', icon: 'phone', label: 'AI Calling', permission: 'ai:read' },
+    ],
   },
   {
     label: 'People & Assets',
@@ -98,6 +109,14 @@ export const NAV: NavGroup[] = [
       { href: '/workforce', icon: 'badge', label: 'Workforce', permission: 'workforce:read' },
       { href: '/vehicles', icon: 'steering', label: 'Vehicles', permission: 'vehicles:read' },
       { href: '/products', icon: 'leaf', label: 'Products', permission: 'products:read' },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { href: '/approvals', icon: 'check', label: 'Approvals', permission: 'dashboard:read' },
+      { href: '/reports', icon: 'file', label: 'Reports' },
+      { href: '/settings', icon: 'gear', label: 'Settings' },
     ],
   },
 ];

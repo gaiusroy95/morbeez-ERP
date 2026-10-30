@@ -7,7 +7,17 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { DashboardService } from './dashboard.service';
 import { PeriodQueryDto } from '../../common/dto/period-query.dto';
-import { DashboardAlerts, DashboardHome, DashboardKpis, DashboardOperations, DashboardProfit, FinanceSummary, ProfitInsights } from './entities/dashboard.entity';
+import {
+  ApprovalsInbox,
+  DashboardAlerts,
+  DashboardHome,
+  DashboardKpis,
+  DashboardOperations,
+  DashboardProfit,
+  FinanceSummary,
+  ProfitInsights,
+} from './entities/dashboard.entity';
+import { ApprovalsInboxService } from './approvals-inbox.service';
 import { HomeQueryDto } from './dto/home-query.dto';
 import { RangeQueryDto } from './dto/range-query.dto';
 
@@ -19,7 +29,10 @@ import { RangeQueryDto } from './dto/range-query.dto';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(
+    private readonly dashboardService: DashboardService,
+    private readonly inbox: ApprovalsInboxService,
+  ) {}
 
   @Get('kpis')
   @RequirePermissions('dashboard:read')
@@ -64,5 +77,12 @@ export class DashboardController {
   @RequirePermissions('dashboard:read')
   getOperations(@CurrentUser() user: AuthContext): Promise<DashboardOperations> {
     return this.dashboardService.getOperations(user.tenantId);
+  }
+
+  /** Approvals & Exceptions: everything waiting for the owner (redesign Phase 7). Each decision goes through its own module. */
+  @Get('approvals')
+  @RequirePermissions('dashboard:read')
+  getApprovals(@CurrentUser() user: AuthContext): Promise<ApprovalsInbox> {
+    return this.inbox.getInbox(user.tenantId);
   }
 }

@@ -33,6 +33,7 @@ const AREA_LABEL: Record<ChecklistArea, string> = {
   deliveries: 'Deliveries',
   load: 'Load (KG)',
   returns: 'Returns & shortages',
+  backhaul: 'Backhaul',
   collections: 'Collections',
   handover: 'Money handover',
   expenses: 'Expenses',
@@ -58,6 +59,12 @@ function HandoverLines({ handover }: { handover: HandoverSummary }) {
             <td>{t('+ Cash from spot sales')}</td>
             <td className="num">{formatMoney(handover.spotCash, currency)}</td>
           </tr>
+          {Number(handover.backhaulCash) > 0 && (
+            <tr>
+              <td>{t('+ Backhaul rent in cash')}</td>
+              <td className="num">{formatMoney(handover.backhaulCash, currency)}</td>
+            </tr>
+          )}
           <tr>
             <td>{t('− Expenses paid')}</td>
             <td className="num">{formatMoney(handover.expenses, currency)}</td>
@@ -391,6 +398,7 @@ export function ClosedTrip({ reconciliation, timeZone }: { reconciliation: TripR
           ['Advance', formatMoney(reconciliation.advanceAmount, currency)],
           ['Cash collected', formatMoney(reconciliation.cashCollections, currency)],
           ['Spot-sale cash', formatMoney(reconciliation.spotCash, currency)],
+          ...(Number(reconciliation.backhaulCash ?? 0) > 0 ? ([['Backhaul cash', formatMoney(reconciliation.backhaulCash, currency)]] as [string, string][]) : []),
           ['Expenses', formatMoney(reconciliation.totalExpenses, currency)],
           ['Deposited in bank', formatMoney(reconciliation.cashDeposited, currency)],
           ['Cash received', formatMoney(reconciliation.cashReturned, currency)],

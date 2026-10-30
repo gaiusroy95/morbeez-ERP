@@ -170,22 +170,99 @@ export interface Fill {
   litres: string;
   amount: string;
   odometerKm: number | null;
+  /** Filled to the brim; a fill recorded without saying is taken as full. */
+  fullTank?: boolean;
 }
 
-/**
- * Distance from the odometer readings in the period, and fuel economy over
- * the fills after the first reading (the first fill's fuel was burnt
- * before it). Null when there aren't two readings to compare.
- */
-export function fuelEconomy(fills: Fill[]): { km: number | null; kmPerLitre: string | null } {
-  const read = fills.filter((f) => f.odometerKm !== null).sort((a, b) => a.odometerKm! - b.odometerKm!);
-  if (read.length < 2) return { km: null, kmPerLitre: null };
-  const km = read[read.length - 1].odometerKm! - read[0].odometerKm!;
-  const litresMilli = read.slice(1).reduce((s, f) => {
+const litresMilliOf = (fills: Fill[]): bigint =>
+  fills.reduce((s, f) => {
     const [w, fr = ''] = f.litres.split('.');
     return s + BigInt(w) * 1000n + BigInt((fr + '000').slice(0, 3));
   }, 0n);
-  if (km <= 0 || litresMilli === 0n) return { km: km > 0 ? km : null, kmPerLitre: null };
-  const perLitreCenti = half(BigInt(km) * 100_000n, litresMilli); // km / litres, 2 dp
-  return { km, kmPerLitre: `${perLitreCenti / 100n}.${(perLitreCenti % 100n).toString().padStart(2, '0')}` };
+
+/** km ÷ litres to 2 dp; null when either is nothing. */
+function perLitre(km: number, litresMilli: bigint): string | null {
+  if (km <= 0 || litresMilli === 0n) return null;
+  const centi = half(BigInt(km) * 100_000n, litresMilli);
+  return `${centi / 100n}.${(centi % 100n).toString().padStart(2, '0')}`;
+}
+
+/** The fills with an odometer reading, in the order the odometer read them. */
+const readFills = <T extends Fill>(fills: T[]): T[] => fills.filter((f) => f.odometerKm !== null).sort((a, b) => a.odometerKm! - b.odometerKm!);
+
+/**
+ * Distance from the odometer readings in the period, and fuel economy from
+ * full tank to full tank: the fuel put in after the first full tank, up to
+ * and including the last, drove the km between them (a part fill in
+ * between counts with them). With every fill full, that's every fill after
+ * the first reading. Null when there aren't two readings (or two full
+ * tanks) to compare.
+ */
+export function fuelEconomy(fills: Fill[]): { km: number | null; kmPerLitre: string | null } {
+  const read = readFills(fills);
+  if (read.length < 2) return { km: null, kmPerLitre: null };
+  const km = read[read.length - 1].odometerKm! - read[0].odometerKm!;
+  const fulls = read.map((f, i) => (f.fullTank === false ? -1 : i)).filter((i) => i >= 0);
+  if (fulls.length < 2) return { km: km > 0 ? km : null, kmPerLitre: null };
+  const first = fulls[0];
+  const last = fulls[fulls.length - 1];
+  const span = read[last].odometerKm! - read[first].odometerKm!;
+  return { km: km > 0 ? km : null, kmPerLitre: perLitre(span, litresMilliOf(read.slice(first + 1, last + 1))) };
+}
+
+export interface FullTankMileage {
+  /** The odometer at the full tank before the latest one, and at the latest. */
+  fromKm: number;
+  toKm: number;
+  km: number;
+  litres: string;
+  kmPerLitre: string | null;
+}
+
+/**
+ * The full tank before to the last full tank filled on [tripId] (the
+ * mileage incentive, driver app D7): the km between them, and the litres and
+ * cost of every fill after the first, up to and including it. Null when the
+ * trip filled no full tank, or there's no full tank before it.
+ */
+export function tripMileageSegment(
+  fills: (Fill & { tripId: string | null })[],
+  tripId: string,
+): { km: number; litres: string; cost: string } | null {
+  const read = readFills(fills);
+  const fulls = read.map((f, i) => (f.fullTank === false ? -1 : i)).filter((i) => i >= 0);
+  const onTrip = fulls.filter((i) => read[i].tripId === tripId);
+  if (onTrip.length === 0) return null;
+  const to = onTrip[onTrip.length - 1];
+  const from = fulls.filter((i) => i < to).pop();
+  if (from === undefined) return null;
+  const between = read.slice(from + 1, to + 1);
+  const milli = litresMilliOf(between);
+  const cents = between.reduce((s, f) => {
+    const [w, fr = ''] = f.amount.split('.');
+    return s + BigInt(w) * 100n + BigInt((fr + '00').slice(0, 2));
+  }, 0n);
+  return {
+    km: read[to].odometerKm! - read[from].odometerKm!,
+    litres: `${milli / 1000n}.${(milli % 1000n).toString().padStart(3, '0')}`,
+    cost: `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`,
+  };
+}
+
+/** The latest full tank to full tank (My Expenses' "Vehicle mileage"); null until there are two. */
+export function lastFullTankMileage(fills: Fill[]): FullTankMileage | null {
+  const read = readFills(fills);
+  const fulls = read.map((f, i) => (f.fullTank === false ? -1 : i)).filter((i) => i >= 0);
+  if (fulls.length < 2) return null;
+  const from = fulls[fulls.length - 2];
+  const to = fulls[fulls.length - 1];
+  const km = read[to].odometerKm! - read[from].odometerKm!;
+  const milli = litresMilliOf(read.slice(from + 1, to + 1));
+  return {
+    fromKm: read[from].odometerKm!,
+    toKm: read[to].odometerKm!,
+    km,
+    litres: `${milli / 1000n}.${(milli % 1000n).toString().padStart(3, '0')}`,
+    kmPerLitre: perLitre(km, milli),
+  };
 }

@@ -199,12 +199,27 @@ export class FleetRepository {
 
   // ---- Fuel and maintenance ----
 
+  /**
+   * The vehicle's fills: the fuel log, and the fills a driver paid for on a
+   * trip with the pump's details (driver app D6) — paid from the trip's
+   * cash, on the trip's own expenses. Both make the vehicle's mileage.
+   */
   async fuel(client: PoolClient, vehicleId: string | null, from: string | null, to: string | null): Promise<FuelRecord[]> {
     const r = await client.query(
-      `SELECT id, vehicle_id, filled_on::text AS filled_on, litres::text AS litres, amount::text AS amount, odometer_km, station, paid_from, trip_id
-       FROM fleet.fuel_log
-       WHERE ($1::uuid IS NULL OR vehicle_id = $1) AND ($2::date IS NULL OR filled_on >= $2) AND ($3::date IS NULL OR filled_on <= $3)
-       ORDER BY filled_on DESC, created_at DESC`,
+      `WITH tn AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id())
+       SELECT id, vehicle_id, filled_on::text AS filled_on, litres::numeric(10,3)::text AS litres, amount::numeric(12,2)::text AS amount,
+              odometer_km, full_tank, station, paid_from, trip_id, source
+       FROM (
+         SELECT id, vehicle_id, filled_on, litres, amount, odometer_km, full_tank, station, paid_from, trip_id, created_at, 'fuel_log' AS source
+         FROM fleet.fuel_log
+         UNION ALL
+         SELECT e.id, t.vehicle_id, (e.recorded_at AT TIME ZONE tn.timezone)::date, e.litres, e.amount, e.odometer_km, COALESCE(e.full_tank, true),
+                e.notes, 'cash_with_drivers', t.id, e.recorded_at, 'trip_expense'
+         FROM fulfilment.trip_expense e JOIN fulfilment.trip t ON t.id = e.trip_id, tn
+         WHERE e.category = 'fuel' AND e.litres IS NOT NULL
+       ) f
+       WHERE ($1::uuid IS NULL OR vehicle_id = $1) AND ($2::date IS NULL OR f.filled_on >= $2) AND ($3::date IS NULL OR f.filled_on <= $3)
+       ORDER BY f.filled_on DESC, created_at DESC`,
       [vehicleId, from, to],
     );
     return r.rows.map((x) => ({
@@ -214,9 +229,11 @@ export class FleetRepository {
       litres: x.litres,
       amount: x.amount,
       odometerKm: x.odometer_km,
+      fullTank: x.full_tank,
       station: x.station,
       paidFrom: x.paid_from,
       tripId: x.trip_id,
+      source: x.source,
     }));
   }
 
@@ -224,7 +241,10 @@ export class FleetRepository {
     const r = await client.query(
       `SELECT odometer_km AS km, d::text AS on FROM (
          SELECT odometer_km, filled_on AS d FROM fleet.fuel_log WHERE vehicle_id = $1 AND odometer_km IS NOT NULL
-         UNION ALL SELECT odometer_km, service_date FROM fleet.maintenance_record WHERE vehicle_id = $1 AND odometer_km IS NOT NULL) x
+         UNION ALL SELECT odometer_km, service_date FROM fleet.maintenance_record WHERE vehicle_id = $1 AND odometer_km IS NOT NULL
+         UNION ALL SELECT e.odometer_km, (e.recorded_at AT TIME ZONE (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id()))::date
+           FROM fulfilment.trip_expense e JOIN fulfilment.trip t ON t.id = e.trip_id
+           WHERE t.vehicle_id = $1 AND e.odometer_km IS NOT NULL) x
        WHERE d <= $2::date ORDER BY odometer_km DESC LIMIT 1`,
       [vehicleId, onOrBefore],
     );
@@ -520,18 +540,21 @@ export class FleetRepository {
 
   // ---- Economics ----
 
-  /** Every cost a vehicle ran up in a period, by kind, from its own records and its trips' fuel. */
+  /** Every cost a vehicle ran up in a period, by kind, from its own records and its trips' fuel and repairs on the road. */
   async costs(client: PoolClient, from: string, to: string): Promise<Row[]> {
     const r = await client.query(
       `WITH v AS (SELECT v.id, v.registration_number, COALESCE(p.ownership, 'owned') AS ownership
                   FROM trading_partners.vehicle v LEFT JOIN fleet.vehicle_profile p ON p.vehicle_id = v.id),
-       tn AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id())
+       tn AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id()),
+       road AS (SELECT t.vehicle_id, e.category, e.amount, e.litres FROM fulfilment.trip_expense e JOIN fulfilment.trip t ON t.id = e.trip_id, tn
+                WHERE e.category IN ('fuel', 'repair') AND (e.recorded_at AT TIME ZONE tn.timezone)::date BETWEEN $1 AND $2)
        SELECT v.id AS vehicle_id, v.registration_number, v.ownership,
          (SELECT COALESCE(SUM(amount), 0) FROM fleet.fuel_log f WHERE f.vehicle_id = v.id AND f.filled_on BETWEEN $1 AND $2)::numeric(14,2)::text AS fuel_logged,
-         (SELECT COALESCE(SUM(litres), 0) FROM fleet.fuel_log f WHERE f.vehicle_id = v.id AND f.filled_on BETWEEN $1 AND $2)::numeric(12,3)::text AS litres,
-         (SELECT COALESCE(SUM(e.amount), 0) FROM fulfilment.trip_expense e JOIN fulfilment.trip t ON t.id = e.trip_id, tn
-            WHERE t.vehicle_id = v.id AND e.category = 'fuel' AND (e.recorded_at AT TIME ZONE tn.timezone)::date BETWEEN $1 AND $2)::numeric(14,2)::text AS fuel_on_trips,
-         (SELECT COALESCE(SUM(amount), 0) FROM fleet.maintenance_record m WHERE m.vehicle_id = v.id AND m.service_date BETWEEN $1 AND $2)::numeric(14,2)::text AS maintenance,
+         ((SELECT COALESCE(SUM(litres), 0) FROM fleet.fuel_log f WHERE f.vehicle_id = v.id AND f.filled_on BETWEEN $1 AND $2)
+           + (SELECT COALESCE(SUM(litres), 0) FROM road WHERE road.vehicle_id = v.id AND category = 'fuel'))::numeric(12,3)::text AS litres,
+         (SELECT COALESCE(SUM(amount), 0) FROM road WHERE road.vehicle_id = v.id AND category = 'fuel')::numeric(14,2)::text AS fuel_on_trips,
+         ((SELECT COALESCE(SUM(amount), 0) FROM fleet.maintenance_record m WHERE m.vehicle_id = v.id AND m.service_date BETWEEN $1 AND $2)
+           + (SELECT COALESCE(SUM(amount), 0) FROM road WHERE road.vehicle_id = v.id AND category = 'repair'))::numeric(14,2)::text AS maintenance,
          (SELECT COALESCE(SUM(amount), 0) FROM fleet.vehicle_document d WHERE d.vehicle_id = v.id AND (d.created_at AT TIME ZONE (SELECT timezone FROM tn))::date BETWEEN $1 AND $2)::numeric(14,2)::text AS documents,
          (SELECT COALESCE(SUM(amount), 0) FROM fleet.depreciation_entry e WHERE e.vehicle_id = v.id AND e.period_month BETWEEN date_trunc('month', $1::date)::date AND $2)::numeric(14,2)::text AS depreciation,
          (SELECT COALESCE(SUM(p.interest), 0) FROM fleet.loan_payment p JOIN fleet.vehicle_loan l ON l.id = p.loan_id WHERE l.vehicle_id = v.id AND p.paid_on BETWEEN $1 AND $2)::numeric(14,2)::text AS loan_interest,

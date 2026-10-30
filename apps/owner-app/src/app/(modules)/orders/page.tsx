@@ -40,7 +40,7 @@ import { SearchSelect } from '@/components/forms/SearchSelect';
 import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, todayIn } from '@/lib/format';
 import { optionalText } from '@/lib/parse';
 import { useT } from '@/lib/i18n';
-import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatOrderNumber, useOrdersBoard, useRouteName, useRoutes } from '@/lib/hooks/use-delivery-orders';
 import { CreateBar, DayTabs, ListCard, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 
@@ -554,6 +554,7 @@ export default function OrdersPage() {
     setForCustomer(params.get('customer') ?? '');
     setCreating(true);
   });
+  useOpenParam(setSelected);
   const { data: session } = useSession();
   const canWrite = hasPermission(session, 'orders:write');
   const board = useOrdersBoard(day, query);

@@ -221,6 +221,8 @@ private fun labelOf(type: String): Int = when (runCatching { PendingOperationTyp
     PendingOperationType.START_TRIP -> R.string.op_start_trip
     PendingOperationType.ARRIVE_STOP -> R.string.op_arrive
     PendingOperationType.START_DELIVERIES -> R.string.op_start_deliveries
+    PendingOperationType.RETURN_TRIP -> R.string.op_return_trip
+    PendingOperationType.RAISE_DISPUTE -> R.string.op_raise_dispute
     PendingOperationType.COMPLETE_PICKUP_STOP -> R.string.op_complete_pickup
     PendingOperationType.COMPLETE_DELIVERY_STOP -> R.string.op_complete_delivery
     PendingOperationType.SKIP_STOP -> R.string.op_skip_stop
@@ -229,5 +231,13 @@ private fun labelOf(type: String): Int = when (runCatching { PendingOperationTyp
     PendingOperationType.RECORD_DEPOSIT -> R.string.op_deposit
     PendingOperationType.SUBMIT_TRIP -> R.string.op_submit_trip
     PendingOperationType.REPORT_PROBLEM -> R.string.op_problem
+    PendingOperationType.CREATE_BACKHAUL -> R.string.op_add_backhaul
+    PendingOperationType.ACCEPT_BACKHAUL -> R.string.op_accept_backhaul
+    PendingOperationType.SKIP_BACKHAUL -> R.string.op_skip_backhaul
+    PendingOperationType.BACKHAUL_STEP -> R.string.op_backhaul_step
+    PendingOperationType.PAY_BACKHAUL -> R.string.op_pay_backhaul
+    PendingOperationType.ACKNOWLEDGE_PAY -> R.string.op_ack_pay
+    PendingOperationType.SEND_MESSAGE -> R.string.op_send_message
+    PendingOperationType.READ_CHAT -> R.string.op_read_chat
     null -> R.string.op_other
 }

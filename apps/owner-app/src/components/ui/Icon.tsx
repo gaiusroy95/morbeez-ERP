@@ -45,6 +45,13 @@ const PATHS = {
   navigate: 'M3 11l18-8-8 18-2-8z',
   check: 'M5 12.5l4.5 4.5L19 7.5',
   globe: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 2.5v3M12 18.5v3M4.2 6.7l2.1 2.1M17.7 15.2l2.1 2.1M2.5 12h3M18.5 12h3M4.2 17.3l2.1-2.1M17.7 8.8l2.1-2.1',
+  file: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  print: 'M7 9V3h10v6M7 17H4v-7h16v7h-3M7 14h10v7H7z',
+  clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  camera: 'M4 8h3.5L9 5.5h6L16.5 8H20v11H4zM12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z',
+  sync: 'M19.5 10A7.5 7.5 0 0 0 6 6.5M5 3.5v3.5h3.5M4.5 14A7.5 7.5 0 0 0 18 17.5M19 20.5V17h-3.5',
 } as const;
 
 export type IconName = keyof typeof PATHS;

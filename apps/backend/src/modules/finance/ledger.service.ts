@@ -3,13 +3,26 @@ import { PoolClient } from 'pg';
 import { compareMoney, isPositiveMoney, normalizeMoney, subtractMoney, sumMoney, toCents } from '../../common/money';
 import { LedgerAccount, LedgerLineInput, LedgerPosting, LedgerRepository } from './repositories/ledger.repository';
 
-export type TripExpenseCategory = 'fuel' | 'toll' | 'labour' | 'other';
+export type TripExpenseCategory = 'fuel' | 'toll' | 'parking' | 'labour' | 'repair' | 'other';
 
+// Parking is a road charge, booked with tolls; a repair on the road is the
+// vehicle's repairs and maintenance, like the workshop's bill (driver app D6).
 const EXPENSE_ACCOUNT: Record<TripExpenseCategory, LedgerAccount> = {
   fuel: 'trip_expense_fuel',
   toll: 'trip_expense_toll',
+  parking: 'trip_expense_toll',
   labour: 'trip_expense_labour',
+  repair: 'repairs_maintenance',
   other: 'trip_expense_other',
+};
+
+const EXPENSE_MEMO: Record<TripExpenseCategory, string> = {
+  fuel: 'fuel',
+  toll: 'toll',
+  parking: 'parking',
+  labour: 'loading',
+  repair: 'repair',
+  other: 'other',
 };
 
 /**
@@ -76,7 +89,7 @@ export class LedgerService {
       sourceType: 'trip_expense',
       sourceId: expense.id,
       occurredAt: expense.occurredAt,
-      memo: `Trip ${expense.category}${expense.notes ? `: ${expense.notes}` : ''}`,
+      memo: `Trip ${EXPENSE_MEMO[expense.category]}${expense.notes ? `: ${expense.notes}` : ''}`,
       createdBy: actorUserId,
       lines: [
         { account: EXPENSE_ACCOUNT[expense.category], debit: amount },
@@ -156,6 +169,33 @@ export class LedgerService {
           : `Trip cash reconciled — ${compareMoney(variance, '0') > 0 ? 'short' : 'over'} ${normalizeMoney(variance.replace('-', ''))}`,
       createdBy: actorUserId,
       lines,
+    });
+  }
+
+  /**
+   * Backhaul rent received (driver app D5): income at once. Paid in cash,
+   * it's in the driver's float until the handover settles it; by UPI or a
+   * transfer, it went straight to the bank.
+   */
+  async postBackhaulIncomeWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    backhaul: { id: string; tripNumber: string; route: string; method: 'cash' | 'upi' | 'bank_transfer'; amount: string; occurredAt: Date },
+  ): Promise<void> {
+    const amount = normalizeMoney(backhaul.amount);
+    await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'backhaul_income_received',
+      sourceType: 'backhaul',
+      sourceId: backhaul.id,
+      occurredAt: backhaul.occurredAt,
+      memo: `Backhaul ${backhaul.route} on ${backhaul.tripNumber} (${backhaul.method.replace('_', ' ')})`,
+      createdBy: actorUserId,
+      lines: [
+        { account: backhaul.method === 'cash' ? 'cash_with_drivers' : 'bank', debit: amount },
+        { account: 'backhaul_income', credit: amount },
+      ],
     });
   }
 

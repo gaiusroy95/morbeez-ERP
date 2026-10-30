@@ -4,6 +4,8 @@ import {
   disposalResult,
   emi,
   fuelEconomy,
+  lastFullTankMileage,
+  tripMileageSegment,
   monthlyInterest,
   remainingSchedule,
   splitPayment,
@@ -86,5 +88,54 @@ describe('fuel economy', () => {
 
   it('nothing to say with fewer than two readings', () => {
     expect(fuelEconomy([{ filledOn: '2026-09-01', litres: '50', amount: '4500', odometerKm: null }])).toEqual({ km: null, kmPerLitre: null });
+  });
+
+  // Driver app D6: mileage runs from one full tank to the next.
+  const fills = [
+    { filledOn: '2026-09-01', litres: '50', amount: '4500', odometerKm: 47380, fullTank: true },
+    { filledOn: '2026-09-08', litres: '20', amount: '1800', odometerKm: 47600, fullTank: false },
+    { filledOn: '2026-09-15', litres: '45.6', amount: '4100', odometerKm: 48000, fullTank: true },
+    { filledOn: '2026-09-19', litres: '65.4', amount: '6049.50', odometerKm: 48620, fullTank: true },
+    { filledOn: '2026-09-21', litres: '10', amount: '925', odometerKm: 48700, fullTank: false },
+  ];
+
+  it('full tank to full tank: a part fill in between counts, one after the last full tank doesn’t', () => {
+    // 47380 → 48620 = 1240 km on 20 + 45.6 + 65.4 = 131 L
+    expect(fuelEconomy(fills)).toEqual({ km: 1320, kmPerLitre: '9.47' });
+  });
+
+  it('with every fill full, the same as before', () => {
+    const full = fills.map((f) => ({ ...f, fullTank: true }));
+    // 47380 → 48700 = 1320 km on everything after the first: 141 L
+    expect(fuelEconomy(full).kmPerLitre).toBe('9.36');
+  });
+
+  it('the latest full tank to full tank', () => {
+    expect(lastFullTankMileage(fills)).toEqual({ fromKm: 48000, toKm: 48620, km: 620, litres: '65.400', kmPerLitre: '9.48' });
+  });
+
+  it('no mileage until two full tanks', () => {
+    expect(lastFullTankMileage(fills.slice(0, 2))).toBeNull();
+    expect(fuelEconomy(fills.slice(0, 2))).toEqual({ km: 220, kmPerLitre: null });
+  });
+});
+
+describe("the mileage incentive's segment (driver app D7)", () => {
+  const fill = (odometerKm: number, litres: string, amount: string, fullTank: boolean, tripId: string | null) => ({ filledOn: '2026-10-30', odometerKm, litres, amount, fullTank, tripId });
+  const fills = [
+    fill(47380, '50', '4625.00', true, null),
+    fill(47600, '20', '1850.00', false, 't1'),
+    fill(48000, '45.6', '4218.00', true, 't1'),
+    fill(48620, '65.4', '6049.50', true, 't2'),
+  ];
+
+  it('from the full tank before to the last full tank on the trip, the part fill in between counted', () => {
+    expect(tripMileageSegment(fills, 't1')).toEqual({ km: 620, litres: '65.600', cost: '6068.00' });
+    expect(tripMileageSegment(fills, 't2')).toEqual({ km: 620, litres: '65.400', cost: '6049.50' });
+  });
+
+  it('nothing when the trip filled no full tank, or there was none before', () => {
+    expect(tripMileageSegment(fills, 't9')).toBeNull();
+    expect(tripMileageSegment([fill(47380, '50', '4625.00', true, 't1')], 't1')).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { Paginated, AiRecommendation, AiRecommendationType, AiRunSummary, AiScorecard, AiSettings, CustomerProfitReport, PlacePin } from '@morbeez/shared-types';
+import type { Paginated, AiRecommendation, AiRecommendationType, AiRunSummary, AiScorecard, AiSettings, CallList, CustomerProfitReport, PlacePin, PricingBoard } from '@morbeez/shared-types';
 import { apiGet } from '../api/client';
 import type { DateRange } from './use-accounting';
 
@@ -34,3 +34,16 @@ export const useCustomerProfit = (range: DateRange | null) =>
 export const useAiSettings = (enabled = true) => useQuery({ queryKey: ['ai', 'settings'], queryFn: () => apiGet<AiSettings>('ai/settings'), enabled });
 
 export const usePins = (enabled = true) => useQuery({ queryKey: ['ai', 'pins'], queryFn: () => apiGet<PlacePin[]>('logistics/pins'), enabled });
+
+// ---- Owner Phase 8: AI Pricing, AI Calling ----
+
+export const useAiPricing = () => useQuery({ queryKey: ['ai', 'pricing'], queryFn: () => apiGet<PricingBoard>('ai/pricing') });
+
+export const useAiCalls = () => useQuery({ queryKey: ['ai', 'calls'], queryFn: () => apiGet<CallList>('ai/calls') });
+
+/** Every open suggestion of a type — a screen of its own shows them all, not a page. */
+export const useOpenSuggestions = (type: AiRecommendationType) =>
+  useQuery({
+    queryKey: ['ai', 'suggestions', 'open', type, 'all'],
+    queryFn: () => apiGet<Paginated<AiRecommendation>>('ai/recommendations', { status: 'open', type, page: 1, pageSize: 100 }),
+  });

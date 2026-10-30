@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type {
   ExpenseCategory,
   OrderRecord,
@@ -22,21 +23,59 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useConfirmedOrders, useConfirmedPurchaseOrders, usePickups, useTripDetail } from '@/lib/hooks/use-modules';
 import { useCurrency, useCustomerName, useEmployeeName, useFarmerName, useTenantProfile, useVehicleName } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
-import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, timeOf } from '@/lib/format';
+import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, formatRate, timeOf } from '@/lib/format';
 import { sumMoney } from '@/lib/decimal';
 import { optionalText, parseMoney } from '@/lib/parse';
 import { ClosedTrip, TripClosure } from '@/components/logistics/TripClosure';
 import { CreateTripDialog } from '@/components/logistics/CreateTrip';
 import { navigateUrl, TripMap, tripDistance, useTripPoints } from '@/components/logistics/TripMap';
 import { TripQuantitiesView } from '@/components/logistics/TripQuantities';
+import { TripBackhaulView } from '@/components/logistics/TripBackhaul';
 import { CreateBar, DayTabs, ListCard, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
-import { useT } from '@/lib/i18n';
-import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { useT, type Translate } from '@/lib/i18n';
+import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatPoNumber } from '@/lib/hooks/use-procurement';
 import { formatOrderNumber, useRouteName } from '@/lib/hooks/use-delivery-orders';
 import { useTripsBoard } from '@/lib/hooks/use-trips';
+import { useTripIncentives } from '@/lib/hooks/use-admin';
+import { TripIncentivesView } from '@/components/people/DriverIncentives';
 
-const EXPENSE_LABEL: Record<ExpenseCategory, string> = { fuel: 'Fuel', toll: 'Toll', labour: 'Labour', other: 'Other' };
+const EXPENSE_LABEL: Record<ExpenseCategory, string> = {
+  fuel: 'Fuel',
+  toll: 'Toll',
+  parking: 'Parking',
+  labour: 'Loading labour',
+  repair: 'Repair',
+  other: 'Other',
+};
+
+/** What the driver recorded beside the amount (driver app D6): the pump's details, the bill, the owner's decision. */
+function expenseFacts(e: TripExpenseRecord, currency: string, t: Translate): string[] {
+  const facts: string[] = [];
+  const fuel = e.fuel;
+  if (fuel?.litres && fuel.ratePerLitre) {
+    facts.push(
+      [
+        t('{litres} L at {rate} a litre', { litres: formatQuantity(fuel.litres), rate: formatRate(fuel.ratePerLitre, currency) }),
+        fuel.fullTank === false ? t('Part fill') : t('Full tank'),
+        fuel.odometerKm !== null ? t('{km} km on the odometer', { km: fuel.odometerKm.toLocaleString('en-IN') }) : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    );
+  }
+  if (e.photos) facts.push(e.photos === 1 ? t('Bill photo') : t('{n} bill photos', { n: e.photos }));
+  if (e.needsApproval) {
+    facts.push(
+      e.decision === 'approved'
+        ? t('Approved')
+        : e.decision === 'rejected'
+          ? t('Rejected: {note}', { note: e.decisionNote ?? '' })
+          : t('Beyond the driver’s authority — waiting for your approval'),
+    );
+  }
+  return facts;
+}
 
 // Trips carry cash (Finance → Trip cash) and complete deliveries (orders,
 // stock, receivables), so their actions refresh all of it.
@@ -254,13 +293,14 @@ function ExpenseDialog({ trip, onClose }: { trip: TripRecord; onClose: () => voi
 // ---- Detail ----
 
 type Open = 'delivery' | 'pickup' | 'start' | 'complete' | 'cancel' | 'expense';
-type Tab = 'overview' | 'stops' | 'quantities' | 'expenses';
+type Tab = 'overview' | 'stops' | 'quantities' | 'expenses' | 'backhaul';
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'stops', label: 'Stops' },
   { value: 'quantities', label: 'Quantities' },
   { value: 'expenses', label: 'Expenses' },
+  { value: 'backhaul', label: 'Backhaul' },
 ];
 
 /** "Ginger 500 kg · +1" for a stop. */
@@ -336,6 +376,7 @@ function stopTitle(stop: TripStopRecord, t: (s: string) => string): string {
 function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }) {
   const t = useT();
   const { data, error, isPending, refetch } = useTripDetail(tripId);
+  const incentives = useTripIncentives(tripId);
   const currency = useCurrency();
   const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
   const vehicleName = useVehicleName();
@@ -420,6 +461,13 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
               ['Started', formatDateTime(trip.startedAt, timeZone)],
               ['Finished', formatDateTime(trip.completedAt, timeZone)],
               ['Cash advance', formatMoney(trip.advanceAmount, currency)],
+              ...(trip.openingKm || trip.closingKm
+                ? ([
+                    ['Opening KM', trip.openingKm ? formatQuantity(trip.openingKm, 'km') : '—'],
+                    ['Closing KM', trip.closingKm ? formatQuantity(trip.closingKm, 'km') : '—'],
+                    ['Trip KM', trip.openingKm && trip.closingKm ? formatQuantity((Number(trip.closingKm) - Number(trip.openingKm)).toFixed(1), 'km') : '—'],
+                  ] as [string, string][])
+                : []),
             ]}
           />
           {trip.status === 'in_progress' && trip.reviewNote && (
@@ -464,6 +512,11 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
                 {t('Record expense')}
               </button>
             )}
+            {canDispatch && (
+              <Link className="button" href={`/chat?driver=${trip.driverEmployeeId}&trip=${trip.id}`}>
+                <Icon name="chat" size={16} /> {t('Message the driver')}
+              </Link>
+            )}
             {canWrite && active && (
               <button type="button" className="button button-danger" onClick={() => setOpen('cancel')}>
                 {t('Cancel trip')}
@@ -471,6 +524,7 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
             )}
           </ActionBar>
 
+          {incentives.data && <TripIncentivesView data={incentives.data} currency={currency} />}
           <TripMap stops={stops} />
           <div className="count-tiles trip-tiles">
             <span className="count-tile">
@@ -598,6 +652,8 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
 
       {tab === 'quantities' && <TripQuantitiesView tripId={trip.id} />}
 
+      {tab === 'backhaul' && <TripBackhaulView trip={trip} />}
+
       {tab === 'expenses' && (
         <>
           {expenses.length === 0 ? (
@@ -609,7 +665,14 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
                   {expenses.map((expense) => (
                     <tr key={expense.id}>
                       <td>{t(EXPENSE_LABEL[expense.category])}</td>
-                      <td className="muted">{expense.notes ?? ''}</td>
+                      <td className="muted">
+                        {expense.notes ?? ''}
+                        {expenseFacts(expense, currency, t).map((fact) => (
+                          <div key={fact} className="cell-sub">
+                            {fact}
+                          </div>
+                        ))}
+                      </td>
                       <td className="align-right">{formatMoney(expense.amount, currency)}</td>
                     </tr>
                   ))}
@@ -694,6 +757,7 @@ export default function LogisticsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   useOpenOnNew(() => setCreating(true));
+  useOpenParam(setSelected);
   const { data: session } = useSession();
   const canDispatch = hasPermission(session, 'logistics:dispatch');
   const board = useTripsBoard(day, query);

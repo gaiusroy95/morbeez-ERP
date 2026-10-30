@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -166,4 +167,32 @@ export class PaySettlementDto {
 export class VoidSettlementDto {
   @ApiProperty() @IsInt() @Min(1) version!: number;
   @ApiProperty() @IsString() @MinLength(3) @MaxLength(300) reason!: string;
+}
+
+const INCENTIVE_KINDS = ['collection', 'backhaul', 'mileage', 'crates', 'quality', 'new_customer', 'performance', 'night_duty', 'data_quality', 'completion'];
+const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
+export class DriverIncentiveRuleDto {
+  @ApiProperty({ enum: INCENTIVE_KINDS }) @IsIn(INCENTIVE_KINDS) kind!: string;
+  @ApiProperty() @IsBoolean() enabled!: boolean;
+  @ApiProperty({ description: 'Percent of its base, up to 3 decimals' }) @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(100) percent!: number;
+}
+
+/** The owner's incentive rules for drivers (driver app D7): all ten at once. */
+export class DriverIncentivesDto {
+  @ApiProperty({ description: '0 when saving for the first time' }) @IsInt() @Min(0) version!: number;
+  @ApiProperty({ type: [DriverIncentiveRuleDto] })
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => DriverIncentiveRuleDto)
+  rules!: DriverIncentiveRuleDto[];
+  @ApiPropertyOptional({ description: 'The mileage incentive: km per litre the vehicle should do' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.1)
+  @Max(100)
+  targetKmPerLitre?: number | null;
+  @ApiProperty({ example: '21:00' }) @Matches(CLOCK, { message: 'nightFrom must be HH:MM' }) nightFrom!: string;
+  @ApiProperty({ example: '05:00' }) @Matches(CLOCK, { message: 'nightUntil must be HH:MM' }) nightUntil!: string;
 }

@@ -10,6 +10,7 @@ import {
   PayrollSettings,
   SettlementLine,
   SettlementRecord,
+  TripIncentiveRow,
   WorkerDocument,
   WorkerRow,
 } from '../entities/payroll.entity';
@@ -85,7 +86,7 @@ const SETTLEMENT_SELECT = `
          s.period_end::text AS period_end, s.status, s.gross::text AS gross, s.deductions::text AS deductions,
          s.net::text AS net, s.warnings, s.prepared_by, COALESCE(pu.phone, pu.email::text) AS prepared_by_email, s.prepared_at,
          COALESCE(au.phone, au.email::text) AS approved_by_email, s.approved_at, s.paid_at, s.paid_from, s.payment_reference,
-         s.voided_at, s.void_reason, s.version, s.approval_entry_id
+         s.voided_at, s.void_reason, s.version, s.approval_entry_id, s.received_at
   FROM workforce.settlement s
   JOIN trading_partners.employee e ON e.id = s.employee_id
   LEFT JOIN identity.app_user pu ON pu.id = s.prepared_by
@@ -113,6 +114,7 @@ const toSettlement = (r: Record<string, unknown>): SettlementRecord & { approval
   paymentReference: r.payment_reference as string | null,
   voidedAt: r.voided_at as Date | null,
   voidReason: r.void_reason as string | null,
+  receivedAt: (r.received_at as Date | null) ?? null,
   version: r.version as number,
   approvalEntryId: r.approval_entry_id as string | null,
 });
@@ -591,6 +593,138 @@ export class PayrollRepository {
     const r = await client.query(
       `UPDATE workforce.settlement SET ${assignments}, version = version + 1 WHERE id = $1 AND version = $2 AND status = $3`,
       [id, version, from, ...keys.map((k) => set[k])],
+    );
+    return (r.rowCount ?? 0) === 1;
+  }
+
+  // ---- Driver incentives (driver app D7) ----
+
+  /** The owner's incentive rules; version 0 while never saved (every incentive off). */
+  async driverIncentiveRules(client: PoolClient): Promise<{ version: number; targetKmPerLitre: string | null; nightFrom: string; nightUntil: string; rules: { kind: string; enabled: boolean; percent: string }[] }> {
+    const s = await client.query<{ version: number; target: string | null; night_from: string; night_until: string }>(
+      `SELECT version, target_km_per_litre::text AS target, to_char(night_from, 'HH24:MI') AS night_from, to_char(night_until, 'HH24:MI') AS night_until
+       FROM workforce.driver_incentive_settings WHERE tenant_id = current_tenant_id()`,
+    );
+    const rules = await client.query<{ kind: string; enabled: boolean; percent: string }>(
+      'SELECT kind, enabled, percent::numeric(7,3)::text AS percent FROM workforce.driver_incentive_rule WHERE tenant_id = current_tenant_id()',
+    );
+    const row = s.rows[0];
+    return {
+      version: row?.version ?? 0,
+      targetKmPerLitre: row?.target ?? null,
+      nightFrom: row?.night_from ?? '21:00',
+      nightUntil: row?.night_until ?? '05:00',
+      rules: rules.rows,
+    };
+  }
+
+  /** Saves them all at once, at the version read; false when someone else saved first. */
+  async saveDriverIncentiveRules(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    version: number,
+    v: { targetKmPerLitre: string | null; nightFrom: string; nightUntil: string; rules: { kind: string; enabled: boolean; percent: string }[] },
+  ): Promise<boolean> {
+    const saved =
+      version === 0
+        ? await client.query(
+            `INSERT INTO workforce.driver_incentive_settings (tenant_id, target_km_per_litre, night_from, night_until, updated_by)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id) DO NOTHING`,
+            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, userId],
+          )
+        : await client.query(
+            `UPDATE workforce.driver_incentive_settings
+             SET target_km_per_litre = $2, night_from = $3, night_until = $4, updated_by = $5, updated_at = now(), version = version + 1
+             WHERE tenant_id = $1 AND version = $6`,
+            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, userId, version],
+          );
+    if ((saved.rowCount ?? 0) !== 1) return false;
+    for (const r of v.rules) {
+      await client.query(
+        `INSERT INTO workforce.driver_incentive_rule (tenant_id, kind, enabled, percent) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, kind) DO UPDATE SET enabled = EXCLUDED.enabled, percent = EXCLUDED.percent`,
+        [tenantId, r.kind, r.enabled, r.percent],
+      );
+    }
+    return true;
+  }
+
+  /** A trip's incentives, worked out once when it closes: a second close changes nothing. */
+  async insertTripIncentives(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    tripId: string,
+    employeeId: string,
+    workDate: string,
+    lines: { kind: string; base: string; percent: string; amount: string; detail: string }[],
+  ): Promise<void> {
+    for (const l of lines) {
+      await client.query(
+        `INSERT INTO workforce.trip_incentive (tenant_id, trip_id, employee_id, kind, base, percent, amount, detail, work_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (trip_id, employee_id, kind) DO NOTHING`,
+        [tenantId, tripId, employeeId, l.kind, l.base, l.percent, l.amount, l.detail, workDate, userId],
+      );
+    }
+  }
+
+  /** Trip incentives — one trip's, or a worker's on days in a range (unsettled only, for a settlement). */
+  async tripIncentives(
+    client: PoolClient,
+    filter: { tripId?: string; employeeId?: string; from?: string; to?: string; unsettled?: boolean },
+  ): Promise<TripIncentiveRow[]> {
+    const r = await client.query(
+      `SELECT i.id, i.trip_id, t.number AS trip_number, i.employee_id, i.kind, i.base::text AS base, i.percent::numeric(7,3)::text AS percent,
+              i.amount::text AS amount, i.detail, i.work_date::text AS work_date, i.settlement_id
+       FROM workforce.trip_incentive i JOIN fulfilment.trip t ON t.id = i.trip_id
+       WHERE ($1::uuid IS NULL OR i.trip_id = $1) AND ($2::uuid IS NULL OR i.employee_id = $2)
+         AND ($3::date IS NULL OR i.work_date >= $3) AND ($4::date IS NULL OR i.work_date <= $4)
+         AND (NOT $5 OR i.settlement_id IS NULL)
+       ORDER BY i.work_date, t.number, i.created_at`,
+      [filter.tripId ?? null, filter.employeeId ?? null, filter.from ?? null, filter.to ?? null, filter.unsettled ?? false],
+    );
+    return r.rows.map((x) => ({
+      id: x.id,
+      tripId: x.trip_id,
+      tripNumber: x.trip_number,
+      employeeId: x.employee_id,
+      kind: x.kind,
+      base: x.base,
+      percent: x.percent,
+      amount: x.amount,
+      detail: x.detail,
+      workDate: x.work_date,
+      settlementId: x.settlement_id,
+    }));
+  }
+
+  async linkTripIncentives(client: PoolClient, settlementId: string, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await client.query('UPDATE workforce.trip_incentive SET settlement_id = $1 WHERE id = ANY($2) AND settlement_id IS NULL', [settlementId, ids]);
+  }
+
+  async unlinkTripIncentives(client: PoolClient, settlementId: string): Promise<void> {
+    await client.query('UPDATE workforce.trip_incentive SET settlement_id = NULL WHERE settlement_id = $1', [settlementId]);
+  }
+
+  /** Work done on days in a range, settled or not — what the driver's fixed pay is worked out from. */
+  async workBetween(client: PoolClient, employeeId: string, from: string, to: string): Promise<AssignmentRecord[]> {
+    const r = await client.query(
+      `${ASSIGNMENT_SELECT}
+       WHERE a.employee_id = $1 AND a.work_date BETWEEN $2::date AND $3::date AND a.status IN ('completed', 'absent')
+       ORDER BY a.work_date`,
+      [employeeId, from, to],
+    );
+    return r.rows.map(toAssignment);
+  }
+
+  /** The driver says they received a paid settlement — once; false when it isn't theirs, or isn't paid. */
+  async markReceived(client: PoolClient, settlementId: string, employeeId: string, userId: string): Promise<boolean> {
+    const r = await client.query(
+      `UPDATE workforce.settlement SET received_at = COALESCE(received_at, now()), received_by = COALESCE(received_by, $3)
+       WHERE id = $1 AND employee_id = $2 AND status = 'paid'`,
+      [settlementId, employeeId, userId],
     );
     return (r.rowCount ?? 0) === 1;
   }

@@ -128,16 +128,18 @@ function international(phone: string): string | null {
   return digits.length >= 8 ? digits : null;
 }
 
-/** Call, WhatsApp, Navigate — each disabled when there's no number or place to go to. */
+/** Call, WhatsApp, Navigate — each disabled when there's no number or place to go to; [navigate] false leaves the map out (a person, not a place). */
 export function ContactActions({
   phone,
   pin,
   address,
+  navigate: withMap = true,
 }: {
   phone: string | null | undefined;
   pin: { latitude: string; longitude: string } | null;
   /** Used to search the map when there's no pin. */
   address: string | null;
+  navigate?: boolean;
 }) {
   const t = useT();
   const number = phone ? international(phone) : null;
@@ -162,7 +164,7 @@ export function ContactActions({
     <div className="contact-actions">
       {item(number ? `tel:+${number}` : null, 'phone', 'Call', false)}
       {item(number ? `https://wa.me/${number}` : null, 'chat', 'WhatsApp', true)}
-      {item(navigate, 'navigate', 'Navigate', true)}
+      {withMap && item(navigate, 'navigate', 'Navigate', true)}
     </div>
   );
 }

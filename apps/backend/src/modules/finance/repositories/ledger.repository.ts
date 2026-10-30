@@ -49,7 +49,8 @@ export type LedgerAccount =
   | 'vehicle_loans'
   | 'loan_interest'
   | 'crate_recoveries'
-  | 'crate_purchases';
+  | 'crate_purchases'
+  | 'backhaul_income';
 
 export type LedgerEntryType =
   | 'invoice_issued'
@@ -87,7 +88,8 @@ export type LedgerEntryType =
   | 'vehicle_hire_paid'
   | 'crate_charge_invoiced'
   | 'crate_charge_deducted'
-  | 'crates_purchased';
+  | 'crates_purchased'
+  | 'backhaul_income_received';
 
 export interface LedgerParty {
   type: 'customer' | 'farmer';

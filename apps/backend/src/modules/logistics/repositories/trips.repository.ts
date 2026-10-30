@@ -23,6 +23,8 @@ interface TripRow {
   start_latitude: string | null;
   start_longitude: string | null;
   delivery_started_at: Date | null;
+  closing_km: string | null;
+  returned_at: Date | null;
   completed_at: Date | null;
   submitted_by: string | null;
   cash_declared: string | null;
@@ -52,6 +54,8 @@ function toRecord(row: TripRow): TripRecord {
     startLatitude: row.start_latitude ?? null,
     startLongitude: row.start_longitude ?? null,
     deliveryStartedAt: row.delivery_started_at ?? null,
+    closingKm: row.closing_km ?? null,
+    returnedAt: row.returned_at ?? null,
     completedAt: row.completed_at,
     submittedBy: row.submitted_by ?? null,
     cashDeclared: row.cash_declared ?? null,
@@ -179,6 +183,17 @@ export class TripsRepository {
   }
 
   /** [readings]: the odometer and the phone's position when the day started, when the driver gave them. */
+  /** Return (driver app D4): the closing KM, correctable while on the road; when it came back is kept from the first time. */
+  async returnWithClient(client: PoolClient, id: string, closingKm: number): Promise<TripRecord | null> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET closing_km = $2, returned_at = COALESCE(returned_at, now()), updated_at = now()
+       WHERE id = $1 AND status = 'in_progress'
+       RETURNING *`,
+      [id, closingKm],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
+  }
+
   /** Start Trip (driver app D3): the delivery run set off — the first time only. */
   async startDeliveriesWithClient(client: PoolClient, id: string): Promise<TripRecord | null> {
     const result = await client.query<TripRow>(

@@ -4,8 +4,8 @@
 
 import type { Confidence } from '../math/forecast';
 
-export type RecommendationType = 'pricing' | 'procurement' | 'logistics_route' | 'logistics_load' | 'customer_terms' | 'exception';
-export const RECOMMENDATION_TYPES: RecommendationType[] = ['pricing', 'procurement', 'logistics_route', 'logistics_load', 'customer_terms', 'exception'];
+export type RecommendationType = 'pricing' | 'procurement' | 'logistics_route' | 'logistics_load' | 'customer_terms' | 'exception' | 'order';
+export const RECOMMENDATION_TYPES: RecommendationType[] = ['pricing', 'procurement', 'logistics_route', 'logistics_load', 'customer_terms', 'exception', 'order'];
 export type RecommendationDecision = 'accepted' | 'modified' | 'dismissed' | 'expired';
 export type RecommendationStatus = 'open' | RecommendationDecision;
 
@@ -17,6 +17,8 @@ export const DECIDE_PERMISSION: Record<RecommendationType, string> = {
   logistics_load: 'ai:decide:logistics',
   customer_terms: 'ai:decide:customers',
   exception: 'ai:decide:exceptions',
+  // A customer's order (owner Phase 8): the customer's, like their terms.
+  order: 'ai:decide:customers',
 };
 
 export interface Evidence {
@@ -120,6 +122,59 @@ export interface CustomerProfitRow {
   contributionPct: number | null;
   averageDaysToPay: number | null;
   paymentTermsDays: number;
+}
+
+/** AI Pricing (owner Phase 8; requirements Part 15): each product's price against what it costs to sell. */
+export interface PricingRow {
+  productId: string;
+  name: string;
+  uom: string;
+  /** Null: no list price set yet. */
+  currentPrice: string | null;
+  /** Free stock and what it cost; null without costed stock. */
+  stockQty: string | null;
+  unitCost: string | null;
+  /** Cost + spoilage + delivery = sustainable; + target margin = target. Null without costed stock. */
+  buildUp: { shrinkRate: number; spoilage: string; delivery: string | null; sustainable: string; target: string } | null;
+  standing: 'no_price' | 'no_cost' | 'below_cost' | 'below_sustainable' | 'below_target' | 'on_target';
+  /** What today's price keeps over the sustainable price, %. */
+  marginPct: number | null;
+  realized: { low: string; high: string; average: string; lines: number } | null;
+  /** An open price suggestion for it. */
+  suggestionId: string | null;
+}
+
+export interface PricingBoard {
+  asOf: string;
+  currency: string;
+  targetMarginPct: string;
+  /** Delivering a kilo over the last 30 days — trip expenses and fuel over kilos delivered. */
+  deliveryPerKg: string | null;
+  deliveryWindow: { from: string; to: string; cost: string; kg: string };
+  rows: PricingRow[];
+}
+
+/** AI Calling (owner Phase 8; requirements Part 21–23): today's calls, made by a person until AI voice arrives. */
+export interface CallItem {
+  /** payment: money fallen due; order: their usual order not placed; quantity: an order to confirm. */
+  kind: 'payment' | 'order' | 'quantity';
+  customerId: string;
+  name: string;
+  phone: string | null;
+  place: string | null;
+  amount: string | null;
+  dueDate: string | null;
+  overdueDays: number | null;
+  recommendationId: string | null;
+  /** The suggestion's title, for an order or a quantity to confirm. */
+  about: string | null;
+}
+
+export interface CallList {
+  /** AI voice calls are Part 7 of the plan — not built; these are for the owner to make. */
+  voice: 'coming';
+  date: string;
+  calls: CallItem[];
 }
 
 export interface CustomerProfitReport {

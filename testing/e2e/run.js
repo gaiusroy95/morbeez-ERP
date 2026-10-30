@@ -48,7 +48,10 @@ const CHAINS = {
   staff: ['staff-access-e2e.js'],
   // Owner app redesign (docs/redesign): Home, Procurement, Delivery orders, Trips, Customers & Farmers, then the
   // driver app's stock by the kilo (D0), then Inventory, Collections, Finance and Profit, then the driver's day (D1)
-  // the farmer stop (D2) and delivery (D3); runs on the seed, in this order.
+  // the farmer stop (D2), delivery (D3), collections, return and handover (D4), backhaul (D5), then the owner's
+  // Approvals, Reports, Settings, Profile, Workforce & Vehicles (Phase 7), then the driver's expenses, approvals,
+  // trips and vehicle (D6), then the incentive engine and the driver's earnings (D7), then the driver–owner chat (D9),
+  // then AI Orders, AI Pricing, AI Calling and driver phones' sync (Phase 8); runs on the seed, in this order.
   redesign: [
     'redesign-home-e2e.js',
     'redesign-procurement-e2e.js',
@@ -60,6 +63,13 @@ const CHAINS = {
     'driver-day-e2e.js',
     'farm-stop-e2e.js',
     'delivery-stop-e2e.js',
+    'collections-return-e2e.js',
+    'backhaul-e2e.js',
+    'redesign-admin-e2e.js',
+    'driver-records-e2e.js',
+    'driver-earnings-e2e.js',
+    'driver-chat-e2e.js',
+    'redesign-ai-e2e.js',
   ],
 };
 

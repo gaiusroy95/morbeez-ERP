@@ -26,6 +26,9 @@ export interface TripRecord {
   startLongitude: string | null;
   /** Start Trip in the driver app: when the delivery run set off. */
   deliveryStartedAt: IsoDateTime | null;
+  /** Return in the driver app: the odometer when back, and when; trip KM = closing − opening. */
+  closingKm: string | null;
+  returnedAt: IsoDateTime | null;
   completedAt: IsoDateTime | null;
   submittedBy: string | null;
   /** Cash the driver said they're handing over. */
@@ -104,7 +107,19 @@ export interface FarmStopOutcome {
   loadedKg: string;
 }
 
-export type ExpenseCategory = 'fuel' | 'toll' | 'labour' | 'other';
+/** 'labour' is loading (the driver app's "Loading"). */
+export type ExpenseCategory = 'fuel' | 'toll' | 'parking' | 'labour' | 'repair' | 'other';
+
+export type FuelType = 'diesel' | 'petrol' | 'cng' | 'electric';
+
+/** A fuel expense's pump details (driver app D6). */
+export interface ExpenseFuel {
+  odometerKm: number | null;
+  fuelType: FuelType | null;
+  fullTank: boolean | null;
+  litres: string | null;
+  ratePerLitre: string | null;
+}
 
 export interface TripExpenseRecord {
   id: string;
@@ -115,9 +130,17 @@ export interface TripExpenseRecord {
   recordedAt: IsoDateTime;
   /** Spent beyond the driver's authority (below level 4): the owner approves it at closure. */
   needsApproval: boolean;
+  /** The owner's decision on it (Approvals inbox), with their note. */
+  decision?: 'approved' | 'rejected' | null;
+  decisionNote?: string | null;
+  decidedAt?: IsoDateTime | null;
+  /** Fuel's pump details; null otherwise (driver app D6). */
+  fuel?: ExpenseFuel | null;
+  /** Bill photos kept with it. */
+  photos?: number;
 }
 
-export type ChecklistArea = 'procurement' | 'deliveries' | 'load' | 'collections' | 'handover' | 'expenses' | 'returns';
+export type ChecklistArea = 'procurement' | 'deliveries' | 'load' | 'collections' | 'handover' | 'expenses' | 'returns' | 'backhaul';
 
 export interface ChecklistItem {
   area: ChecklistArea;
@@ -133,6 +156,7 @@ export interface TripReconciliationRecord {
   cashReturned: string; // cash the owner received at handover
   spotCash: string; // cash taken for spot sales on the trip
   cashCollections: string; // cash collected at deliveries, held by the driver
+  backhaulCash: string; // backhaul rent paid to the driver in cash
   cashDeposited: string; // cash the driver paid into the bank on the road
   directPayments: string; // UPI/bank/cheque straight to the business — no handover
   cashDeclared: string | null;
@@ -146,11 +170,13 @@ export interface TripReconciliationRecord {
   reconciledAt: IsoDateTime;
 }
 
-/** What the driver should hand over: opening cash + cash collected + spot cash − expenses − bank deposits. */
+/** What the driver should hand over: opening cash + cash collected + spot cash + backhaul cash − expenses − bank deposits. */
 export interface HandoverSummary {
   openingCash: string;
   cashCollections: string;
   spotCash: string;
+  /** Backhaul rent paid to the driver in cash (driver app D5). */
+  backhaulCash: string;
   expenses: string;
   deposited: string;
   expected: string;
@@ -193,6 +219,76 @@ export interface CustomerCollectionRecord {
   method: PaymentMethod;
   notes: string | null;
   collectedAt: IsoDateTime;
+  /** Who paid: the customer, or someone on their behalf (driver app D4). */
+  payer: 'customer' | 'third_party';
+  payerName: string | null;
+  /** UPI or transfer: its reference (UTR). */
+  reference: string | null;
+}
+
+/** GET logistics/trips/:id/collections — the customers delivered on the trip, each with what they owe in all. */
+export interface TripCollections {
+  tripId: string;
+  customers: {
+    customerId: string;
+    name: string;
+    phone: string | null;
+    place: string | null;
+    stopId: string;
+    terms: 'cash' | 'credit';
+    outstanding: string;
+    disputed: string;
+    collectedOnTrip: string;
+  }[];
+  collected: { cash: string; upi: string; bankTransfer: string; cheque: string; total: string };
+  pending: { customers: number; amount: string };
+}
+
+// ---- Backhaul (driver app D5) ----
+
+export type BackhaulStatus = 'offered' | 'accepted' | 'skipped' | 'cancelled' | 'completed';
+export type BackhaulStep = 'pickup_reached' | 'loaded' | 'drop_reached' | 'completed';
+export type BackhaulPaymentMethod = 'cash' | 'upi' | 'bank_transfer';
+
+/** GET logistics/trips/:id/backhauls — a fixed-rent job on the way back: no product, no kilos, no stock. */
+export interface BackhaulRecord {
+  id: string;
+  tripId: string;
+  pickupPlace: string;
+  dropPlace: string;
+  rent: string;
+  hirerName: string | null;
+  notes: string | null;
+  /** The owner offered it, or the driver took it on the road. */
+  offeredBy: 'owner' | 'driver';
+  status: BackhaulStatus;
+  skipReason: string | null;
+  acceptedAt: IsoDateTime | null;
+  pickupReachedAt: IsoDateTime | null;
+  loadedAt: IsoDateTime | null;
+  dropReachedAt: IsoDateTime | null;
+  completedAt: IsoDateTime | null;
+  cancelledAt: IsoDateTime | null;
+  cancelReason: string | null;
+  payment: { method: BackhaulPaymentMethod; amount: string; reference: string | null; note: string | null; paidAt: IsoDateTime } | null;
+  photos: { load: number; drop: number; payment: number };
+  createdAt: IsoDateTime;
+  version: number;
+}
+
+export interface CreateBackhaulBody {
+  pickupPlace: string;
+  dropPlace: string;
+  rent: number;
+  hirerName?: string;
+  notes?: string;
+}
+
+export interface BackhaulPaymentBody {
+  method: BackhaulPaymentMethod;
+  amount: number;
+  reference?: string;
+  note?: string;
 }
 
 // Request bodies.
@@ -366,4 +462,28 @@ export interface ClosingStockLine {
   uom: string;
   expected: string;
   counted: string;
+}
+
+// ---- Workforce & Vehicles (owner app redesign Phase 7) ----
+
+/** GET logistics/trips/on-the-road — trips on the road now, with their crew. */
+export interface OnTheRoad {
+  tripId: string;
+  number: string;
+  vehicleId: string;
+  driverEmployeeId: string;
+  packerEmployeeId: string | null;
+  loaderEmployeeId: string | null;
+  startedAt: IsoDateTime | null;
+  routeName: string | null;
+}
+
+/** GET logistics/trips/vehicles/:vehicleId — a vehicle's trips. */
+export interface VehicleTrips {
+  vehicleId: string;
+  trips: number;
+  km: string;
+  current: string | null;
+  crew: { driverName: string; driverPhone: string | null; packerName: string | null } | null;
+  recent: { id: string; number: string; status: TripStatus; day: IsoDate; routeName: string | null; km: string | null; driverName: string }[];
 }

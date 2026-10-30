@@ -18,7 +18,20 @@ enum class PendingOperationType {
     START_TRIP,
     ARRIVE_STOP,
     START_DELIVERIES,
+    RETURN_TRIP,
+    RAISE_DISPUTE,
+    CREATE_BACKHAUL,
+    ACCEPT_BACKHAUL,
+    SKIP_BACKHAUL,
+    BACKHAUL_STEP,
+    PAY_BACKHAUL,
+    ACKNOWLEDGE_PAY,
+    SEND_MESSAGE,
+    READ_CHAT,
 }
+
+/** The conversation with the office (D9): sent on its own, never behind a trip action the server refused. */
+val CHAT_OPERATIONS = setOf(PendingOperationType.SEND_MESSAGE.name, PendingOperationType.READ_CHAT.name)
 
 // What each PendingOperationEntity.payloadJson deserializes into — one
 // shape per operation type, carrying whatever that specific backend call
@@ -45,9 +58,48 @@ data class CompleteDeliveryPayload(
 )
 data class StartDeliveriesPayload(val at: String)
 data class SkipStopPayload(val stopId: String, val reason: String? = null)
-data class RecordExpensePayload(val category: String, val amount: Double, val notes: String?)
-data class RecordCollectionPayload(val stopId: String, val amount: Double, val method: String, val notes: String?)
+/** [expenseId]: the phone's own (D6), so its bill follows it; a fuel expense's pump details. Older queued payloads have neither. */
+data class RecordExpensePayload(
+    val category: String,
+    val amount: Double,
+    val notes: String?,
+    val expenseId: String? = null,
+    val odometerKm: Int? = null,
+    val fuelType: String? = null,
+    val fullTank: Boolean? = null,
+    val litres: Double? = null,
+    val ratePerLitre: Double? = null,
+)
+data class RecordCollectionPayload(
+    val stopId: String,
+    val amount: Double,
+    val method: String,
+    val notes: String?,
+    /** UPI or transfer: its reference (D4). */
+    val reference: String? = null,
+    /** customer | third_party, and who (D4). */
+    val payer: String? = null,
+    val payerName: String? = null,
+)
+data class ReturnTripPayload(val closingKm: Double)
+data class RaiseDisputePayload(val stopId: String, val amount: Double, val reason: String)
 data class RecordDepositPayload(val amount: Double, val bankAccount: String, val reference: String, val depositedAt: String)
 data class SubmitTripPayload(val cashDeclared: Double?, val note: String?)
 data class ReportProblemPayload(val kind: String, val note: String)
 data class StartTripPayload(val openingKm: Double, val latitude: Double?, val longitude: Double?, val accuracyMeters: Double?)
+
+/** Backhaul (D5): [backhaulId] is the phone's own for one the driver added. */
+data class CreateBackhaulPayload(val backhaulId: String, val pickupPlace: String, val dropPlace: String, val rent: Double, val hirerName: String?, val notes: String?)
+data class BackhaulPayload(val backhaulId: String)
+data class SkipBackhaulPayload(val backhaulId: String, val reason: String)
+/** pickup_reached | loaded | drop_reached | completed, and when on the phone. */
+data class BackhaulStepPayload(val backhaulId: String, val step: String, val at: String)
+data class PayBackhaulPayload(val backhaulId: String, val method: String, val amount: Double, val reference: String?, val note: String?, val at: String)
+
+/** "I received it" (D7): the settlement the driver says reached them. */
+data class AcknowledgePayPayload(val settlementId: String)
+
+/** A message to the office (D9): [messageId] is the phone's own, so sent again it's the same message, and its photo follows it. */
+data class SendMessagePayload(val messageId: String, val body: String?, val tripId: String?, val photo: Boolean, val writtenAt: String)
+/** Read up to [upTo], by when the server had each message. */
+data class ReadChatPayload(val upTo: String)

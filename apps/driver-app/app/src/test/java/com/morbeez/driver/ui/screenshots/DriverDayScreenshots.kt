@@ -73,6 +73,11 @@ class DriverDayScreenshots {
 
     @Test fun drawerOffline() = shell(onTheRoad.copy(link = LinkState(online = false, waiting = 3)), drawerOpen = true)
 
+    // The office wrote (D9): the count on the header's chat button and in the drawer.
+    @Test fun dashboardChatUnread() = shell(onTheRoad.copy(chatUnread = 2))
+
+    @Test fun drawerChatUnread() = shell(onTheRoad.copy(chatUnread = 2), drawerOpen = true)
+
     @Test fun startDay() = draw {
         StartDayContent(
             state = StartDayUiState(day = day, trip = trip.copy(status = "planned", openingKm = null), stopCount = 4, gps = GpsState.LOCKED, position = here),

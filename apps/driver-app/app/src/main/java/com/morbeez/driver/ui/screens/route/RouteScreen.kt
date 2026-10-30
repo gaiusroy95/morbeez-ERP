@@ -74,7 +74,8 @@ import com.morbeez.driver.ui.theme.Fresh
 @Composable
 fun RouteScreen(
     onOpenStop: (tripId: String, stopId: String, isPickup: Boolean) -> Unit,
-    onOpenExpenses: (tripId: String) -> Unit,
+    onHandover: () -> Unit,
+    onTripSummary: () -> Unit,
     onBack: (() -> Unit)? = null,
     viewModel: RouteViewModel = hiltViewModel(),
 ) {
@@ -165,14 +166,14 @@ fun RouteScreen(
                     Spacer(Modifier.height(10.dp))
                 } else if (trip.status == "in_progress") {
                     // Every stop done: hand over the cash and submit.
-                    PrimaryAction(text = stringResource(R.string.handover_submit), onClick = { onOpenExpenses(trip.id) }, glyph = Glyph.Rupee)
+                    PrimaryAction(text = stringResource(R.string.handover_submit), onClick = onHandover, glyph = Glyph.Rupee)
                     Spacer(Modifier.height(10.dp))
                 }
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable(role = Role.Button) { onOpenExpenses(trip.id) }
+                        .clickable(role = Role.Button, onClick = onTripSummary)
                         .padding(vertical = 10.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,

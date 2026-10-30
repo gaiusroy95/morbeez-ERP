@@ -35,6 +35,24 @@ data class DriverDayEntity(
     val crewJson: String? = null,
     /** The business's crate types, as JSON (List<CrateTypeResponse>). */
     val crateTypesJson: String? = null,
+    /** The trip's collections, as JSON (TripCollectionsResponse), as the server last listed them (D4). */
+    val collectionsJson: String? = null,
+    /** What the driver raised that the owner decides, as JSON (DriverApprovalsResponse) (D6). */
+    val approvalsJson: String? = null,
+    /** The last 30 days' expenses and the vehicle's mileage, as JSON (MyExpensesResponse) (D6). */
+    val myExpensesJson: String? = null,
+    /** The vehicle the driver drives, as JSON (DriverVehicleResponse) (D6). */
+    val vehicleJson: String? = null,
+    /** Who the driver is and who to call, as JSON (DriverProfileResponse) (D6). */
+    val profileJson: String? = null,
+    /** My Earnings for today, this week and this month, as JSON (MyEarningsResponse) (D7). */
+    val earningsTodayJson: String? = null,
+    val earningsWeekJson: String? = null,
+    val earningsMonthJson: String? = null,
+    /** The driver's settlements, as JSON (List<DriverSettlementResponse>) (D7). */
+    val settlementsJson: String? = null,
+    /** How far the driver has read the conversation with the office (D9): ISO instant, by when the server had each message. */
+    val chatReadAt: String? = null,
 )
 
 @Dao

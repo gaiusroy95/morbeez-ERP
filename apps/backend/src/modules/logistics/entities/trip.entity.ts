@@ -29,6 +29,9 @@ export interface TripRecord {
   startLongitude: string | null;
   /** Start Trip in the driver app (D3): when the delivery run set off. */
   deliveryStartedAt: Date | null;
+  /** Return (D4): the odometer when the vehicle was back, and when; trip KM = closing − opening. */
+  closingKm: string | null;
+  returnedAt: Date | null;
   completedAt: Date | null;
   /** Who submitted the trip for reconciliation, and the cash they said they were handing over. */
   submittedBy: string | null;

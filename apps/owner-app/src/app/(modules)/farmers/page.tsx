@@ -16,7 +16,7 @@ import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
 import { optionalText } from '@/lib/parse';
 import { useT } from '@/lib/i18n';
-import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatPoNumber } from '@/lib/hooks/use-procurement';
 import { useFarmerProfile, useFarmersBoard } from '@/lib/hooks/use-parties';
 import { CreateBar, DayTabs, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
@@ -268,6 +268,7 @@ export default function FarmersPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   useOpenOnNew(() => setAdding(true));
+  useOpenParam(setSelected);
   const board = useFarmersBoard(filter, place, query);
   const counts = board.data?.counts;
 

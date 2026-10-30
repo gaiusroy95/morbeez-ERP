@@ -2,6 +2,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ChecklistItem, ClosureOutcome, TripReconciliationRecord } from '../entities/trip-reconciliation.entity';
 import { ClosingStockLine } from '../entities/trip-planning.entity';
+import { BackhaulRecord } from '../entities/backhaul.entity';
 
 interface TripReconciliationRow {
   id: string;
@@ -11,6 +12,7 @@ interface TripReconciliationRow {
   cash_returned: string;
   spot_cash: string;
   cash_collections: string;
+  backhaul_cash: string;
   cash_deposited: string;
   direct_payments: string;
   cash_declared: string | null;
@@ -33,6 +35,7 @@ function toRecord(row: TripReconciliationRow): TripReconciliationRecord {
     cashReturned: row.cash_returned,
     spotCash: row.spot_cash,
     cashCollections: row.cash_collections ?? '0.00',
+    backhaulCash: row.backhaul_cash ?? '0.00',
     cashDeposited: row.cash_deposited ?? '0.00',
     directPayments: row.direct_payments ?? '0.00',
     cashDeclared: row.cash_declared ?? null,
@@ -140,9 +143,12 @@ export class TripReconciliationsRepository {
        ORDER BY c.name`,
       [tripId],
     );
-    // Spent by a driver whose authority didn't cover expenses: the owner's to approve.
-    const unapproved = await client.query<{ total: string }>(
-      `SELECT COALESCE(SUM(amount), 0)::numeric(12,2)::text AS total
+    // Spent by a driver whose authority didn't cover expenses: the owner's to
+    // approve — here, or from the Approvals inbox; what the owner rejected
+    // there is settled with the driver.
+    const unapproved = await client.query<{ total: string; rejected: string }>(
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE decision IS NULL), 0)::numeric(12,2)::text AS total,
+              COALESCE(SUM(amount) FILTER (WHERE decision = 'rejected'), 0)::numeric(12,2)::text AS rejected
          FROM fulfilment.trip_expense WHERE trip_id = $1 AND needs_approval`,
       [tripId],
     );
@@ -163,6 +169,7 @@ export class TripReconciliationsRepository {
       load: load.rows.map((r) => ({ product: r.product, uom: r.uom, pickedUp: r.picked_up, delivered: r.delivered, returned: r.returned })),
       unpaidCashCustomers: unpaid.rows,
       expensesNeedingApproval: unapproved.rows[0].total,
+      expensesRejected: unapproved.rows[0].rejected,
       lossExceptions: losses.rows.map((r) => ({
         customer: r.customer,
         product: r.product,
@@ -191,6 +198,7 @@ export class TripReconciliationsRepository {
       cashReturned: number;
       spotCash: string;
       cashCollections: string;
+      backhaulCash?: string;
       cashDeposited: string;
       directPayments: string;
       cashDeclared: string | null;
@@ -206,8 +214,9 @@ export class TripReconciliationsRepository {
       const result = await client.query<TripReconciliationRow>(
         `INSERT INTO fulfilment.trip_reconciliation
            (trip_id, advance_amount, total_expenses, cash_returned, variance, notes, reconciled_by, spot_cash,
-            cash_collections, cash_deposited, direct_payments, cash_declared, outcome, exception_note, checklist, closing_stock)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            cash_collections, cash_deposited, direct_payments, cash_declared, outcome, exception_note, checklist, closing_stock,
+            backhaul_cash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
          RETURNING *`,
         [
           fields.tripId,
@@ -226,6 +235,7 @@ export class TripReconciliationsRepository {
           fields.exceptionNote,
           JSON.stringify(fields.checklist),
           fields.closingStock ? JSON.stringify(fields.closingStock) : null,
+          fields.backhaulCash ?? '0',
         ],
       );
       return toRecord(result.rows[0]);
@@ -242,8 +252,12 @@ export interface TripReviewFacts {
   stops: { id: string; type: 'pickup' | 'delivery'; status: string; name: string; notes: string | null; hasPod: boolean }[];
   load: { product: string; uom: string; pickedUp: string; delivered: string; returned: string }[];
   unpaidCashCustomers: { customer: string; invoiced: string; collected: string }[];
-  /** Expenses recorded beyond the driver's authority (below level 4). */
+  /** Expenses recorded beyond the driver's authority (below level 4), not yet decided. */
   expensesNeedingApproval: string;
+  /** …and those the owner rejected (Approvals inbox): settled with the driver. */
+  expensesRejected?: string;
   /** Shrinkage (live birds) or breakage (eggs) above the owner's tolerance. */
   lossExceptions?: { customer: string; product: string; kind: 'weighment' | 'breakage'; lossPct: string; tolerancePct: string }[];
+  /** The trip's backhauls (driver app D5). */
+  backhauls?: BackhaulRecord[];
 }

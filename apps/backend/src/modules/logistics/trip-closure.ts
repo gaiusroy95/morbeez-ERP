@@ -2,13 +2,14 @@ import { compareMoney, normalizeMoney, subtractMoney, sumMoney } from '../../com
 import { ChecklistItem } from './entities/trip-reconciliation.entity';
 import { TripReviewFacts } from './repositories/trip-reconciliations.repository';
 import { ClosingStockLine } from './entities/trip-planning.entity';
+import { backhaulCheckOf } from './backhaul';
 
 /**
  * What the driver should hand over (pilot baseline, money handover):
  *
  *   expected = opening cash (the advance) + cash collected at deliveries
- *              + other cash receipts (spot sales) − cash expenses
- *              − cash deposited in the bank on the road
+ *              + other cash receipts (spot sales, backhaul rent)
+ *              − cash expenses − cash deposited in the bank on the road
  *
  * UPI/bank/cheque payments went straight to the business: they're shown,
  * never handed over.
@@ -17,6 +18,8 @@ export interface HandoverSummary {
   openingCash: string;
   cashCollections: string;
   spotCash: string;
+  /** Backhaul rent paid to the driver in cash (driver app D5). */
+  backhaulCash: string;
   expenses: string;
   deposited: string;
   expected: string;
@@ -28,19 +31,22 @@ export function handoverOf(input: {
   advance: string;
   cashCollections: string;
   spotCash: string;
+  backhaulCash?: string;
   expenses: string;
   deposited: string;
   declared: string | null;
   directPayments: string;
 }): HandoverSummary {
+  const backhaulCash = input.backhaulCash ?? '0';
   const expected = subtractMoney(
-    sumMoney([input.advance, input.cashCollections, input.spotCash]),
+    sumMoney([input.advance, input.cashCollections, input.spotCash, backhaulCash]),
     sumMoney([input.expenses, input.deposited]),
   );
   return {
     openingCash: normalizeMoney(input.advance),
     cashCollections: normalizeMoney(input.cashCollections),
     spotCash: normalizeMoney(input.spotCash),
+    backhaulCash: normalizeMoney(backhaulCash),
     expenses: normalizeMoney(input.expenses),
     deposited: normalizeMoney(input.deposited),
     expected,
@@ -129,6 +135,10 @@ export function checklistOf(
         },
   );
 
+  // Backhaul (driver app D5): done or validly skipped, and paid — only on a trip that had one.
+  const backhaul = backhaulCheckOf(facts.backhauls ?? []);
+  if (backhaul) items.push(backhaul);
+
   // Collections: cash customers paid on the road.
   items.push(
     facts.unpaidCashCustomers.length === 0
@@ -163,6 +173,7 @@ export function checklistOf(
   // Expenses: shown for the owner to look over; any the driver had no
   // authority to spend (below delegation level 4) need approving.
   const unapproved = facts.expensesNeedingApproval ?? '0';
+  const rejected = facts.expensesRejected ?? '0';
   items.push(
     compareMoney(unapproved, '0') > 0
       ? {
@@ -170,7 +181,13 @@ export function checklistOf(
           status: 'exception',
           detail: `${rupees(handover.expenses)} spent on the road, of which ${rupees(unapproved)} beyond the driver's authority — approve it with the closure.`,
         }
-      : { area: 'expenses', status: 'pass', detail: `${rupees(handover.expenses)} spent on the road.` },
+      : compareMoney(rejected, '0') > 0
+        ? {
+            area: 'expenses',
+            status: 'exception',
+            detail: `${rupees(handover.expenses)} spent on the road, of which you rejected ${rupees(rejected)} — settle it with the driver.`,
+          }
+        : { area: 'expenses', status: 'pass', detail: `${rupees(handover.expenses)} spent on the road.` },
   );
 
   return items;

@@ -56,7 +56,7 @@ import {
   parseQuantity,
   type Parsed,
 } from '@/lib/parse';
-import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
+import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatPoNumber, useAgents, useProcurementBoard } from '@/lib/hooks/use-procurement';
 import { CreateBar, DayTabs, ListCard, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 
@@ -1104,6 +1104,7 @@ export default function ProcurementPage() {
     setForFarmer(params.get('farmer') ?? '');
     setCreating(true);
   });
+  useOpenParam(setSelected);
   const { data: session } = useSession();
   const canWrite = hasPermission(session, 'procurement:write');
   const board = useProcurementBoard(day, query);

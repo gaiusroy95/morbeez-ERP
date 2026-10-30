@@ -3,7 +3,10 @@ package com.morbeez.driver.di
 import android.content.Context
 import androidx.room.Room
 import com.morbeez.driver.data.local.AppDatabase
+import com.morbeez.driver.data.local.BackhaulDao
+import com.morbeez.driver.data.local.ChatDao
 import com.morbeez.driver.data.local.DriverDayDao
+import com.morbeez.driver.data.local.ExpenseDao
 import com.morbeez.driver.data.local.StopDraftDao
 import com.morbeez.driver.data.local.PendingOperationDao
 import com.morbeez.driver.data.local.PendingPhotoDao
@@ -36,7 +39,7 @@ object DatabaseModule {
         val supportFactory = SupportFactory(databaseKeyProvider.getOrCreatePassphrase())
         return Room.databaseBuilder(context, AppDatabase::class.java, "morbeez-driver.db")
             .openHelperFactory(supportFactory)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10, AppDatabase.MIGRATION_10_11, AppDatabase.MIGRATION_11_12)
             .build()
     }
 
@@ -57,4 +60,13 @@ object DatabaseModule {
 
     @Provides
     fun provideStopDraftDao(db: AppDatabase): StopDraftDao = db.stopDraftDao()
+
+    @Provides
+    fun provideBackhaulDao(db: AppDatabase): BackhaulDao = db.backhaulDao()
+
+    @Provides
+    fun provideExpenseDao(db: AppDatabase): ExpenseDao = db.expenseDao()
+
+    @Provides
+    fun provideChatDao(db: AppDatabase): ChatDao = db.chatDao()
 }

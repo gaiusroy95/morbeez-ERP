@@ -55,8 +55,9 @@ async function signIn(browser, email) {
   await step('workers: list with pay and advance status', async () => {
     await page.goto(`${BASE}/workforce`);
     await page.waitForSelector('text=Raju Shinde');
-    const rows = await rowsText();
-    if (!rows.some((r) => /Raju Shinde.*₹3 per crate/.test(r)) || !rows.some((r) => /Suresh Kale.*₹450 a day/.test(r))) throw new Error(rows.join(' | '));
+    // The workers as the client's cards (owner app Phase 7), each with their pay.
+    const cards = (await page.locator('.party-card').allTextContents()).map((r) => r.replace(/\s+/g, ' '));
+    if (!cards.some((r) => /Raju Shinde.*₹3 per crate/.test(r)) || !cards.some((r) => /Suresh Kale.*₹450 a day/.test(r))) throw new Error(cards.join(' | '));
   });
 
   await step('add a worker, set employment details and an hourly rate', async () => {

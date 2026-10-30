@@ -127,7 +127,7 @@ export function ScorecardView({ card }: { card: AiScorecard }) {
   );
 }
 
-const TYPES: AiRecommendationType[] = ['procurement', 'pricing', 'logistics_route', 'logistics_load', 'customer_terms', 'exception'];
+const TYPES: AiRecommendationType[] = ['procurement', 'pricing', 'order', 'logistics_route', 'logistics_load', 'customer_terms', 'exception'];
 
 export function AiSettingsView({ settings, canConfigure }: { settings: AiSettings; canConfigure: boolean }) {
   const [f, setF] = useState({

@@ -34,6 +34,17 @@ export function formatMoney(value: string, currency: string): string {
   return moneyFormatter(currency).format(Number(value));
 }
 
+const rateFormatters = new Map<string, Intl.NumberFormat>();
+/** A price per unit — a litre at the pump — to the paisa: ₹92.50, not ₹93. */
+export function formatRate(value: string, currency: string): string {
+  let formatter = rateFormatters.get(currency);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    rateFormatters.set(currency, formatter);
+  }
+  return formatter.format(Number(value));
+}
+
 export function formatMoneyCompact(value: string, currency: string): string {
   return compactFormatter(currency).format(Number(value));
 }

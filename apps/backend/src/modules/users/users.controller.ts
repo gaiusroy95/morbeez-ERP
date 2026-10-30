@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { TeamService } from './team.service';
+import { ActivityEntry, RoleSummary, TeamMember } from './repositories/team.repository';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -21,12 +23,44 @@ import { PublicUser } from './entities/user.entity';
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly teamService: TeamService,
+  ) {}
 
   @Get()
   @RequirePermissions('users:read')
   list(@CurrentUser() user: AuthContext): Promise<PublicUser[]> {
     return this.usersService.list(user.tenantId);
+  }
+
+  /** Users & permissions (owner app Phase 7): every login with its roles, and whose it is. */
+  @Get('team')
+  @RequirePermissions('users:read')
+  team(@CurrentUser() user: AuthContext): Promise<TeamMember[]> {
+    return this.teamService.list(user.tenantId);
+  }
+
+  @Get('roles')
+  @RequirePermissions('users:read')
+  roles(@CurrentUser() user: AuthContext): Promise<RoleSummary[]> {
+    return this.teamService.roles(user.tenantId);
+  }
+
+  @Post(':id/roles/:roleId/remove')
+  @RequirePermissions('roles:assign')
+  removeRole(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('roleId', ParseUUIDPipe) roleId: string,
+  ): Promise<{ ok: true }> {
+    return this.teamService.removeRole(user.tenantId, user.userId, id, roleId);
+  }
+
+  /** My Profile: what you did lately. Self-service. */
+  @Get('me/activity')
+  activity(@CurrentUser() user: AuthContext): Promise<ActivityEntry[]> {
+    return this.teamService.activity(user.tenantId, user.userId);
   }
 
   @Post()

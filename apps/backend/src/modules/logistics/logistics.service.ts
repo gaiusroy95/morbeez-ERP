@@ -27,7 +27,8 @@ import { ChecklistItem } from './entities/trip-reconciliation.entity';
 import { TripReviewFacts } from './repositories/trip-reconciliations.repository';
 import { TripRecord, TripStatus } from './entities/trip.entity';
 import { TripStopRecord } from './entities/trip-stop.entity';
-import { TripExpenseRecord } from './entities/trip-expense.entity';
+import { TripExpensePhotoRecord, TripExpenseRecord } from './entities/trip-expense.entity';
+import { fuelProblemOf, odometerProblemOf } from './expenses';
 import { TripReconciliationRecord } from './entities/trip-reconciliation.entity';
 import { PhotoType, TripStopPhotoRecord } from './entities/trip-stop-photo.entity';
 import { CustomerCollectionRecord } from './entities/customer-collection.entity';
@@ -58,9 +59,27 @@ import { farmLinesOf, loadedKgOf, rejectionTextOf } from './farm-stop';
 import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
 import { qrMatches, shortfallsOf, shortfallTextOf } from './delivery-stop';
 import { CratesService } from '../crates/crates.service';
+import { TripCollectionsRepository } from './repositories/trip-collections.repository';
+import { TripCollections } from './entities/trip-collections.entity';
+import { RaiseStopDisputeDto, ReturnTripDto } from './dto/return-trip.dto';
+import { DisputesService, InvoiceDispute } from '../finance/disputes.service';
+import { BackhaulsRepository } from './repositories/backhauls.repository';
+import { handoverHoldOf, returnHoldOf } from './backhaul';
+import { TripIncentivesService } from './trip-incentives.service';
 import { RoutesService } from '../routes/routes.service';
 import { TripPlanningRepository } from './repositories/trip-planning.repository';
-import { ClosingStockLine, DriverDay, TripPlan, TripQuantities, TripsBoard, TripsBoardDay, TripVehicleStock } from './entities/trip-planning.entity';
+import {
+  ClosingStockLine,
+  DriverDay,
+  OnTheRoad,
+  TripPlan,
+  TripQuantities,
+  TripsBoard,
+  TripsBoardDay,
+  TripVehicleStock,
+  VehicleTrips,
+} from './entities/trip-planning.entity';
+import { DecideExpenseDto } from './dto/record-expense.dto';
 import { StartTripDto } from './dto/start-trip.dto';
 import { addDays } from '../../common/period';
 import { formatOrderNumber, nextTripNumber } from '../../common/persistence/document-number';
@@ -110,6 +129,10 @@ export class LogisticsService {
     private readonly farmStops: FarmStopsRepository,
     private readonly deliveries: DeliveryStopsRepository,
     private readonly crates: CratesService,
+    private readonly tripCollections: TripCollectionsRepository,
+    private readonly disputes: DisputesService,
+    private readonly backhauls: BackhaulsRepository,
+    private readonly incentives: TripIncentivesService,
   ) {}
 
   // ---- The owner's Trips list and planning (redesign Phase 4) ----
@@ -121,6 +144,58 @@ export class LogisticsService {
   /** What a trip on [date] along [routeId] could carry, and the chosen vehicle's capacity and stock. */
   getPlan(tenantId: string, date: string, routeId: string | null, vehicleId: string | null): Promise<TripPlan> {
     return this.db.withTenant(tenantId, (client) => this.planning.plan(client, date, routeId, vehicleId));
+  }
+
+  /** Trips on the road now, with their crew (Workforce & Vehicles, redesign Phase 7). */
+  onTheRoad(tenantId: string): Promise<OnTheRoad[]> {
+    return this.db.withTenant(tenantId, (client) => this.planning.onTheRoadWithClient(client));
+  }
+
+  /** A vehicle's trips: how many, the KM recorded on them, its latest crew and trips (Vehicle details). */
+  async vehicleTrips(tenantId: string, vehicleId: string): Promise<VehicleTrips> {
+    await this.vehicles.getById(tenantId, vehicleId);
+    return this.db.withTenant(tenantId, (client) => this.planning.vehicleTripsWithClient(client, vehicleId));
+  }
+
+  /**
+   * The owner decides a driver's expense that was beyond their authority
+   * (Approvals inbox, redesign Phase 7): approved, it's settled like any
+   * other; rejected — with the reason — it stays on the trip as an exception
+   * to settle with the driver at closing. Nothing is deducted from pay.
+   */
+  async decideExpense(
+    tenantId: string,
+    actorUserId: string,
+    tripId: string,
+    expenseId: string,
+    dto: DecideExpenseDto,
+  ): Promise<TripExpenseRecord> {
+    const trip = await this.findTripOrThrow(tenantId, tripId);
+    const decision = dto.approve ? 'approved' : 'rejected';
+    const note = dto.note?.trim() || null;
+    if (!dto.approve && (!note || note.length < 3)) throw new BadRequestException('Say why the expense is rejected');
+    return this.db.withTenant(tenantId, async (client) => {
+      const before = await this.expenses.findByIdWithClient(client, expenseId);
+      if (!before || before.tripId !== tripId) throw new NotFoundException('Expense not found on this trip');
+      if (!before.needsApproval) throw new ConflictException("This expense was within the driver's authority: there's nothing to approve");
+      if (before.decision) {
+        if (before.decision === decision) return before;
+        throw new ConflictException(`This expense was already ${before.decision}`);
+      }
+      if (trip.status === 'reconciled' || trip.status === 'cancelled') throw new ConflictException(`The trip is ${trip.status}`);
+      const after = await this.expenses.decideWithClient(client, expenseId, actorUserId, decision, note);
+      if (!after) throw new ConflictException('This expense was decided meanwhile — reload it');
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: 'trip_expense',
+        entityId: expenseId,
+        before: before as unknown as Record<string, unknown>,
+        after: after as unknown as Record<string, unknown>,
+      });
+      return after;
+    });
   }
 
   /** The trip's quantities product by product — and, once closed, what was counted on the vehicle. */
@@ -196,6 +271,10 @@ export class LogisticsService {
     if (!tripId) return base;
 
     const trip = await this.findTripOrThrow(tenantId, tripId);
+    // Earned so far: the week's pay and incentives, and what today's trip would add once closed (D7).
+    if (earnedThisWeek !== null && trip.status !== 'reconciled') {
+      base.earnedThisWeek = sumMoney([earnedThisWeek, (await this.incentives.forTrip(tenantId, trip)).total]);
+    }
     const vehicle = await this.vehicles.getById(tenantId, trip.vehicleId);
     const routeName = trip.routeId ? (await this.routes.get(tenantId, trip.routeId)).name : null;
     const lastOdometerKm = await this.db.withTenant(tenantId, (client) => this.planning.lastOdometerWithClient(client, trip.vehicleId, trip.id));
@@ -457,12 +536,19 @@ export class LogisticsService {
     dto: SubmitTripDto,
   ): Promise<TripRecord> {
     const before = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, id);
+    // A trip that set off with an opening KM comes back with a closing one (driver app D4: Return).
+    if (!callerIsDispatcher && before.openingKm !== null && before.closingKm === null) {
+      throw new ConflictException('Record the closing KM (Return) before handing over');
+    }
 
     return this.db.withTenant(tenantId, async (client) => {
       const pending = await this.stops.countPendingWithClient(client, id);
       if (pending > 0) {
         throw new ConflictException(`${pending} stop(s) on this trip are still pending`);
       }
+      // A backhaul is done (or skipped) and paid before the driver hands over (D5); the owner may close regardless, as an exception.
+      const backhaulHold = callerIsDispatcher ? null : handoverHoldOf(await this.backhauls.listByTripWithClient(client, id));
+      if (backhaulHold) throw new ConflictException(`${backhaulHold}, before handing over`);
 
       // The driver submits; only the owner closes (reconcileTrip).
       const after = await this.trips.completeWithClient(client, id, dto.version, {
@@ -781,6 +867,129 @@ export class LogisticsService {
         farmer: await this.farmStops.farmerNameWithClient(client, purchaseOrderId),
       };
     });
+  }
+
+  /** Return (driver app D4; client spec §22): the closing KM once the vehicle is back — never below the opening KM. */
+  async returnTrip(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string, dto: ReturnTripDto): Promise<TripRecord> {
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    if (trip.status !== 'in_progress') {
+      throw new ConflictException('Only a trip on the road can come back');
+    }
+    if (trip.openingKm !== null && dto.closingKm < Number(trip.openingKm)) {
+      throw new BadRequestException(`Closing KM ${dto.closingKm} is below the opening KM, ${Number(trip.openingKm)} km`);
+    }
+    return this.db.withTenant(tenantId, async (client) => {
+      // A fill on the road read the odometer too (D6): the vehicle came back with at least that.
+      const pumpKm = await this.expenses.maxOdometerOnTripWithClient(client, tripId);
+      if (pumpKm !== null && dto.closingKm < pumpKm) {
+        throw new BadRequestException(`Closing KM ${dto.closingKm} is below the odometer at the pump on this trip, ${pumpKm} km`);
+      }
+      // The vehicle isn't back while a backhaul waits for an answer or is under way (D5).
+      const hold = returnHoldOf(await this.backhauls.listByTripWithClient(client, tripId));
+      if (hold) throw new ConflictException(`${hold}, then record Return`);
+      const after = await this.trips.returnWithClient(client, tripId, dto.closingKm);
+      if (!after) throw new ConflictException('Only a trip on the road can come back');
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: TRIP_ENTITY,
+        entityId: tripId,
+        before: { closingKm: trip.closingKm },
+        after: { closingKm: after.closingKm, returnedAt: after.returnedAt },
+      });
+      return after;
+    });
+  }
+
+  /**
+   * Collections (driver app D4; client spec §18–§21): only the customers
+   * delivered on this trip, each with their whole outstanding now (not just
+   * this trip's invoice), what's disputed and with the owner, and what was
+   * collected on the trip — in all and by how it was paid.
+   */
+  async getTripCollections(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string): Promise<TripCollections> {
+    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    return this.db.withTenant(tenantId, async (client) => {
+      const delivered = await this.tripCollections.deliveredCustomersWithClient(client, tripId);
+      const { byCustomer, byMethod } = await this.tripCollections.collectedWithClient(client, tripId);
+      const disputed = await this.tripCollections.disputedWithClient(client, delivered.map((c) => c.customer_id));
+      const customers = [];
+      for (const c of delivered) {
+        const balance = (await this.receivables.customerBalanceWithClient(client, c.customer_id)).balance;
+        customers.push({
+          customerId: c.customer_id,
+          name: c.name,
+          phone: c.phone,
+          place: c.place,
+          stopId: c.stop_id,
+          terms: (c.terms_days === 0 ? 'cash' : 'credit') as 'cash' | 'credit',
+          outstanding: toCents(balance) > 0n ? balance : '0.00',
+          disputed: disputed.get(c.customer_id) ?? '0.00',
+          collectedOnTrip: byCustomer.get(c.customer_id) ?? '0.00',
+        });
+      }
+      const collectible = customers.map((c) => {
+        const left = subtractMoney(c.outstanding, c.disputed);
+        return toCents(left) > 0n ? left : '0.00';
+      });
+      const by = (m: string) => byMethod.get(m) ?? '0.00';
+      return {
+        tripId,
+        customers,
+        collected: { cash: by('cash'), upi: by('upi'), bankTransfer: by('bank_transfer'), cheque: by('cheque'), total: sumMoney([...byMethod.values()]) },
+        pending: { customers: collectible.filter((x) => toCents(x) > 0n).length, amount: sumMoney(collectible) },
+      };
+    });
+  }
+
+  /**
+   * A customer disputes part of what they owe (driver app D4; client spec
+   * §21): raised on the delivery's invoice, where it waits for the owner —
+   * the driver never writes a balance off. A retried request raises nothing more.
+   */
+  async raiseStopDispute(
+    tenantId: string,
+    actorUserId: string,
+    callerIsDispatcher: boolean,
+    tripId: string,
+    stopId: string,
+    dto: RaiseStopDisputeDto,
+  ): Promise<InvoiceDispute> {
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    const stop = await this.getStopOnTrip(tenantId, tripId, stopId);
+    if (stop.stopType !== 'delivery' || stop.status !== 'completed') {
+      throw new BadRequestException('A dispute is raised on a delivery that was made');
+    }
+    await this.delegation.assertCan(tenantId, callerIsDispatcher, trip, 'collect');
+    const reason = dto.reason.trim();
+    const amount = moneyFromNumber(dto.amount);
+    const { invoiceId, existing, customer } = await this.db.withTenant(tenantId, async (client) => {
+      const invoice = await this.tripCollections.invoiceOfOrderWithClient(client, stop.orderId as string);
+      const facts = await this.deliveries.factsWithClient(client, stop.orderId as string);
+      return {
+        invoiceId: invoice,
+        existing: invoice ? await this.tripCollections.sameOpenDisputeWithClient(client, invoice, amount, reason, actorUserId) : null,
+        customer: facts.customerName,
+      };
+    });
+    if (!invoiceId) throw new ConflictException("This delivery's invoice isn't there yet");
+    if (existing) {
+      const prior = (await this.disputes.list(tenantId, { invoiceId })).find((d) => d.id === existing);
+      if (prior) return prior;
+    }
+    const dispute = await this.disputes.raise(tenantId, actorUserId, { invoiceId, amount: dto.amount, reason });
+    await this.db.withTenant(tenantId, (client) =>
+      this.alerts.raiseWithClient(client, tenantId, {
+        kind: 'collection_discrepancy',
+        severity: 'warning',
+        title: `${customer} disputes ₹${amount}`,
+        detail: `${reason}. Raised by the driver at the delivery; it waits for you in Finance — the driver can't write anything off.`,
+        tripId,
+        dedupeKey: `dispute:${dispute.id}`,
+      }),
+    );
+    return dispute;
   }
 
   /** Start Trip (driver app D3): the delivery run set off, after the farms — recorded once. */
@@ -1105,6 +1314,27 @@ export class LogisticsService {
 
   // ---- Expenses ----
 
+  /** The bill (driver app D6), kept with the expense — a retried upload adds the same picture again, harmlessly. */
+  async addExpensePhoto(
+    tenantId: string,
+    actorUserId: string,
+    callerIsDispatcher: boolean,
+    tripId: string,
+    expenseId: string,
+    file: UploadedPhoto,
+  ): Promise<TripExpensePhotoRecord> {
+    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    const expense = await this.db.withTenant(tenantId, (client) => this.expenses.findByIdWithClient(client, expenseId));
+    if (!expense || expense.tripId !== tripId) throw new NotFoundException('Expense not found on this trip');
+    if (!VALID_PHOTO_CONTENT_TYPES.includes(file.mimetype)) throw new BadRequestException(`Unsupported image type: ${file.mimetype}`);
+    const extension = file.mimetype === 'image/png' ? 'png' : file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+    const key = `${tenantId}/expense/${expenseId}/${randomUUID()}.${extension}`;
+    await this.storage.put(key, file.buffer, file.mimetype);
+    return this.db.withTenant(tenantId, (client) =>
+      this.expenses.insertPhotoWithClient(client, tenantId, actorUserId, { expenseId, storageKey: key, contentType: file.mimetype, sizeBytes: file.size }),
+    );
+  }
+
   async listExpenses(
     tenantId: string,
     actorUserId: string,
@@ -1134,21 +1364,43 @@ export class LogisticsService {
       find,
       sameRequest: (prior) => sameExpense(prior, dto),
       write: async () => {
+        // The phone's own id (D6): the same expense sent again is the one recorded.
+        if (dto.id) {
+          const existing = await this.db.withTenant(tenantId, (client) => this.expenses.findByIdWithClient(client, dto.id as string));
+          if (existing) {
+            if (existing.tripId === tripId && sameExpense(existing, dto)) return existing;
+            throw new ConflictException('That expense was recorded already, differently');
+          }
+        }
         if (trip.status === 'cancelled' || trip.status === 'reconciled') {
           throw new ConflictException(`Cannot record an expense against a ${trip.status} trip`);
         }
+        const fuelProblem = fuelProblemOf(dto);
+        if (fuelProblem) throw new BadRequestException(fuelProblem);
         // Spending is a full route operator's call (level 4). Below that the
         // driver still records what they paid — the money is gone either
         // way — and the owner approves it at closure.
         const authority = callerIsDispatcher ? null : await this.delegation.authorityOnTrip(tenantId, trip);
         return this.db.withTenant(tenantId, async (client) => {
+          if (dto.odometerKm !== undefined) {
+            const odometerProblem = odometerProblemOf(dto.odometerKm, trip, await this.expenses.maxOdometerOnTripWithClient(client, tripId));
+            if (odometerProblem) throw new BadRequestException(odometerProblem);
+          }
+          const isFuel = dto.category === 'fuel';
           const expense = await this.expenses.createWithClient(client, actorUserId, {
+            id: dto.id ?? null,
             tripId,
             category: dto.category,
             amount: dto.amount,
-            notes: dto.notes ?? null,
+            notes: dto.notes?.trim() || null,
             clientRef: key,
             needsApproval: authority !== null && !authority.can.expense,
+            odometerKm: isFuel ? (dto.odometerKm ?? null) : null,
+            fuelType: isFuel ? (dto.fuelType ?? null) : null,
+            // A fill with litres is full unless the driver said it wasn't.
+            fullTank: isFuel && dto.litres !== undefined ? (dto.fullTank ?? true) : null,
+            litres: isFuel ? (dto.litres ?? null) : null,
+            ratePerLitre: isFuel ? (dto.ratePerLitre ?? null) : null,
           });
           await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
             id: expense.id,
@@ -1215,17 +1467,24 @@ export class LogisticsService {
           throw new ConflictException(`Cannot record a collection against a ${trip.status} trip`);
         }
         await this.delegation.assertCan(tenantId, callerIsDispatcher, trip, 'collect');
+        // Someone paying on the customer's behalf (driver app D4): who.
+        const payerName = dto.payer === 'third_party' ? dto.payerName?.trim() || null : null;
+        if (dto.payer === 'third_party' && !payerName) throw new BadRequestException('Paid by someone else: say who');
+        const notes = [payerName ? `Paid by ${payerName}` : null, dto.notes?.trim() || null].filter(Boolean).join(' — ') || null;
         return this.db.withTenant(tenantId, async (client) => {
           const collection = await this.collections.createWithClient(client, tenantId, actorUserId, {
             tripStopId: stopId,
             orderId: order.id,
             amount: dto.amount,
             method: dto.method,
-            notes: dto.notes ?? null,
+            notes,
             clientRef: key,
             // Cash stays with the driver until they hand it over; UPI, bank
             // and cheque payments reach the business directly.
             intoDriverFloat: dto.method === 'cash',
+            payer: dto.payer ?? 'customer',
+            payerName,
+            reference: dto.reference?.trim() || null,
           });
           await this.receivables.recordCollectionPaymentWithClient(client, tenantId, actorUserId, {
             collectionId: collection.id,
@@ -1236,6 +1495,7 @@ export class LogisticsService {
             notes: collection.notes,
             collectedAt: collection.collectedAt,
             receivedInto: collection.intoDriverFloat ? 'cash_with_drivers' : undefined,
+            reference: collection.reference,
           });
           return collection;
         });
@@ -1419,16 +1679,24 @@ export class LogisticsService {
   private async handoverWithClient(client: PoolClient, trip: TripRecord): Promise<HandoverSummary> {
     const spot = await this.reconciliations.spotSalesWithClient(client, trip.id);
     const money = await this.reconciliations.moneyWithClient(client, trip.id);
+    const backhaul = await this.backhauls.moneyWithClient(client, trip.id);
     const expenses = await this.expenses.sumByTripWithClient(client, trip.id);
     return handoverOf({
       advance: trip.advanceAmount,
       cashCollections: money.cashCollections,
       spotCash: spot.cash,
+      backhaulCash: backhaul.cash,
       expenses: moneyFromNumber(expenses),
       deposited: money.deposited,
       declared: trip.cashDeclared,
-      directPayments: money.directPayments,
+      directPayments: sumMoney([money.directPayments, backhaul.direct]),
     });
+  }
+
+  /** What the owner checks before closing, with the trip's backhauls (D5). */
+  private async reviewFactsWithClient(client: PoolClient, tripId: string): Promise<TripReviewFacts> {
+    const facts = await this.reconciliations.reviewFactsWithClient(client, tripId);
+    return { ...facts, backhauls: await this.backhauls.listByTripWithClient(client, tripId) };
   }
 
   /**
@@ -1441,7 +1709,7 @@ export class LogisticsService {
       const trip = await this.trips.findByIdWithClient(client, tripId);
       if (!trip) throw new NotFoundException('Trip not found');
       const handover = await this.handoverWithClient(client, trip);
-      const facts = await this.reconciliations.reviewFactsWithClient(client, tripId);
+      const facts = await this.reviewFactsWithClient(client, tripId);
       const spot = await this.reconciliations.spotSalesWithClient(client, tripId);
       const checklist = checklistOf(facts, handover, cashReceived === null ? null : moneyFromNumber(cashReceived));
       return {
@@ -1518,7 +1786,7 @@ export class LogisticsService {
         throw new ConflictException(`${spot.pending} spot sale(s) on this trip still await an approval decision — decide them first`);
       }
       const handover = await this.handoverWithClient(client, trip);
-      const facts: TripReviewFacts = await this.reconciliations.reviewFactsWithClient(client, tripId);
+      const facts: TripReviewFacts = await this.reviewFactsWithClient(client, tripId);
       const received = moneyFromNumber(dto.cashReturned);
       // The count is checked against what's on the vehicle now (driver app
       // D0), for every product the trip moved and anything else aboard —
@@ -1553,6 +1821,7 @@ export class LogisticsService {
         cashReturned: dto.cashReturned,
         spotCash: spot.cash,
         cashCollections: handover.cashCollections,
+        backhaulCash: handover.backhaulCash,
         cashDeposited: handover.deposited,
         directPayments: handover.directPayments,
         cashDeclared: trip.cashDeclared,
@@ -1567,7 +1836,7 @@ export class LogisticsService {
         id: reconciliation.id,
         tripId,
         advanceAmount: reconciliation.advanceAmount,
-        cashIn: sumMoney([reconciliation.spotCash, reconciliation.cashCollections]),
+        cashIn: sumMoney([reconciliation.spotCash, reconciliation.cashCollections, reconciliation.backhaulCash]),
         totalExpenses: reconciliation.totalExpenses,
         cashDeposited: reconciliation.cashDeposited,
         cashReturned: reconciliation.cashReturned,
@@ -1589,6 +1858,8 @@ export class LogisticsService {
       }
 
       const after = await this.trips.markReconciledWithClient(client, tripId, dto.version);
+      // The driver's incentives (D7), worked out from the trip now it's closed — and kept.
+      await this.incentives.recordAtCloseWithClient(client, tenantId, actorUserId, tripId, reconciliation.outcome);
       await this.audit.record(client, {
         tenantId,
         actorUserId,

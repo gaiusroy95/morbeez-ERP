@@ -4,18 +4,30 @@ import com.morbeez.driver.data.local.PendingOperationDao
 import com.morbeez.driver.data.local.PendingOperationEntity
 import com.morbeez.driver.data.local.PendingPhotoDao
 import com.morbeez.driver.data.remote.ApiService
+import com.morbeez.driver.data.remote.dto.BackhaulPaymentRequest
+import com.morbeez.driver.data.remote.dto.BackhaulStepRequest
 import com.morbeez.driver.data.remote.dto.CompleteDeliveryRequest
+import com.morbeez.driver.data.remote.dto.CreateBackhaulRequest
+import com.morbeez.driver.data.remote.dto.SkipBackhaulRequest
 import com.morbeez.driver.data.remote.dto.CompletePickupRequest
 import com.morbeez.driver.data.remote.dto.RecordCollectionRequest
 import com.morbeez.driver.data.remote.dto.RecordDepositRequest
 import com.morbeez.driver.data.remote.dto.RecordExpenseRequest
 import com.morbeez.driver.data.remote.dto.ReportProblemRequest
 import com.morbeez.driver.data.remote.dto.SkipStopRequest
+import com.morbeez.driver.data.remote.dto.RaiseDisputeRequest
+import com.morbeez.driver.data.remote.dto.ReturnTripRequest
 import com.morbeez.driver.data.remote.dto.StartTripRequest
 import com.morbeez.driver.data.remote.dto.SubmitTripRequest
+import com.morbeez.driver.data.remote.dto.ChatReadRequest
+import com.morbeez.driver.data.remote.dto.SendChatMessageRequest
+import com.morbeez.driver.data.repository.ChatRepository
 import com.morbeez.driver.data.repository.TripRepository
+import com.morbeez.driver.data.security.TokenStore
+import com.morbeez.driver.BuildConfig
 import com.squareup.moshi.Moshi
 import java.io.File
+import java.time.Instant
 import javax.inject.Inject
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -45,13 +57,19 @@ class SyncEngine @Inject constructor(
     private val pendingOperationDao: PendingOperationDao,
     private val pendingPhotoDao: PendingPhotoDao,
     private val tripRepository: TripRepository,
+    private val chatRepository: ChatRepository,
+    private val tokenStore: TokenStore,
     private val moshi: Moshi,
 ) {
     suspend fun sync(): SyncResult = passes.withLock {
         // One pass at a time across every trigger — periodic, app opened,
         // Refresh — so two never race to send the same queued action
         // (Performance Audit PA-11).
-        val operationsDrained = pushOperations()
+        // The chat first and on its own (D9): a message to the office never
+        // waits behind a trip action the server refused — it's how the driver
+        // asks for help with one.
+        val chatDrained = pushOperations(chat = true)
+        val operationsDrained = pushOperations(chat = false)
 
         // Push before pull (DRV.9) is about actions: a pull must never land
         // on top of one the server hasn't seen. Photos change no state a pull
@@ -60,13 +78,26 @@ class SyncEngine @Inject constructor(
         if (operationsDrained) {
             runCatching { tripRepository.refreshMyTrips() }
         }
+        if (chatDrained) {
+            runCatching { chatRepository.refresh() }
+        }
         val photosDrained = pushPhotos()
 
-        return@withLock if (operationsDrained && photosDrained) SyncResult.SUCCESS else SyncResult.PARTIAL
+        val result = if (chatDrained && operationsDrained && photosDrained) SyncResult.SUCCESS else SyncResult.PARTIAL
+        // The office sees what's still on this phone (owner Phase 8); best effort — never fails the pass.
+        if (tokenStore.isLoggedIn()) {
+            runCatching {
+                api.reportSync(
+                    SyncReport.of(tokenStore.deviceId, BuildConfig.VERSION_NAME, pendingOperationDao.nextBatch(), pendingPhotoDao.nextBatch(), result, Instant.now()),
+                )
+            }
+        }
+        return@withLock result
     }
 
-    private suspend fun pushOperations(): Boolean {
-        for (operation in pendingOperationDao.nextBatch()) {
+    /** The chat's queue ([chat]) or everything else's, each in strict order. */
+    private suspend fun pushOperations(chat: Boolean): Boolean {
+        for (operation in pendingOperationDao.nextBatch().filter { (it.operationType in CHAT_OPERATIONS) == chat }) {
             val outcome = runCatching { applyOperation(operation) }
             if (outcome.isSuccess) {
                 pendingOperationDao.delete(operation.idempotencyKey)
@@ -95,8 +126,48 @@ class SyncEngine @Inject constructor(
                     CompletePickupRequest(payload.weights, payload.lines, payload.packerEmployeeId, payload.loaderEmployeeId),
                 )
             }
+            PendingOperationType.RETURN_TRIP -> {
+                val payload = parse<ReturnTripPayload>(operation.payloadJson)
+                api.returnTrip(operation.tripId, ReturnTripRequest(payload.closingKm))
+            }
+            PendingOperationType.RAISE_DISPUTE -> {
+                val payload = parse<RaiseDisputePayload>(operation.payloadJson)
+                api.raiseStopDispute(operation.tripId, payload.stopId, RaiseDisputeRequest(payload.amount, payload.reason))
+            }
             PendingOperationType.START_DELIVERIES -> {
                 api.startDeliveries(operation.tripId)
+            }
+            PendingOperationType.CREATE_BACKHAUL -> {
+                val p = parse<CreateBackhaulPayload>(operation.payloadJson)
+                api.createBackhaul(operation.tripId, CreateBackhaulRequest(p.backhaulId, p.pickupPlace, p.dropPlace, p.rent, p.hirerName, p.notes))
+            }
+            PendingOperationType.ACCEPT_BACKHAUL -> {
+                api.acceptBackhaul(operation.tripId, parse<BackhaulPayload>(operation.payloadJson).backhaulId)
+            }
+            PendingOperationType.SKIP_BACKHAUL -> {
+                val p = parse<SkipBackhaulPayload>(operation.payloadJson)
+                api.skipBackhaul(operation.tripId, p.backhaulId, SkipBackhaulRequest(p.reason))
+            }
+            PendingOperationType.BACKHAUL_STEP -> {
+                val p = parse<BackhaulStepPayload>(operation.payloadJson)
+                // The load and the drop are photographed before their step: those photos go first.
+                if (!pushPhotos(p.backhaulId)) error("The backhaul's photos haven't uploaded yet")
+                api.backhaulStep(operation.tripId, p.backhaulId, BackhaulStepRequest(p.step, p.at))
+            }
+            PendingOperationType.PAY_BACKHAUL -> {
+                val p = parse<PayBackhaulPayload>(operation.payloadJson)
+                if (!pushPhotos(p.backhaulId)) error("The payment proof hasn't uploaded yet")
+                api.payBackhaul(operation.tripId, p.backhaulId, BackhaulPaymentRequest(p.method, p.amount, p.reference, p.note, p.at))
+            }
+            PendingOperationType.ACKNOWLEDGE_PAY -> {
+                api.acknowledgeSettlement(parse<AcknowledgePayPayload>(operation.payloadJson).settlementId)
+            }
+            PendingOperationType.SEND_MESSAGE -> {
+                val p = parse<SendMessagePayload>(operation.payloadJson)
+                chatRepository.markSent(api.sendChatMessage(SendChatMessageRequest(p.messageId, p.body, p.tripId, p.photo, p.writtenAt)))
+            }
+            PendingOperationType.READ_CHAT -> {
+                api.readChat(ChatReadRequest(parse<ReadChatPayload>(operation.payloadJson).upTo))
             }
             PendingOperationType.ARRIVE_STOP -> {
                 val payload = parse<ArriveStopPayload>(operation.payloadJson)
@@ -126,19 +197,20 @@ class SyncEngine @Inject constructor(
                 api.skipStop(operation.tripId, payload.stopId, SkipStopRequest(payload.reason))
             }
             PendingOperationType.RECORD_EXPENSE -> {
-                val payload = parse<RecordExpensePayload>(operation.payloadJson)
+                val p = parse<RecordExpensePayload>(operation.payloadJson)
                 api.recordExpense(
                     operation.tripId,
-                    RecordExpenseRequest(payload.category, payload.amount, payload.notes),
+                    RecordExpenseRequest(p.category, p.amount, p.notes, p.expenseId, p.odometerKm, p.fuelType, p.fullTank, p.litres, p.ratePerLitre),
                     operation.idempotencyKey,
                 )
+                p.expenseId?.let { tripRepository.markExpenseSent(it) }
             }
             PendingOperationType.RECORD_COLLECTION -> {
                 val payload = parse<RecordCollectionPayload>(operation.payloadJson)
                 api.recordCollection(
                     operation.tripId,
                     payload.stopId,
-                    RecordCollectionRequest(payload.amount, payload.method, payload.notes),
+                    RecordCollectionRequest(payload.amount, payload.method, payload.notes, payload.reference, payload.payer, payload.payerName),
                     operation.idempotencyKey,
                 )
             }
@@ -181,17 +253,28 @@ class SyncEngine @Inject constructor(
     private inline fun <reified T> parse(json: String): T =
         moshi.adapter(T::class.java).fromJson(json) ?: error("Malformed pending-operation payload")
 
-    /** Uploads queued photos — every one, or only one stop's ([stopId]). */
+    /** Uploads queued photos — every one, or only one stop's, backhaul's or expense's ([stopId]). */
     private suspend fun pushPhotos(stopId: String? = null): Boolean {
         for (photo in pendingPhotoDao.nextBatch().filter { stopId == null || it.stopId == stopId }) {
+            // An expense's bill goes once the expense itself has reached the server (D6); a chat photo once its message has (D9).
+            if (photo.target == "expense" && tripRepository.isExpenseUnsent(photo.stopId)) continue
+            if (photo.target == "chat" && chatRepository.isUnsent(photo.stopId)) continue
             val outcome = runCatching {
                 val file = File(photo.localPath)
                 val mediaType = photo.mimeType.toMediaTypeOrNull()
                 val body = file.asRequestBody(mediaType)
                 val part = MultipartBody.Part.createFormData("file", file.name, body)
                 val photoTypeBody = photo.photoType.toRequestBody("text/plain".toMediaTypeOrNull())
-                val productBody = photo.productId?.toRequestBody("text/plain".toMediaTypeOrNull())
-                api.uploadPhoto(photo.tripId, photo.stopId, photoTypeBody, part, productBody)
+                if (photo.target == "chat") {
+                    chatRepository.markSent(api.uploadChatPhoto(photo.stopId, part))
+                } else if (photo.target == "backhaul") {
+                    api.uploadBackhaulPhoto(photo.tripId, photo.stopId, photoTypeBody, part)
+                } else if (photo.target == "expense") {
+                    api.uploadExpensePhoto(photo.tripId, photo.stopId, photoTypeBody, part)
+                } else {
+                    val productBody = photo.productId?.toRequestBody("text/plain".toMediaTypeOrNull())
+                    api.uploadPhoto(photo.tripId, photo.stopId, photoTypeBody, part, productBody)
+                }
             }
             if (outcome.isSuccess) {
                 pendingPhotoDao.delete(photo.id)

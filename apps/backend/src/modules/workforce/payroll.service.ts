@@ -8,11 +8,14 @@ import { LedgerLineInput } from '../finance/repositories/ledger.repository';
 import { assertRealDate } from '../../common/period';
 import { fromCents, moneyFromNumber, sumMoney, toCents } from '../../common/money';
 import { PayrollRepository } from './repositories/payroll.repository';
-import { computeEarnings, WorkDay } from './payroll-math';
+import { computeEarnings, inForceOn, WorkDay } from './payroll-math';
+import { dayPayOf, IncentiveKind, IncentiveLine, IncentiveRules, INCENTIVE_BASE, INCENTIVE_KINDS, INCENTIVE_LABEL, SUGGESTED_PERCENT } from './trip-incentives';
 import {
   AdvanceRecord,
   AssignmentRecord,
+  DriverIncentiveSettings,
   EarningsPreview,
+  TripIncentiveRow,
   IncentiveRule,
   MinimumWageRate,
   PayrollSettings,
@@ -23,6 +26,7 @@ import {
 import {
   CreateAssignmentDto,
   DraftSettlementsDto,
+  DriverIncentivesDto,
   IncentiveRuleDto,
   MinimumWageDto,
   PayRateDto,
@@ -434,6 +438,7 @@ export class PayrollService {
   ): Promise<EarningsPreview> {
     const covered = await this.repo.overlapping(client, worker.employeeId, from, to);
     const work = await this.repo.unsettledWork(client, worker.employeeId, from, to);
+    const tripIncentives = await this.repo.tripIncentives(client, { employeeId: worker.employeeId, from, to, unsettled: true });
     const rates = await this.repo.ratesFor(client, worker.employeeId);
     const advances = (await this.repo.advances(client, worker.employeeId, true)).map((a) => ({ id: a.id, paidOn: a.paidOn, outstanding: a.outstanding }));
     const result = computeEarnings({
@@ -447,6 +452,7 @@ export class PayrollService {
       rates,
       work: work.map<WorkDay>((a) => ({ date: a.workDate, status: a.status as WorkDay['status'], kind: a.kind, hours: a.hours, units: a.units })),
       incentiveRules: shared.incentives,
+      tripIncentives: tripIncentives.map((i) => ({ label: INCENTIVE_LABEL[i.kind as IncentiveKind] ?? i.kind, tripNumber: i.tripNumber, amount: i.amount })),
       minimumWages: shared.minimumWages,
       minWagePolicy: shared.settings.minWagePolicy,
       adjustments: extra.adjustments,
@@ -465,6 +471,7 @@ export class PayrollService {
       net: result.net,
       warnings: result.warnings,
       assignmentIds: work.map((a) => a.id),
+      tripIncentiveIds: tripIncentives.map((i) => i.id),
       blockedBy: covered
         ? `Overlaps settlement #${covered.settlement_number} (${covered.status})`
         : rates.length === 0
@@ -561,6 +568,7 @@ export class PayrollService {
           lines: preview.lines,
         });
         await this.repo.linkAssignments(client, settlementId, preview.assignmentIds);
+        await this.repo.linkTripIncentives(client, settlementId, preview.tripIncentiveIds);
         await this.audit.record(client, {
           tenantId,
           actorUserId: userId,
@@ -718,8 +726,152 @@ export class PayrollService {
       });
       if (!ok) throw new ConflictException('This settlement was changed by someone else — reload and try again');
       await this.repo.unlinkAssignments(client, id);
+      await this.repo.unlinkTripIncentives(client, id);
       await this.audit.record(client, { tenantId, actorUserId: userId, action: 'update', entityType: 'settlement', entityId: id, before: { status: s.status }, after: { status: 'void', reason: dto.reason.trim(), entryId } });
       return this.settlementDetail(client, id);
+    });
+  }
+
+  // ---- Driver incentives (driver app D7) ----
+
+  /** The owner's incentive rules, each with what it's a percentage of; every one off until saved. */
+  getDriverIncentives(tenantId: string): Promise<DriverIncentiveSettings> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const saved = await this.repo.driverIncentiveRules(client);
+      return {
+        version: saved.version,
+        targetKmPerLitre: saved.targetKmPerLitre,
+        nightFrom: saved.nightFrom,
+        nightUntil: saved.nightUntil,
+        rules: INCENTIVE_KINDS.map((kind) => {
+          const rule = saved.rules.find((r) => r.kind === kind);
+          return {
+            kind,
+            label: INCENTIVE_LABEL[kind],
+            base: INCENTIVE_BASE[kind],
+            enabled: rule?.enabled ?? false,
+            percent: rule?.percent ?? SUGGESTED_PERCENT[kind],
+            suggestedPercent: SUGGESTED_PERCENT[kind],
+          };
+        }),
+      };
+    });
+  }
+
+  saveDriverIncentives(tenantId: string, userId: string, dto: DriverIncentivesDto): Promise<DriverIncentiveSettings> {
+    const kinds = new Set(dto.rules.map((r) => r.kind));
+    if (kinds.size !== dto.rules.length) throw new BadRequestException('Each incentive once');
+    if (dto.rules.some((r) => r.kind === 'mileage' && r.enabled) && !dto.targetKmPerLitre) {
+      throw new BadRequestException('The mileage incentive needs a km/l target');
+    }
+    return this.db
+      .withTenant(tenantId, async (client) => {
+        const before = await this.repo.driverIncentiveRules(client);
+        const ok = await this.repo.saveDriverIncentiveRules(client, tenantId, userId, dto.version, {
+          targetKmPerLitre: dto.targetKmPerLitre === undefined || dto.targetKmPerLitre === null ? null : dto.targetKmPerLitre.toFixed(2),
+          nightFrom: dto.nightFrom,
+          nightUntil: dto.nightUntil,
+          rules: dto.rules.map((r) => ({ kind: r.kind, enabled: r.enabled, percent: r.percent.toFixed(3) })),
+        });
+        if (!ok) throw new ConflictException('The incentive rules were changed by someone else — reload and try again');
+        await this.audit.record(client, {
+          tenantId,
+          actorUserId: userId,
+          action: before.version === 0 ? 'create' : 'update',
+          entityType: 'driver_incentive_rules',
+          entityId: tenantId,
+          before: before as unknown as Record<string, unknown>,
+          after: { ...dto } as unknown as Record<string, unknown>,
+        });
+      })
+      .then(() => this.getDriverIncentives(tenantId));
+  }
+
+  /** The rules as the engine reads them. */
+  async incentiveRulesWithClient(client: PoolClient): Promise<IncentiveRules> {
+    const saved = await this.repo.driverIncentiveRules(client);
+    return {
+      rules: saved.rules.filter((r): r is { kind: IncentiveKind; enabled: boolean; percent: string } => (INCENTIVE_KINDS as readonly string[]).includes(r.kind)),
+      targetKmPerLitre: saved.targetKmPerLitre,
+      nightFrom: saved.nightFrom,
+      nightUntil: saved.nightUntil,
+    };
+  }
+
+  /** The worker's fixed pay for a day, from the pay rate in force then; null when not paid by the day, month or hour. */
+  async dayPayWithClient(client: PoolClient, employeeId: string, date: string): Promise<string | null> {
+    return dayPayOf(inForceOn(await this.repo.ratesFor(client, employeeId), date), date);
+  }
+
+  /** A trip's incentives, worked out when the owner closes it — once; inside the close's transaction. */
+  async recordTripIncentivesWithClient(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    trip: { id: string; employeeId: string; workDate: string },
+    lines: IncentiveLine[],
+  ): Promise<void> {
+    await this.repo.insertTripIncentives(client, tenantId, userId, trip.id, trip.employeeId, trip.workDate, lines);
+  }
+
+  tripIncentivesWithClient(client: PoolClient, filter: { tripId?: string; employeeId?: string; from?: string; to?: string }): Promise<TripIncentiveRow[]> {
+    return this.repo.tripIncentives(client, filter);
+  }
+
+  /**
+   * A driver's fixed pay over days (My Earnings): what their pay rate gives
+   * for the work they did, settled or not — no incentives, adjustments or
+   * advances (those are the settlement's).
+   */
+  async fixedPay(tenantId: string, employeeId: string, from: string, to: string): Promise<string> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const [worker] = await this.repo.workers(client, to, employeeId);
+      if (!worker) return '0.00';
+      const settings = await this.repo.settings(client);
+      const work = await this.repo.workBetween(client, employeeId, from, to);
+      const result = computeEarnings({
+        periodStart: from,
+        periodEnd: to,
+        roleType: worker.roleType,
+        skillCategory: worker.skillCategory,
+        stateCode: worker.workStateCode ?? settings.defaultStateCode,
+        joinedOn: worker.joinedOn,
+        leftOn: worker.leftOn,
+        rates: await this.repo.ratesFor(client, employeeId),
+        work: work.map<WorkDay>((a) => ({ date: a.workDate, status: a.status as WorkDay['status'], kind: a.kind, hours: a.hours, units: a.units })),
+        incentiveRules: [],
+        minimumWages: [],
+        minWagePolicy: 'warn',
+        adjustments: [],
+        advances: [],
+        maxAdvanceRecovery: null,
+      });
+      return sumMoney(result.lines.filter((l) => l.kind === 'basic').map((l) => l.amount));
+    });
+  }
+
+  /** A worker's own settlements, newest first, with their lines — never a draft. */
+  async workerSettlements(tenantId: string, employeeId: string): Promise<SettlementRecord[]> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const list = (await this.repo.settlements(client, null, employeeId, null, null)).filter((s) => s.status === 'approved' || s.status === 'paid');
+      const out: SettlementRecord[] = [];
+      for (const s of list.slice(0, 26)) out.push(await this.settlementDetail(client, s.id));
+      return out;
+    });
+  }
+
+  /** The driver says they received a paid settlement (driver app D7); again changes nothing. */
+  acknowledgeReceipt(tenantId: string, userId: string, employeeId: string, settlementId: string): Promise<SettlementRecord> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const s = await this.repo.findSettlement(client, settlementId);
+      if (!s || s.employeeId !== employeeId) throw new NotFoundException('Settlement not found');
+      if (s.status !== 'paid') throw new ConflictException(`Settlement #${s.settlementNumber} isn't paid yet`);
+      const first = s.receivedAt === null;
+      await this.repo.markReceived(client, settlementId, employeeId, userId);
+      if (first) {
+        await this.audit.record(client, { tenantId, actorUserId: userId, action: 'update', entityType: 'settlement', entityId: settlementId, before: { receivedAt: null }, after: { received: true } });
+      }
+      return this.settlementDetail(client, settlementId);
     });
   }
 

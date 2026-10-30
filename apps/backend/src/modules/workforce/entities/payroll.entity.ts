@@ -146,6 +146,8 @@ export interface SettlementRecord {
   paymentReference: string | null;
   voidedAt: Date | null;
   voidReason: string | null;
+  /** The driver said they received it (driver app D7). */
+  receivedAt: Date | null;
   version: number;
   lines?: SettlementLine[];
   daysWorked?: number;
@@ -164,5 +166,33 @@ export interface EarningsPreview {
   net: string;
   warnings: string[];
   assignmentIds: string[];
+  /** The trips' incentives it pays (driver app D7). */
+  tripIncentiveIds: string[];
   blockedBy: string | null; // why no settlement can be drafted (e.g. an overlapping one)
+}
+
+/** What a driver earned on a trip, worked out when the owner closed it (driver app D7). */
+export interface TripIncentiveRow {
+  id: string;
+  tripId: string;
+  tripNumber: string;
+  employeeId: string;
+  kind: string;
+  base: string;
+  percent: string;
+  amount: string;
+  /** Why it is what it is. */
+  detail: string;
+  workDate: string;
+  settlementId: string | null;
+}
+
+/** The owner's incentive rules (Settings → Rates & rules), with what each is a percentage of. */
+export interface DriverIncentiveSettings {
+  /** 0 until saved: every incentive off. */
+  version: number;
+  targetKmPerLitre: string | null;
+  nightFrom: string;
+  nightUntil: string;
+  rules: { kind: string; label: string; base: string; enabled: boolean; percent: string; suggestedPercent: string }[];
 }

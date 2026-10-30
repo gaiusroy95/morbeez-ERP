@@ -18,4 +18,9 @@ export interface CustomerCollectionRecord {
   intoDriverFloat: boolean;
   /** The Idempotency-Key it was recorded under, when the client sent one. */
   clientRef: string | null;
+  /** Who paid (driver app D4): the customer, or someone on their behalf. */
+  payer: 'customer' | 'third_party';
+  payerName: string | null;
+  /** UPI or transfer: its reference (UTR). */
+  reference: string | null;
 }

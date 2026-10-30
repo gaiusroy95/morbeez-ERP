@@ -114,9 +114,52 @@ interface ApiService {
         @Part("productId") productId: okhttp3.RequestBody? = null,
     ): TripStopPhotoResponse
 
+    /** Return (D4): the closing KM when the vehicle is back. */
+    @POST("logistics/trips/{tripId}/closing-km")
+    suspend fun returnTrip(@Path("tripId") tripId: String, @Body body: ReturnTripRequest): TripResponse
+
+    /** Collections (D4): the customers delivered on the trip, with what each owes in all. */
+    @GET("logistics/trips/{tripId}/collections")
+    suspend fun getTripCollections(@Path("tripId") tripId: String): TripCollectionsResponse
+
+    /** A customer disputes part of what they owe (D4). */
+    @POST("logistics/trips/{tripId}/stops/{stopId}/disputes")
+    suspend fun raiseStopDispute(@Path("tripId") tripId: String, @Path("stopId") stopId: String, @Body body: RaiseDisputeRequest): InvoiceDisputeResponse
+
     /** Start Trip (D3): the delivery run sets off. */
     @POST("logistics/trips/{tripId}/start-deliveries")
     suspend fun startDeliveries(@Path("tripId") tripId: String): TripResponse
+
+    // ---- Backhaul (D5) ----
+
+    @GET("logistics/trips/{tripId}/backhauls")
+    suspend fun listBackhauls(@Path("tripId") tripId: String): List<BackhaulResponse>
+
+    /** One the driver took on the road; the same id again is the same backhaul. */
+    @POST("logistics/trips/{tripId}/backhauls")
+    suspend fun createBackhaul(@Path("tripId") tripId: String, @Body body: CreateBackhaulRequest): BackhaulResponse
+
+    @POST("logistics/trips/{tripId}/backhauls/{backhaulId}/accept")
+    suspend fun acceptBackhaul(@Path("tripId") tripId: String, @Path("backhaulId") backhaulId: String): BackhaulResponse
+
+    @POST("logistics/trips/{tripId}/backhauls/{backhaulId}/skip")
+    suspend fun skipBackhaul(@Path("tripId") tripId: String, @Path("backhaulId") backhaulId: String, @Body body: SkipBackhaulRequest): BackhaulResponse
+
+    /** Pickup reached, loaded, drop reached, completed — in that order. */
+    @POST("logistics/trips/{tripId}/backhauls/{backhaulId}/steps")
+    suspend fun backhaulStep(@Path("tripId") tripId: String, @Path("backhaulId") backhaulId: String, @Body body: BackhaulStepRequest): BackhaulResponse
+
+    @POST("logistics/trips/{tripId}/backhauls/{backhaulId}/payment")
+    suspend fun payBackhaul(@Path("tripId") tripId: String, @Path("backhaulId") backhaulId: String, @Body body: BackhaulPaymentRequest): BackhaulResponse
+
+    @Multipart
+    @POST("logistics/trips/{tripId}/backhauls/{backhaulId}/photos")
+    suspend fun uploadBackhaulPhoto(
+        @Path("tripId") tripId: String,
+        @Path("backhaulId") backhaulId: String,
+        @Part("photoType") photoType: okhttp3.RequestBody,
+        @Part file: MultipartBody.Part,
+    ): BackhaulPhotoResponse
 
     /** The driver reached the stop (D2: Start pickup). */
     @POST("logistics/trips/{tripId}/stops/{stopId}/arrive")
@@ -142,6 +185,71 @@ interface ApiService {
         @Body body: RecordExpenseRequest,
         @Header("Idempotency-Key") idempotencyKey: String,
     ): TripExpenseResponse
+
+    @Multipart
+    @POST("logistics/trips/{tripId}/expenses/{expenseId}/photos")
+    suspend fun uploadExpensePhoto(
+        @Path("tripId") tripId: String,
+        @Path("expenseId") expenseId: String,
+        @Part("photoType") photoType: okhttp3.RequestBody,
+        @Part file: MultipartBody.Part,
+    ): ExpensePhotoResponse
+
+    // ---- The driver's own records (D6) ----
+
+    @GET("logistics/trips/mine/expenses")
+    suspend fun getMyExpenses(@Query("from") from: String? = null, @Query("to") to: String? = null): MyExpensesResponse
+
+    @GET("logistics/trips/mine/approvals")
+    suspend fun getMyApprovals(): DriverApprovalsResponse
+
+    @GET("logistics/trips/mine/history")
+    suspend fun getMyHistory(@Query("from") from: String? = null, @Query("to") to: String? = null): TripHistoryResponse
+
+    @GET("logistics/trips/mine/vehicle")
+    suspend fun getMyVehicle(): MyVehicleResponse
+
+    @GET("logistics/trips/mine/profile")
+    suspend fun getMyProfile(): DriverProfileResponse
+
+    @GET("logistics/trips/mine/earnings")
+    suspend fun getMyEarnings(@Query("period") period: String): MyEarningsResponse
+
+    @GET("logistics/trips/mine/settlements")
+    suspend fun getMySettlements(): List<DriverSettlementResponse>
+
+    /** "I received it": once paid; again changes nothing. */
+    @POST("logistics/trips/mine/settlements/{settlementId}/received")
+    suspend fun acknowledgeSettlement(@Path("settlementId") settlementId: String): DriverSettlementResponse
+
+    @GET("logistics/trips/{tripId}/summary")
+    suspend fun getTripSummary(@Path("tripId") tripId: String): DriverTripSummaryResponse
+
+    // ---- The phone's sync, for the office (owner Phase 8) ----
+
+    @POST("devices/sync-report")
+    suspend fun reportSync(@Body body: SyncReportRequest)
+
+    // ---- Chat with the office (D9) ----
+
+    @GET("chat/mine")
+    suspend fun getMyChat(): ChatThreadResponse
+
+    /** Sent again with the same id, it's the same message. */
+    @POST("chat/mine")
+    suspend fun sendChatMessage(@Body body: SendChatMessageRequest): ChatMessageResponse
+
+    @POST("chat/mine/read")
+    suspend fun readChat(@Body body: ChatReadRequest): ChatReadResponse
+
+    /** The photo a message said would follow — once it's on the server. */
+    @Multipart
+    @POST("chat/messages/{messageId}/photo")
+    suspend fun uploadChatPhoto(@Path("messageId") messageId: String, @Part file: MultipartBody.Part): ChatMessageResponse
+
+    @Streaming
+    @GET("chat/messages/{messageId}/photo")
+    suspend fun getChatPhoto(@Path("messageId") messageId: String): okhttp3.ResponseBody
 
     // ---- Collections ----
 

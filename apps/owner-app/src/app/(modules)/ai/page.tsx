@@ -26,7 +26,7 @@ const SECTIONS: { value: Section; label: string; needs?: string }[] = [
 ];
 const TYPE_FILTER: { value: AiRecommendationType | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
-  ...(['procurement', 'pricing', 'logistics_route', 'logistics_load', 'customer_terms', 'exception'] as AiRecommendationType[]).map((t) => ({ value: t, label: TYPE_LABEL[t] })),
+  ...(['procurement', 'pricing', 'order', 'logistics_route', 'logistics_load', 'customer_terms', 'exception'] as AiRecommendationType[]).map((t) => ({ value: t, label: TYPE_LABEL[t] })),
 ];
 const SUBTITLE = 'What the numbers suggest. You decide — nothing here changes anything until you act on it.';
 

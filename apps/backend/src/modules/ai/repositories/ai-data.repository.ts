@@ -22,7 +22,8 @@ export class AiDataRepository {
     return r.rows[0];
   }
 
-  async products(client: PoolClient): Promise<{ id: string; name: string; uom: string; base_price: string; version: number }[]> {
+  /** Active products; base_price is null until the owner sets one. */
+  async products(client: PoolClient): Promise<{ id: string; name: string; uom: string; base_price: string | null; version: number }[]> {
     const r = await client.query(`SELECT id, name, base_uom AS uom, base_price::text AS base_price, version FROM trading_partners.product WHERE status = 'active' ORDER BY name`);
     return r.rows;
   }
@@ -394,6 +395,105 @@ export class AiDataRepository {
       [since],
     );
     return r.rows;
+  }
+
+  // ---- Customers' orders (owner Phase 8) ----
+
+  /** What each customer ordered, by the day it was for (its delivery date, else the day it was placed) and product. */
+  async customerOrderDays(client: PoolClient, tz: string, from: string, to: string): Promise<{ customer_id: string; customer_name: string; day: string; product_id: string; qty: number }[]> {
+    const r = await client.query(
+      `SELECT o.customer_id, c.name AS customer_name, COALESCE(o.delivery_date, (o.created_at AT TIME ZONE $1)::date)::text AS day,
+              l.product_id, SUM(l.quantity)::float8 AS qty
+       FROM commerce.customer_order o
+       JOIN commerce.customer_order_line l ON l.order_id = o.id
+       JOIN trading_partners.customer c ON c.id = o.customer_id
+       WHERE o.status <> 'cancelled' AND NOT c.is_walk_in AND c.status = 'active'
+         AND COALESCE(o.delivery_date, (o.created_at AT TIME ZONE $1)::date) BETWEEN $2::date AND $3::date
+       GROUP BY 1, 2, 3, 4`,
+      [tz, from, to],
+    );
+    return r.rows;
+  }
+
+  /** Orders still to deliver on [day], line by line. */
+  async ordersFor(client: PoolClient, day: string): Promise<{ order_id: string; number: number; customer_id: string; customer_name: string; product_id: string; qty: number }[]> {
+    const r = await client.query(
+      `SELECT o.id AS order_id, o.number, o.customer_id, c.name AS customer_name, l.product_id, SUM(l.quantity)::float8 AS qty
+       FROM commerce.customer_order o
+       JOIN commerce.customer_order_line l ON l.order_id = o.id
+       JOIN trading_partners.customer c ON c.id = o.customer_id
+       WHERE o.status IN ('placed', 'confirmed') AND o.delivery_date = $1::date AND NOT c.is_walk_in
+       GROUP BY 1, 2, 3, 4, 5`,
+      [day],
+    );
+    return r.rows;
+  }
+
+  /** The price each customer was last charged for each product they order. */
+  async lastPrices(client: PoolClient): Promise<Map<string, string>> {
+    const r = await client.query(
+      `SELECT DISTINCT ON (o.customer_id, l.product_id) o.customer_id, l.product_id, l.unit_price::text AS price
+       FROM commerce.customer_order o JOIN commerce.customer_order_line l ON l.order_id = o.id
+       WHERE o.status <> 'cancelled'
+       ORDER BY o.customer_id, l.product_id, o.created_at DESC`,
+    );
+    return new Map(r.rows.map((x) => [`${x.customer_id}:${x.product_id}`, x.price as string]));
+  }
+
+  /**
+   * Delivering, per kilo, over the window: the trips' expenses (but those the
+   * owner rejected — the driver's to settle) and fuel, over the kilos their
+   * completed deliveries carried.
+   */
+  async deliveryCost(client: PoolClient, tz: string, from: string, to: string): Promise<{ cost: string; kg: string }> {
+    const r = await client.query(
+      `WITH stops AS (
+         SELECT s.trip_id, s.order_id FROM fulfilment.trip_stop s
+         JOIN fulfilment.trip t ON t.id = s.trip_id
+         WHERE s.stop_type = 'delivery' AND s.status = 'completed' AND (s.completed_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       ),
+       kg AS (
+         SELECT COALESCE(SUM(CASE p.base_uom WHEN 'kg' THEN COALESCE(l.delivered_quantity, l.quantity) WHEN 'g' THEN COALESCE(l.delivered_quantity, l.quantity) / 1000 END), 0) AS kg
+         FROM stops s JOIN commerce.customer_order_line l ON l.order_id = s.order_id JOIN trading_partners.product p ON p.id = l.product_id
+       ),
+       trips AS (SELECT DISTINCT trip_id FROM stops)
+       SELECT (COALESCE((SELECT SUM(e.amount) FROM fulfilment.trip_expense e WHERE e.trip_id IN (SELECT trip_id FROM trips) AND e.decision IS DISTINCT FROM 'rejected'), 0)
+               + COALESCE((SELECT SUM(f.amount) FROM fleet.fuel_log f WHERE f.trip_id IN (SELECT trip_id FROM trips)), 0))::numeric(14,2)::text AS cost,
+              (SELECT kg FROM kg)::numeric(14,3)::text AS kg`,
+      [tz, from, to],
+    );
+    return r.rows[0];
+  }
+
+  /** Customers with money fallen due by today, net of credit on account — as Collections counts it. */
+  async dueCustomers(client: PoolClient, limit: number): Promise<{ customer_id: string; due_now: string; due_date: string; overdue_days: number }[]> {
+    const r = await client.query(
+      `WITH today AS (SELECT (now() AT TIME ZONE t.timezone)::date AS d FROM tenant.tenant t WHERE t.id = current_tenant_id()),
+       credit AS (SELECT customer_id, SUM(unapplied) AS unapplied FROM money.customer_payment_balance GROUP BY customer_id),
+       owed AS (
+         SELECT c.id AS customer_id,
+                COALESCE(SUM(b.outstanding) FILTER (WHERE b.due_date <= (SELECT d FROM today)), 0) - COALESCE(MAX(cr.unapplied), 0) AS due_now,
+                MIN(b.due_date) FILTER (WHERE b.outstanding > 0 AND b.due_date <= (SELECT d FROM today)) AS due_date
+         FROM trading_partners.customer c
+         LEFT JOIN money.invoice_balance b ON b.customer_id = c.id
+         LEFT JOIN credit cr ON cr.customer_id = c.id
+         WHERE NOT c.is_walk_in
+         GROUP BY c.id
+       )
+       SELECT customer_id, due_now::numeric(14,2)::text AS due_now, due_date::text AS due_date, ((SELECT d FROM today) - due_date)::int AS overdue_days
+       FROM owed WHERE due_now > 0
+       ORDER BY due_now * GREATEST((SELECT d FROM today) - due_date, 1) DESC, customer_id
+       LIMIT $1`,
+      [limit],
+    );
+    return r.rows;
+  }
+
+  /** Who to call: each customer's phone and place (resolved at read time, PIPE.5). */
+  async customerContacts(client: PoolClient, ids: string[]): Promise<Map<string, { name: string; phone: string | null; place: string | null }>> {
+    if (!ids.length) return new Map();
+    const r = await client.query(`SELECT id, name, contact->>'phone' AS phone, place FROM trading_partners.customer WHERE id = ANY($1::uuid[])`, [ids]);
+    return new Map(r.rows.map((x) => [x.id as string, { name: x.name as string, phone: x.phone as string | null, place: x.place as string | null }]));
   }
 
   /** Every name the inbox may show, resolved at read time (AI System PIPE.5). */

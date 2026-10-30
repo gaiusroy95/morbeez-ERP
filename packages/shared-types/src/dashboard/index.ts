@@ -166,3 +166,103 @@ export interface ProfitInsights {
   previous: { revenue: string; netProfit: string };
   products: ProductProfit[];
 }
+
+// ---- Approvals & Exceptions (owner app redesign Phase 7, screen 17) ----
+
+export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close';
+export type InboxTab = 'expense' | 'price' | 'other';
+
+/** GET dashboard/approvals — one thing waiting for the owner; each decision goes through its own module. */
+export interface InboxItem {
+  key: string;
+  kind: InboxKind;
+  tab: InboxTab;
+  subject: string;
+  detail: string | null;
+  amount: string | null;
+  at: string;
+  by: string | null;
+  refs: {
+    tripId?: string;
+    expenseId?: string;
+    approvalRequestId?: string;
+    approvalVersion?: number;
+    purchaseOrderId?: string;
+    orderId?: string;
+    spotSaleId?: string;
+    recommendationId?: string;
+    disputeId?: string;
+    customerId?: string;
+  };
+}
+
+export interface ApprovalsInbox {
+  counts: { all: number; expense: number; price: number; other: number };
+  items: InboxItem[];
+}
+
+// ---- Reports (owner app redesign Phase 7, screen 18) ----
+
+export type ReportKind =
+  | 'sales'
+  | 'procurement'
+  | 'customers'
+  | 'products'
+  | 'farmers'
+  | 'trips'
+  | 'vehicles'
+  | 'workforce'
+  | 'customer-list'
+  | 'farmer-list'
+  | 'product-list';
+
+export type ReportColumnKind = 'text' | 'date' | 'money' | 'qty' | 'int' | 'pct';
+export interface ReportColumn {
+  key: string;
+  label: string;
+  kind: ReportColumnKind;
+  total?: boolean;
+}
+export type ReportCell = string | number | null;
+
+/** GET reports/:kind?from&to */
+export interface ReportTable {
+  kind: ReportKind;
+  title: string;
+  from: string | null;
+  to: string | null;
+  columns: ReportColumn[];
+  rows: Record<string, ReportCell>[];
+  totals: Record<string, ReportCell> | null;
+  truncated: boolean;
+}
+
+// ---- Users & permissions, My Profile (owner app redesign Phase 7) ----
+
+/** GET users/team */
+export interface TeamMember {
+  userId: string;
+  login: string;
+  phone: string | null;
+  email: string | null;
+  status: 'active' | 'deactivated';
+  roles: { id: string; name: string }[];
+  workerName: string | null;
+  createdAt: string;
+}
+
+/** GET users/roles */
+export interface RoleSummary {
+  id: string;
+  name: string;
+  permissions: string[];
+  members: number;
+}
+
+/** GET users/me/activity */
+export interface ActivityEntry {
+  action: string;
+  entityType: string;
+  entityId: string;
+  at: string;
+}

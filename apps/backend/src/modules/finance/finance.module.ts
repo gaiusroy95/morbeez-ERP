@@ -46,6 +46,6 @@ import { FinanceCostsRepository } from './repositories/finance-costs.repository'
     FinanceCostsRepository,
     CollectionsRepository,
   ],
-  exports: [ReceivablesService, PayablesService, LedgerService],
+  exports: [ReceivablesService, PayablesService, LedgerService, DisputesService],
 })
 export class FinanceModule {}

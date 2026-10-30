@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { AiRecommendation, AiRecommendationType } from '@morbeez/shared-types';
 import { AI_DECIDE_PERMISSION } from '@morbeez/shared-types';
 import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
-import { useActiveDrivers, useActiveFarmers } from '@/lib/hooks/use-lookups';
+import { useActiveDrivers, useActiveFarmers, useProductName } from '@/lib/hooks/use-lookups';
+import { useT } from '@/lib/i18n';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { optionalText, parseDecimal, parseMoney, parseQuantity, parseWholeNumber } from '@/lib/parse';
 import { displayLogin } from '@/lib/phone';
@@ -24,6 +26,7 @@ export const TYPE_LABEL: Record<AiRecommendationType, string> = {
   logistics_load: 'Load',
   customer_terms: 'Customer',
   exception: 'Worth a look',
+  order: 'Order',
 };
 const CONFIDENCE: Record<AiRecommendation['confidence'], { label: string; tone: 'done' | 'attention' | 'muted' }> = {
   solid: { label: 'Solid', tone: 'done' },
@@ -40,10 +43,12 @@ function record(id: string, body: unknown) {
 }
 
 export function SuggestionCard({ rec, currency, timeZone, permissions }: { rec: AiRecommendation; currency: string; timeZone: string; permissions: string[] }) {
+  const t = useT();
   const [dialog, setDialog] = useState<'act' | 'dismiss' | null>(null);
   const canDecide = permissions.includes(AI_DECIDE_PERMISSION[rec.type]);
   const c = CONFIDENCE[rec.confidence];
   const review = rec.proposal.action === 'review' || rec.proposal.action === 'review_customer';
+  const check = rec.proposal.action === 'confirm_order';
   return (
     <article className="suggestion" data-type={rec.type} aria-labelledby={`s-${rec.id}`}>
       <header className="suggestion-head">
@@ -77,10 +82,15 @@ export function SuggestionCard({ rec, currency, timeZone, permissions }: { rec: 
         {rec.status === 'open' && canDecide && (
           <ActionBar>
             <button type="button" className="button button-primary" onClick={() => setDialog('act')}>
-              {review ? 'I looked into it' : 'Use this…'}
+              {check ? t('Checked with them') : review ? 'I looked into it' : t('Use this…')}
             </button>
+            {check && (
+              <Link className="button" href={`/orders?open=${s(rec.proposal.orderId)}`}>
+                {t('Open order')}
+              </Link>
+            )}
             <button type="button" className="button" onClick={() => setDialog('dismiss')}>
-              {review ? 'Not useful' : 'Dismiss'}
+              {review || check ? 'Not useful' : 'Dismiss'}
             </button>
           </ActionBar>
         )}
@@ -141,6 +151,8 @@ function ActDialog({ rec, currency, onClose }: { rec: AiRecommendation; currency
       return <TripDialog rec={rec} currency={currency} onClose={onClose} />;
     case 'credit_terms':
       return <TermsDialog rec={rec} onClose={onClose} />;
+    case 'delivery_order':
+      return <OrderDialog rec={rec} currency={currency} onClose={onClose} />;
     default:
       return <ReviewedDialog rec={rec} onClose={onClose} />;
   }
@@ -390,6 +402,91 @@ function TermsDialog({ rec, onClose }: { rec: AiRecommendation; onClose: () => v
       <Field label="Payment terms (days)">{(pp) => <input {...pp} inputMode="numeric" value={terms} onChange={(e) => setTerms(e.target.value)} />}</Field>
       <Field label="Late-payment charge (% a month)">{(pp) => <input {...pp} inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />}</Field>
       <Field label="Grace before it applies (days)">{(pp) => <input {...pp} inputMode="numeric" value={grace} onChange={(e) => setGrace(e.target.value)} />}</Field>
+    </FormDialog>
+  );
+}
+
+type OrderLineProposal = { productId: string; uom: string; quantity: string; unitPrice: string; low: string; high: string };
+
+/**
+ * A customer's usual order (owner Phase 8): the order itself, placed under
+ * the owner's name with the ordinary form's rules — confirmed at once when
+ * credit allows, as Create Delivery Order does. Anything changed is recorded
+ * as a changed suggestion.
+ */
+function OrderDialog({ rec, currency, onClose }: { rec: AiRecommendation; currency: string; onClose: () => void }) {
+  const t = useT();
+  const p = rec.proposal as unknown as P & { customerId: string; deliveryDate: string; lines: OrderLineProposal[] };
+  const productName = useProductName();
+  const [date, setDate] = useState(p.deliveryDate);
+  const [lines, setLines] = useState(p.lines.map((l) => ({ ...l, quantity: String(Number(l.quantity)), unitPrice: String(Number(l.unitPrice)), keep: true })));
+  const [problem, setProblem] = useState<string | null>(null);
+  const save = useAction(
+    async (body: { date: string; lines: { productId: string; quantity: number; unitPrice: number }[] }) => {
+      const order = await apiSend<{ id: string }>('POST', 'orders', { customerId: p.customerId, deliveryDate: body.date, confirm: true, lines: body.lines });
+      await record(rec.id, {
+        outcome: 'acted',
+        submitted: { lines: body.lines.map((l) => ({ productId: l.productId, quantity: l.quantity.toFixed(3) })) },
+        resultRef: { kind: 'customer_order', id: order.id },
+      });
+    },
+    [...WRITES, KEYS.orders],
+    onClose,
+  );
+  const set = (i: number, patch: Partial<(typeof lines)[number]>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  return (
+    <FormDialog
+      title={t('Order — {name}', { name: rec.subjectName ?? '' })}
+      description={<p>{t('Their usual order, placed under your name and confirmed if their credit allows. Change anything they told you.')}</p>}
+      submitLabel={t('Place order')}
+      pending={save.isPending}
+      error={problem ?? save.error}
+      onClose={onClose}
+      onSubmit={() => {
+        const kept: { productId: string; quantity: number; unitPrice: number }[] = [];
+        for (const l of lines.filter((x) => x.keep)) {
+          const q = parseQuantity(l.quantity, `the quantity of ${productName(l.productId)}`);
+          const pr = parseMoney(l.unitPrice, `the price of ${productName(l.productId)}`, true);
+          if (!q.ok) return setProblem(q.error);
+          if (!pr.ok) return setProblem(pr.error);
+          kept.push({ productId: l.productId, quantity: q.value, unitPrice: pr.value });
+        }
+        if (!kept.length) return setProblem(t('Keep at least one product.'));
+        if (!date) return setProblem(t('Choose the delivery date.'));
+        setProblem(null);
+        save.mutate({ date, lines: kept });
+      }}
+    >
+      <Field label={t('Delivery date')}>{(pp) => <input {...pp} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
+      <table className="form-wide table order-lines">
+        <thead>
+          <tr>
+            <th>{t('Product')}</th>
+            <th>{t('Quantity')}</th>
+            <th>{t('Price ({currency})', { currency })}</th>
+            <th aria-label={t('Keep')} />
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l, i) => (
+            <tr key={l.productId} data-dropped={!l.keep || undefined}>
+              <td>
+                {productName(l.productId)}
+                <span className="muted small-block">{t('Usually {low}–{high} {uom}', { low: Number(l.low), high: Number(l.high), uom: l.uom })}</span>
+              </td>
+              <td>
+                <input aria-label={t('Quantity of {name}', { name: productName(l.productId) })} inputMode="decimal" value={l.quantity} disabled={!l.keep} onChange={(e) => set(i, { quantity: e.target.value })} />
+              </td>
+              <td>
+                <input aria-label={t('Price of {name}', { name: productName(l.productId) })} inputMode="decimal" value={l.unitPrice} disabled={!l.keep} onChange={(e) => set(i, { unitPrice: e.target.value })} />
+              </td>
+              <td>
+                <input type="checkbox" aria-label={t('Keep {name}', { name: productName(l.productId) })} checked={l.keep} onChange={(e) => set(i, { keep: e.target.checked })} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </FormDialog>
   );
 }

@@ -32,4 +32,7 @@ data class TripEntity(
     val startedAt: String? = null,
     /** Start Trip (D3): when the delivery run set off. */
     val deliveryStartedAt: String? = null,
+    /** Return (D4): the odometer when back, and when. */
+    val closingKm: String? = null,
+    val returnedAt: String? = null,
 )

@@ -26,6 +26,8 @@ export interface TenantProfile {
   name: string;
   currency: string;
   timezone: string;
+  /** GSTIN, printed on tax invoices. */
+  taxRegistration?: string | null;
   /** "HH:MM" — when the business's day ends; day-off delegations end here. */
   operatingDayEnd?: string;
   ownerAwayUntil?: string | null;

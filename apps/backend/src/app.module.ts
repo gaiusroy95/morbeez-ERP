@@ -31,6 +31,8 @@ import { SpotSalesModule } from './modules/spot-sales/spot-sales.module';
 import { AiModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
+import { ChatModule } from './modules/chat/chat.module';
+import { DevicesModule } from './modules/devices/devices.module';
 import { RoutesModule } from './modules/routes/routes.module';
 
 // The modular monolith root. Each import below is a bounded context
@@ -71,6 +73,8 @@ import { RoutesModule } from './modules/routes/routes.module';
     AiModule,
     DashboardModule,
     AlertsModule,
+    ChatModule,
+    DevicesModule,
     RoutesModule,
   ],
   providers: [

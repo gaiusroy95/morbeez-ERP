@@ -173,12 +173,14 @@ const same = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
     check('…a product opens its lots, with their actions', (await page.locator('.detail').getByRole('button', { name: 'Shrinkage' }).count()) > 0);
 
     await page.goto(`${BASE}/collections`);
-    await page.waitForSelector('.day-tabs button');
+    // Customer / Farmer above (owner app Phase 7); the customer's Today / Pending / All below.
+    const views = '.day-tabs[aria-label="Which collections"] button';
+    await page.waitForSelector(views);
     // The counts arrive with the data, after the tabs are drawn.
-    await page.waitForFunction(() => /\(\d+\)/.test(document.querySelector('.day-tabs button:last-child')?.textContent ?? ''), null, { timeout: 15000 }).catch(() => {});
-    const tabs = await page.locator('.day-tabs button').allInnerTexts();
+    await page.waitForFunction((sel) => /\(\d+\)/.test(document.querySelector(`${sel}:last-child`)?.textContent ?? ''), views, { timeout: 15000 }).catch(() => {});
+    const tabs = await page.locator(views).allInnerTexts();
     check('Collections: Today / Pending / All with counts', /^Today \(\d+\)$/.test(tabs[0]) && /^Pending \(\d+\)$/.test(tabs[1]) && /^All \(\d+\)$/.test(tabs[2]), tabs.join(' | '));
-    await page.locator('.day-tabs button', { hasText: 'Pending' }).click();
+    await page.locator(views, { hasText: 'Pending' }).click();
     await page.waitForSelector('.collection-card:has-text("Annapurna Mess")');
     const dueCard = (await page.locator('.collection-card', { hasText: 'Annapurna Mess' }).textContent()).replace(/\s+/g, ' ');
     check('a pending card: what’s due, Due today, Pending, the balance', /₹6,200/.test(dueCard) && /Due today/.test(dueCard) && /Pending/.test(dueCard) && /Bal: ₹19,700/.test(dueCard), dueCard);

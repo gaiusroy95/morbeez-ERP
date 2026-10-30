@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -52,6 +53,18 @@ import com.morbeez.driver.ui.components.Tone
 import com.morbeez.driver.ui.components.drawGlow
 import com.morbeez.driver.ui.theme.Fresh
 
+/** Where the drawer's records go (D6, D7, D9): past trips, approvals, the vehicle, help, the profile, earnings and pay, the chat. */
+data class DrawerLinks(
+    val chat: () -> Unit = {},
+    val earnings: () -> Unit = {},
+    val settlements: () -> Unit = {},
+    val history: () -> Unit = {},
+    val approvals: () -> Unit = {},
+    val vehicle: () -> Unit = {},
+    val help: () -> Unit = {},
+    val profile: () -> Unit = {},
+)
+
 /**
  * The side drawer (client spec §1, design sheet "Side drawer"): the driver,
  * vehicle and trip; Operations, Trip, My, Approvals, Other; language,
@@ -68,6 +81,9 @@ fun DriverDrawer(
     onSync: () -> Unit,
     onSignOut: (discardUnsynced: Boolean, onResult: (LogoutResult) -> Unit) -> Unit,
     onSignedOut: () -> Unit,
+    onOpenCollections: () -> Unit = {},
+    onOpenBackhaul: () -> Unit = {},
+    links: DrawerLinks = DrawerLinks(),
 ) {
     val context = LocalContext.current
     val trip = state.trip
@@ -86,31 +102,41 @@ fun DriverDrawer(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             DrawerHeader(state)
             Section(R.string.drawer_operations) {
-                DrawerItem(Glyph.File, stringResource(R.string.expenses), enabled = trip != null) { trip?.let { t -> onNavigate { onOpenExpenses(t.id) } } }
-                DrawerItem(Glyph.Rupee, stringResource(R.string.drawer_collections), soon = true)
-                DrawerItem(Glyph.Truck, stringResource(R.string.drawer_backhaul), soon = true)
+                DrawerItem(Glyph.Chat, stringResource(R.string.chat_title), badge = state.chatUnread.takeIf { it > 0 }) { onNavigate(links.chat) }
+                DrawerItem(Glyph.File, stringResource(R.string.expenses)) { onNavigate { onOpenExpenses(trip?.id.orEmpty()) } }
+                DrawerItem(Glyph.Rupee, stringResource(R.string.drawer_collections), enabled = trip != null) { onNavigate(onOpenCollections) }
+                val offers = state.backhauls.count { it.status == "offered" }
+                DrawerItem(Glyph.Truck, stringResource(R.string.drawer_backhaul), enabled = trip != null, badge = offers.takeIf { it > 0 }) { onNavigate(onOpenBackhaul) }
             }
             Section(R.string.drawer_trip) {
                 DrawerItem(Glyph.Pin, stringResource(R.string.drawer_current_trip), enabled = trip != null) { onNavigate(onOpenTrip) }
-                DrawerItem(Glyph.Clock, stringResource(R.string.drawer_trip_history), soon = true)
+                DrawerItem(Glyph.Clock, stringResource(R.string.drawer_trip_history)) { onNavigate(links.history) }
             }
             Section(R.string.drawer_my) {
-                DrawerItem(Glyph.Wallet, stringResource(R.string.drawer_earnings), soon = true)
-                DrawerItem(Glyph.File, stringResource(R.string.drawer_settlements), soon = true)
+                DrawerItem(Glyph.Wallet, stringResource(R.string.drawer_earnings)) { onNavigate(links.earnings) }
+                DrawerItem(Glyph.File, stringResource(R.string.drawer_settlements)) { onNavigate(links.settlements) }
             }
             Section(R.string.drawer_approvals) {
-                DrawerItem(Glyph.Shield, stringResource(R.string.drawer_approvals), soon = true)
+                val counts = state.approvalCounts
+                DrawerItem(
+                    Glyph.Shield,
+                    stringResource(R.string.drawer_approvals),
+                    pills = listOfNotNull(
+                        counts?.pending?.takeIf { it > 0 }?.let { stringResource(R.string.appr_n_pending, it) to Tone.Attention },
+                        counts?.approved?.takeIf { it > 0 }?.let { stringResource(R.string.appr_n_approved, it) to Tone.Good },
+                    ),
+                ) { onNavigate(links.approvals) }
             }
             Section(R.string.drawer_other) {
-                DrawerItem(Glyph.Car, stringResource(R.string.drawer_vehicle), soon = true)
+                DrawerItem(Glyph.Car, stringResource(R.string.drawer_vehicle)) { onNavigate(links.vehicle) }
                 DrawerItem(Glyph.Sync, stringResource(R.string.drawer_sync), badge = state.link.waiting.takeIf { it > 0 }) { onNavigate(onOpenSync) }
-                DrawerItem(Glyph.Help, stringResource(R.string.drawer_help), soon = true)
+                DrawerItem(Glyph.Help, stringResource(R.string.drawer_help)) { onNavigate(links.help) }
             }
             HorizontalDivider(color = Fresh.border, modifier = Modifier.padding(vertical = 6.dp))
             val code = runCatching { AppLanguage.current(context) }.getOrDefault("en")
             val language = AppLanguage.CHOICES.firstOrNull { it.first == code }?.second
             DrawerItem(Glyph.Globe, stringResource(R.string.language), trailing = language) { choosingLanguage = true }
-            DrawerItem(Glyph.User, stringResource(R.string.drawer_profile), soon = true)
+            DrawerItem(Glyph.User, stringResource(R.string.drawer_profile)) { onNavigate(links.profile) }
         }
         HorizontalDivider(color = Fresh.border)
         Row(
@@ -226,20 +252,30 @@ private fun DrawerItem(
     soon: Boolean = false,
     badge: Int? = null,
     trailing: String? = null,
+    pills: List<Pair<String, Tone>> = emptyList(),
     onClick: () -> Unit = {},
 ) {
     val active = enabled && !soon
     Row(
         Modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .heightIn(min = 52.dp)
             .clickable(enabled = active, role = Role.Button, onClick = onClick)
+            .padding(vertical = if (pills.isEmpty()) 0.dp else 8.dp)
             .padding(horizontal = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         GlyphIcon(glyph, if (active) Fresh.primary else Fresh.inkFaint, size = 22.dp)
         Spacer(Modifier.width(16.dp))
-        Text(label, style = MaterialTheme.typography.titleMedium, color = if (active) Fresh.ink else Fresh.inkFaint, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.titleMedium, color = if (active) Fresh.ink else Fresh.inkFaint)
+            // What waits and what's decided, under the label: the drawer is too narrow beside it.
+            if (pills.isNotEmpty()) {
+                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                    pills.forEach { (text, tone) -> Pill(text, tone) }
+                }
+            }
+        }
         when {
             soon -> Pill(stringResource(R.string.soon), Tone.Neutral)
             badge != null -> Pill("$badge", Tone.Attention)

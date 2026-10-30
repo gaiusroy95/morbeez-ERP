@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { FilterTabs, PageHeader } from '@/components/ui/ListControls';
 import { presetRange, RangeControls } from '@/components/accounting/RangeControls';
-import { AddVehicleDialog, VehiclePanel, VehiclesTable } from '@/components/fleet/Vehicles';
+import { AddVehicleDialog } from '@/components/fleet/Vehicles';
+import { PeopleTabs, VehicleCards, VehicleDetails } from '@/components/people/People';
+import { useOnTheRoad } from '@/lib/hooks/use-admin';
 import { AssetsView, EconomicsView, FleetSettingsView, FuelLogView, HireBillsView, LoansView } from '@/components/fleet/Books';
 import type { DateRange } from '@/lib/hooks/use-accounting';
 import { useAssets, useEconomics, useFleet, useFleetSettings, useFuelLog, useHireBills, useLoans } from '@/lib/hooks/use-fleet';
@@ -62,6 +64,8 @@ function Vehicles({ today }: { today: string }) {
 
   const [section, setSection] = useState<Section>('fleet');
   const [vehicle, setVehicle] = useState<string | null>(null);
+  // A vehicle just added opens on its full record, to record its fuel and documents.
+  const [justAdded, setJustAdded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [fuelRange, setFuelRange] = useState<DateRange>(() => presetRange('month', today));
   const [costRange, setCostRange] = useState<DateRange>(() => presetRange('last_month', today));
@@ -82,6 +86,7 @@ function Vehicles({ today }: { today: string }) {
   };
 
   const fleet = useFleet();
+  const road = useOnTheRoad(can('logistics:dispatch'));
   const fuel = useFuelLog(section === 'fuel' ? fuelRange : null);
   const assets = useAssets(section === 'assets');
   const loans = useLoans(section === 'loans');
@@ -91,33 +96,38 @@ function Vehicles({ today }: { today: string }) {
 
   return (
     <div className="stack">
-      <PageHeader
-        title="Vehicles"
-        subtitle={SUBTITLE}
-        actions={
-          can('vehicles:write') &&
-          section === 'fleet' && (
-            <button type="button" className="button button-primary" onClick={() => setAdding(true)}>
-              Add a vehicle
-            </button>
-          )
-        }
-      />
+      <h1 className="page-title visually-hidden">Vehicles</h1>
+      <PeopleTabs active="vehicles" />
       <FilterTabs label="Vehicles section" options={SECTIONS} value={section} onChange={(v) => v !== 'all' && choose(v)} />
 
       {section === 'fleet' && (
         <div className="split" data-detail={vehicle ? 'open' : undefined}>
-          <Loaded title="Fleet" query={fleet}>
-            {(data) => <VehiclesTable vehicles={data} currency={currency} selected={vehicle} onSelect={setVehicle} />}
-          </Loaded>
+          <div className="list-screen">
+            {fleet.isPending ? (
+              <SkeletonLines lines={6} height={64} />
+            ) : fleet.error || !fleet.data ? (
+              <ErrorState error={fleet.error} onRetry={() => fleet.refetch()} />
+            ) : (
+              <VehicleCards
+                vehicles={fleet.data}
+                onTheRoad={road.data ?? []}
+                selected={vehicle}
+                onSelect={setVehicle}
+                onAdd={can('vehicles:write') ? () => setAdding(true) : undefined}
+              />
+            )}
+          </div>
           {vehicle && (
-            <VehiclePanel
+            <VehicleDetails
               key={vehicle}
               id={vehicle}
               currency={currency}
               today={today}
               canWrite={can('vehicles:write')}
               canFinance={can('fleet:finance')}
+              canSeeTrips={can('logistics:dispatch')}
+              onTheRoad={road.data ?? []}
+              initialFull={justAdded === vehicle}
               onClose={() => setVehicle(null)}
             />
           )}
@@ -158,6 +168,7 @@ function Vehicles({ today }: { today: string }) {
           onClose={() => setAdding(false)}
           onAdded={(id) => {
             setAdding(false);
+            setJustAdded(id);
             setVehicle(id);
           }}
         />

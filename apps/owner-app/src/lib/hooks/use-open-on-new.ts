@@ -9,6 +9,20 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
  * which adds who it's for (?customer=…). The form gets the parameters; they
  * are then removed, so Back or a reload doesn't open the form again.
  */
+/**
+ * Opens a record when a page is reached with ?open=<id> — from the
+ * Approvals inbox's Review (redesign Phase 7) and Collections' View.
+ */
+export function useOpenParam(open: (id: string) => void) {
+  const params = useSearchParams();
+  const opening = params.get('open');
+  useEffect(() => {
+    if (opening) open(opening);
+    // Only when the parameter changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening]);
+}
+
 export function useOpenOnNew(open: (params: URLSearchParams) => void) {
   const params = useSearchParams();
   const router = useRouter();

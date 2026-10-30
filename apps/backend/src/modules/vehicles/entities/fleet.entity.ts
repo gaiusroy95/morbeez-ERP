@@ -39,9 +39,15 @@ export interface FuelRecord {
   litres: string;
   amount: string;
   odometerKm: number | null;
+  /** Filled to the brim: mileage runs from one full tank to the next. */
+  fullTank: boolean;
+  /** The fuel log's station; a driver's fill: their note (the pump). */
   station: string | null;
-  paidFrom: PaidFrom;
+  /** A driver's fill on a trip is paid from the trip's cash. */
+  paidFrom: PaidFrom | 'cash_with_drivers';
   tripId: string | null;
+  /** The owner's fuel log, or a fill a driver recorded on a trip (driver app D6). */
+  source: 'fuel_log' | 'trip_expense';
 }
 
 export interface MaintenanceRecord {

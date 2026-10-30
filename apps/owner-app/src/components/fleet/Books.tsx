@@ -66,7 +66,10 @@ export function FuelLogView({ rows, vehicles, currency }: { rows: FuelRecord[]; 
           </tbody>
         </table>
       </div>
-      <p className="footnote">Record a fill from the vehicle&apos;s panel under Fleet. Fuel a driver paid for on a trip is a trip expense, counted in the cost report.</p>
+      <p className="footnote">
+        Record a fill from the vehicle&apos;s panel under Fleet. A fill a driver paid for on a trip shows here too, paid from the trip&apos;s cash; it&apos;s
+        recorded with the trip&apos;s expenses.
+      </p>
     </>
   );
 }

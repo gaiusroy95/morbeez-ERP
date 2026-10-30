@@ -14,6 +14,9 @@ interface CustomerCollectionRow {
   collected_at: Date;
   into_driver_float: boolean;
   client_ref: string | null;
+  payer: 'customer' | 'third_party';
+  payer_name: string | null;
+  reference: string | null;
 }
 
 function toRecord(row: CustomerCollectionRow): CustomerCollectionRecord {
@@ -29,6 +32,9 @@ function toRecord(row: CustomerCollectionRow): CustomerCollectionRecord {
     collectedAt: row.collected_at,
     intoDriverFloat: row.into_driver_float,
     clientRef: row.client_ref,
+    payer: row.payer ?? 'customer',
+    payerName: row.payer_name ?? null,
+    reference: row.reference ?? null,
   };
 }
 
@@ -54,13 +60,30 @@ export class CustomerCollectionsRepository {
       notes: string | null;
       clientRef: string | null;
       intoDriverFloat: boolean;
+      payer?: 'customer' | 'third_party';
+      payerName?: string | null;
+      reference?: string | null;
     },
   ): Promise<CustomerCollectionRecord> {
     const result = await client.query<CustomerCollectionRow>(
-      `INSERT INTO money.customer_collection (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by, client_ref, into_driver_float)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO money.customer_collection
+         (tenant_id, trip_stop_id, order_id, amount, method, notes, collected_by, client_ref, into_driver_float, payer, payer_name, reference)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [tenantId, fields.tripStopId, fields.orderId, fields.amount, fields.method, fields.notes, collectedBy, fields.clientRef, fields.intoDriverFloat],
+      [
+        tenantId,
+        fields.tripStopId,
+        fields.orderId,
+        fields.amount,
+        fields.method,
+        fields.notes,
+        collectedBy,
+        fields.clientRef,
+        fields.intoDriverFloat,
+        fields.payer ?? 'customer',
+        fields.payerName ?? null,
+        fields.reference ?? null,
+      ],
     );
     return toRecord(result.rows[0]);
   }

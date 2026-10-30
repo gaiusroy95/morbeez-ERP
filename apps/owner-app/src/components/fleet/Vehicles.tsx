@@ -38,7 +38,7 @@ const DOC_TONE: Record<VehicleDocState, 'done' | 'attention' | 'bad' | 'muted'> 
 const DOC_STATE_LABEL: Record<VehicleDocState, string> = { valid: 'Valid', expiring: 'Expiring', expired: 'Expired', no_expiry: 'No expiry' };
 export const KIND_LABEL: Record<MaintenanceKind, string> = { service: 'Service', repair: 'Repair', tyres: 'Tyres', battery: 'Battery', accident: 'Accident', other: 'Other' };
 export const BASIS_LABEL: Record<HireBasis, string> = { per_trip: 'a trip', per_day: 'a day', per_km: 'a km', per_month: 'a month' };
-export const PAID_FROM_LABEL = { bank: 'Bank', cash_on_hand: 'Cash' } as const;
+export const PAID_FROM_LABEL = { bank: 'Bank', cash_on_hand: 'Cash', cash_with_drivers: 'Trip cash (driver)' } as const;
 
 export function DocBadge({ state }: { state: VehicleDocState }) {
   return <StatusBadge status={state} tone={DOC_TONE[state]} label={DOC_STATE_LABEL[state]} />;

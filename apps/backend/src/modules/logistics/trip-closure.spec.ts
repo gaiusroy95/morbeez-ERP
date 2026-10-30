@@ -25,6 +25,12 @@ describe('handoverOf', () => {
     // UPI/bank payments are shown, never part of the handover.
     expect(h.directPayments).toBe('2000.00');
   });
+
+  it('counts backhaul rent paid in cash (driver app D5)', () => {
+    const h = handoverOf({ advance: '500', cashCollections: '1200', spotCash: '0', backhaulCash: '3500', expenses: '300', deposited: '0', declared: null, directPayments: '0' });
+    expect(h.backhaulCash).toBe('3500.00');
+    expect(h.expected).toBe('4900.00');
+  });
 });
 
 describe('checklistOf', () => {
@@ -68,10 +74,36 @@ describe('checklistOf', () => {
     expect(area(items, 'collections').detail).toBe("Cash customers who didn't pay in full: Hotel Sagar (paid ₹500.00 of ₹960.00).");
   });
 
+  it('a trip with a backhaul has it checked after the returns; one without has no such check', () => {
+    expect(checklistOf(facts(), handover(), '1400.00').some((i) => i.area === 'backhaul')).toBe(false);
+    const at = new Date('2026-10-29T12:00:00Z');
+    const items = checklistOf(
+      facts({
+        backhauls: [
+          {
+            id: 'b-1', tripId: 't-1', pickupPlace: 'Mysuru Market', dropPlace: 'Gundlupet Base', rent: '3500.00', hirerName: null, notes: null,
+            offeredBy: 'owner', status: 'completed', skipReason: null, acceptedAt: at, pickupReachedAt: at, loadedAt: at, dropReachedAt: at,
+            completedAt: at, cancelledAt: null, cancelReason: null, payment: null, photos: { load: 1, drop: 1, payment: 0 }, createdAt: at, version: 6,
+          },
+        ],
+      }),
+      handover(),
+      '1400.00',
+    );
+    expect(items.map((i) => i.area).slice(3, 5)).toEqual(['returns', 'backhaul']);
+    expect(area(items, 'backhaul').status).toBe('exception');
+  });
+
   it("expenses beyond the driver's authority wait for the owner's approval", () => {
     const items = checklistOf(facts({ expensesNeedingApproval: '150.00' }), handover(), '1400.00');
     expect(area(items, 'expenses').status).toBe('exception');
     expect(area(items, 'expenses').detail).toContain("of which ₹150.00 beyond the driver's authority");
+  });
+
+  it('an expense the owner rejected is settled with the driver at closing; approved ones pass', () => {
+    const rejected = checklistOf(facts({ expensesNeedingApproval: '0.00', expensesRejected: '120.00' }), handover(), '1400.00');
+    expect(area(rejected, 'expenses')).toEqual({ area: 'expenses', status: 'exception', detail: '₹300.00 spent on the road, of which you rejected ₹120.00 — settle it with the driver.' });
+    expect(area(checklistOf(facts({ expensesNeedingApproval: '0.00', expensesRejected: '0.00' }), handover(), '1400.00'), 'expenses').status).toBe('pass');
   });
   it('a vehicle count that is off at closing is a load exception; one that matches passes', () => {
     const off = checklistOf(facts(), handover(), '1400.00', [

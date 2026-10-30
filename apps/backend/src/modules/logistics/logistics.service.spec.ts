@@ -36,6 +36,11 @@ import { LotStockService } from '../procurement/lot-stock.service';
 import { FarmStopsRepository } from './repositories/farm-stops.repository';
 import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
 import { CratesService } from '../crates/crates.service';
+import { TripCollectionsRepository } from './repositories/trip-collections.repository';
+import { DisputesService } from '../finance/disputes.service';
+import { TripIncentivesService } from './trip-incentives.service';
+import { BackhaulsRepository } from './repositories/backhauls.repository';
+import { BackhaulRecord } from './entities/backhaul.entity';
 
 const storage = { put: jest.fn().mockResolvedValue(undefined) };
 
@@ -89,6 +94,8 @@ const baseTrip: TripRecord = {
   startLatitude: null,
   startLongitude: null,
   deliveryStartedAt: null,
+  closingKm: null,
+  returnedAt: null,
   completedAt: null,
   submittedBy: null,
   cashDeclared: null,
@@ -189,6 +196,10 @@ describe('LogisticsService', () => {
   let farmStops: jest.Mocked<FarmStopsRepository>;
   let deliveries: jest.Mocked<DeliveryStopsRepository>;
   let crates: { listTypes: jest.Mock; stopCountsProblemWithClient: jest.Mock; recordStopCountsWithClient: jest.Mock };
+  let tripCollections: jest.Mocked<TripCollectionsRepository>;
+  let disputes: { raise: jest.Mock; list: jest.Mock };
+  let backhaulsRepo: { listByTripWithClient: jest.Mock; moneyWithClient: jest.Mock };
+  let receivablesMock: { recordCollectionPaymentWithClient: jest.Mock; customerBalanceWithClient: jest.Mock };
   let payroll: { recordTripWorkWithClient: jest.Mock; recordLoadingWorkWithClient: jest.Mock };
 
   beforeEach(async () => {
@@ -212,6 +223,7 @@ describe('LogisticsService', () => {
             createWithClient: jest.fn(),
             startWithClient: jest.fn(),
             startDeliveriesWithClient: jest.fn(),
+            returnWithClient: jest.fn(),
             completeWithClient: jest.fn(),
             cancelWithClient: jest.fn(),
             markReconciledWithClient: jest.fn(),
@@ -236,7 +248,7 @@ describe('LogisticsService', () => {
         },
         {
           provide: TripExpensesRepository,
-          useValue: { listByTripWithClient: jest.fn(), createWithClient: jest.fn(), sumByTripWithClient: jest.fn() },
+          useValue: { listByTripWithClient: jest.fn(), createWithClient: jest.fn(), sumByTripWithClient: jest.fn(), maxOdometerOnTripWithClient: jest.fn().mockResolvedValue(null) },
         },
         {
           provide: TripReconciliationsRepository,
@@ -268,7 +280,38 @@ describe('LogisticsService', () => {
           useValue: { getPickup: jest.fn(), completePickup: jest.fn(), acceptAtFarm: jest.fn() },
         },
         { provide: OrdersService, useValue: { getOrder: jest.fn(), markDelivered: jest.fn() } },
-        { provide: ReceivablesService, useValue: { recordCollectionPaymentWithClient: jest.fn() } },
+        {
+          provide: ReceivablesService,
+          useValue: {
+            recordCollectionPaymentWithClient: jest.fn(),
+            customerBalanceWithClient: jest.fn().mockResolvedValue({ invoicedOutstanding: '0.00', unappliedCredit: '0.00', balance: '0.00', overdue: '0.00', oldestOverdueDays: null }),
+          },
+        },
+        {
+          provide: TripCollectionsRepository,
+          useValue: {
+            deliveredCustomersWithClient: jest.fn().mockResolvedValue([]),
+            collectedWithClient: jest.fn().mockResolvedValue({ byCustomer: new Map(), byMethod: new Map() }),
+            disputedWithClient: jest.fn().mockResolvedValue(new Map()),
+            invoiceOfOrderWithClient: jest.fn().mockResolvedValue('invoice-1'),
+            sameOpenDisputeWithClient: jest.fn().mockResolvedValue(null),
+          },
+        },
+        { provide: DisputesService, useValue: { raise: jest.fn().mockResolvedValue({ id: 'dispute-1' }), list: jest.fn().mockResolvedValue([]) } },
+        {
+          provide: TripIncentivesService,
+          useValue: {
+            recordAtCloseWithClient: jest.fn(),
+            forTrip: jest.fn().mockResolvedValue({ tripId: 'trip-1', tripNumber: 'T-1', final: false, lines: [], total: '0.00' }),
+          },
+        },
+        {
+          provide: BackhaulsRepository,
+          useValue: {
+            listByTripWithClient: jest.fn().mockResolvedValue([]),
+            moneyWithClient: jest.fn().mockResolvedValue({ cash: '0.00', direct: '0.00' }),
+          },
+        },
         { provide: PayrollService, useValue: { recordTripWorkWithClient: jest.fn(), recordLoadingWorkWithClient: jest.fn() } },
         {
           provide: DeliveryStopsRepository,
@@ -368,6 +411,10 @@ describe('LogisticsService', () => {
     farmStops = module.get(FarmStopsRepository);
     deliveries = module.get(DeliveryStopsRepository);
     crates = module.get(CratesService);
+    tripCollections = module.get(TripCollectionsRepository);
+    disputes = module.get(DisputesService);
+    backhaulsRepo = module.get(BackhaulsRepository);
+    receivablesMock = module.get(ReceivablesService);
     payroll = module.get(PayrollService);
   });
 
@@ -614,6 +661,11 @@ describe('LogisticsService', () => {
       recordedBy: 'dispatcher-1',
       recordedAt,
       clientRef: null,
+      decision: null,
+      decisionNote: null,
+      decidedAt: null,
+      fuel: null,
+      photos: 0,
       needsApproval: false,
     });
 
@@ -847,6 +899,155 @@ describe('LogisticsService', () => {
       });
       expect(orders.markDelivered).toHaveBeenCalled();
       expect(pods.createWithClient).toHaveBeenCalledWith(fakeClient, 'dispatcher-1', expect.objectContaining({ qrStatus: null, allUnloaded: null }));
+    });
+  });
+
+  describe('collections, return and handover (driver app D4)', () => {
+    it('returnTrip records the closing KM — never below the opening KM, only on the road', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', openingKm: '48650.0' });
+      await expect(service.returnTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { closingKm: 48600 })).rejects.toThrow('below the opening KM, 48650 km');
+      trips.returnWithClient.mockResolvedValue({ ...baseTrip, status: 'in_progress', closingKm: '48842.0', returnedAt: new Date() });
+      expect((await service.returnTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { closingKm: 48842 })).closingKm).toBe('48842.0');
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'completed' });
+      await expect(service.returnTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { closingKm: 48842 })).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('Return never reads less than the odometer at a pump on the trip (driver app D6)', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', openingKm: '48650.0' });
+      expenses.maxOdometerOnTripWithClient.mockResolvedValueOnce(48800);
+      await expect(service.returnTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { closingKm: 48790 })).rejects.toThrow('below the odometer at the pump on this trip, 48800 km');
+      expect(trips.returnWithClient).not.toHaveBeenCalled();
+    });
+
+    it('a driver who set off with an opening KM hands over only after the closing KM', async () => {
+      workforce.getEmployeeIdForUser.mockResolvedValue('employee-1');
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', openingKm: '48650.0' });
+      await expect(service.completeTrip('tenant-1', 'user-driver-1', false, 'trip-1', { version: 1 })).rejects.toThrow('Record the closing KM');
+    });
+  });
+
+  describe("deciding a driver's expense (Approvals inbox, owner app Phase 7)", () => {
+    const expense = (over: Record<string, unknown> = {}) => ({
+      id: 'expense-1', tripId: 'trip-1', category: 'fuel', amount: '2500.00', notes: null, recordedBy: 'user-driver-1', recordedAt: new Date(),
+      clientRef: null, needsApproval: true, decision: null, decisionNote: null, decidedAt: null, fuel: null, photos: 0, ...over,
+    });
+
+    beforeEach(() => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      (expenses as unknown as { findByIdWithClient: jest.Mock }).findByIdWithClient = jest.fn().mockResolvedValue(expense());
+      (expenses as unknown as { decideWithClient: jest.Mock }).decideWithClient = jest.fn().mockResolvedValue(expense({ decision: 'approved' }));
+    });
+
+    it('approves it, once', async () => {
+      const after = await service.decideExpense('tenant-1', 'owner-1', 'trip-1', 'expense-1', { approve: true });
+      expect(after.decision).toBe('approved');
+      expect((expenses as unknown as { decideWithClient: jest.Mock }).decideWithClient).toHaveBeenCalledWith(fakeClient, 'expense-1', 'owner-1', 'approved', null);
+    });
+
+    it('rejects it only with a reason, and never one within the driver’s authority', async () => {
+      await expect(service.decideExpense('tenant-1', 'owner-1', 'trip-1', 'expense-1', { approve: false })).rejects.toThrow('Say why the expense is rejected');
+      (expenses as unknown as { findByIdWithClient: jest.Mock }).findByIdWithClient.mockResolvedValue(expense({ needsApproval: false }));
+      await expect(service.decideExpense('tenant-1', 'owner-1', 'trip-1', 'expense-1', { approve: true })).rejects.toThrow("nothing to approve");
+    });
+
+    it('a decision already made is the same request again — or a conflict when it differs', async () => {
+      (expenses as unknown as { findByIdWithClient: jest.Mock }).findByIdWithClient.mockResolvedValue(expense({ decision: 'approved' }));
+      expect((await service.decideExpense('tenant-1', 'owner-1', 'trip-1', 'expense-1', { approve: true })).decision).toBe('approved');
+      await expect(service.decideExpense('tenant-1', 'owner-1', 'trip-1', 'expense-1', { approve: false, note: 'No bill' })).rejects.toThrow('already approved');
+    });
+  });
+
+  describe('backhaul in the handover and the close (driver app D5)', () => {
+    const at = new Date('2026-10-29T12:00:00Z');
+    const backhaul = (over: Partial<BackhaulRecord>): BackhaulRecord => ({
+      id: 'b-1', tripId: 'trip-1', pickupPlace: 'Mysuru Market', dropPlace: 'Gundlupet Base', rent: '3500.00', hirerName: null, notes: null,
+      offeredBy: 'owner', status: 'accepted', skipReason: null, acceptedAt: at, pickupReachedAt: null, loadedAt: null, dropReachedAt: null,
+      completedAt: null, cancelledAt: null, cancelReason: null, payment: null, photos: { load: 0, drop: 0, payment: 0 }, createdAt: at, version: 2,
+      ...over,
+    });
+
+    it('the vehicle is not back (Return) while a backhaul is under way', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', openingKm: '48650.0' });
+      backhaulsRepo.listByTripWithClient.mockResolvedValue([backhaul({})]);
+      await expect(service.returnTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { closingKm: 48842 })).rejects.toThrow(
+        'Finish the backhaul Mysuru Market → Gundlupet Base first, then record Return',
+      );
+      expect(trips.returnWithClient).not.toHaveBeenCalled();
+    });
+
+    it('the driver hands over once the backhaul is paid; the owner may complete the trip regardless', async () => {
+      workforce.getEmployeeIdForUser.mockResolvedValue('employee-1');
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      stops.countPendingWithClient.mockResolvedValue(0);
+      backhaulsRepo.listByTripWithClient.mockResolvedValue([backhaul({ status: 'completed', pickupReachedAt: at, loadedAt: at, dropReachedAt: at, completedAt: at })]);
+      await expect(service.completeTrip('tenant-1', 'user-driver-1', false, 'trip-1', { version: 1 })).rejects.toThrow(
+        'Record the payment for the backhaul Mysuru Market → Gundlupet Base first, before handing over',
+      );
+      trips.completeWithClient.mockResolvedValue({ ...baseTrip, status: 'completed' });
+      // The submission alerts that follow need a database; the owner's trip is submitted before them.
+      await service.completeTrip('tenant-1', 'dispatcher-1', true, 'trip-1', { version: 1 }).catch(() => undefined);
+      expect(trips.completeWithClient).toHaveBeenCalled();
+    });
+
+    it('rent paid in cash is part of the cash to hand over; by UPI it went straight to the business', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress', advanceAmount: '500.00' });
+      expenses.sumByTripWithClient.mockResolvedValue(0);
+      backhaulsRepo.moneyWithClient.mockResolvedValue({ cash: '3500.00', direct: '1200.00' });
+      const handover = await service.getHandover('tenant-1', 'dispatcher-1', true, 'trip-1');
+      expect(handover).toEqual(expect.objectContaining({ backhaulCash: '3500.00', expected: '4000.00', directPayments: '1200.00' }));
+    });
+
+    it('collections list the customers delivered on the trip with their whole outstanding, less what they dispute', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      tripCollections.deliveredCustomersWithClient.mockResolvedValue([
+        { customer_id: 'c-1', name: 'Hotel Sagar', phone: null, place: null, stop_id: 's-1', terms_days: 0 },
+        { customer_id: 'c-2', name: 'Green Leaf', phone: null, place: null, stop_id: 's-2', terms_days: 7 },
+      ]);
+      receivablesMock.customerBalanceWithClient.mockImplementation(async (_c: unknown, id: string) => ({ balance: id === 'c-1' ? '48500.00' : '-200.00' }));
+      tripCollections.collectedWithClient.mockResolvedValue({ byCustomer: new Map([['c-1', '1000.00']]), byMethod: new Map([['cash', '700.00'], ['upi', '300.00']]) });
+      tripCollections.disputedWithClient.mockResolvedValue(new Map([['c-1', '500.00']]));
+
+      const board = await service.getTripCollections('tenant-1', 'dispatcher-1', true, 'trip-1');
+
+      expect(board.customers).toEqual([
+        expect.objectContaining({ customerId: 'c-1', terms: 'cash', outstanding: '48500.00', disputed: '500.00', collectedOnTrip: '1000.00' }),
+        expect.objectContaining({ customerId: 'c-2', terms: 'credit', outstanding: '0.00', disputed: '0.00' }),
+      ]);
+      expect(board.collected).toEqual({ cash: '700.00', upi: '300.00', bankTransfer: '0.00', cheque: '0.00', total: '1000.00' });
+      expect(board.pending).toEqual({ customers: 1, amount: '48000.00' });
+    });
+
+    it('someone paying on the customer’s behalf says who; the reference goes with the payment', async () => {
+      trips.findById.mockResolvedValue(baseTrip);
+      orders.getOrder.mockResolvedValue({ id: 'order-1', customerId: 'customer-1' } as never);
+      stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+      await expect(
+        service.recordCollection('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { amount: 500, method: 'upi', payer: 'third_party' }),
+      ).rejects.toThrow('say who');
+      collections.createWithClient.mockResolvedValue({ id: 'c', amount: '500.00', method: 'upi', notes: 'Paid by Ravi (son)', collectedAt: new Date(), intoDriverFloat: false, reference: 'UTR123' } as never);
+      await service.recordCollection('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { amount: 500, method: 'upi', payer: 'third_party', payerName: ' Ravi (son) ', reference: ' UTR123 ' });
+      expect(collections.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', expect.objectContaining({ payer: 'third_party', payerName: 'Ravi (son)', reference: 'UTR123', notes: 'Paid by Ravi (son)' }));
+      expect(receivablesMock.recordCollectionPaymentWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'dispatcher-1', expect.objectContaining({ reference: 'UTR123' }));
+    });
+
+    it("a dispute is raised on the delivery's invoice and the owner is told; a retry raises nothing more", async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1', status: 'completed' }));
+      await service.raiseStopDispute('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { amount: 2000, reason: ' Wrong rate on onion ' });
+      expect(disputes.raise).toHaveBeenCalledWith('tenant-1', 'dispatcher-1', { invoiceId: 'invoice-1', amount: 2000, reason: 'Wrong rate on onion' });
+      expect(alertsRepo.raiseWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', expect.objectContaining({ kind: 'collection_discrepancy', title: 'Hotel Sagar disputes ₹2000.00' }));
+
+      disputes.raise.mockClear();
+      tripCollections.sameOpenDisputeWithClient.mockResolvedValue('dispute-1');
+      disputes.list.mockResolvedValue([{ id: 'dispute-1' }]);
+      expect((await service.raiseStopDispute('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { amount: 2000, reason: 'Wrong rate on onion' })).id).toBe('dispute-1');
+      expect(disputes.raise).not.toHaveBeenCalled();
+    });
+
+    it('a dispute needs a delivery that was made', async () => {
+      trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+      stops.findByIdWithClient.mockResolvedValue(makeStop({ stopType: 'delivery', pickupId: null, orderId: 'order-1' }));
+      await expect(service.raiseStopDispute('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', { amount: 1, reason: 'abc' })).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
@@ -1085,6 +1286,9 @@ describe('LogisticsService', () => {
       collectedAt: new Date(),
       intoDriverFloat: true,
       clientRef: null,
+      payer: 'customer',
+      payerName: null,
+      reference: null,
     });
 
     const result = await service.recordCollection('tenant-1', 'dispatcher-1', true, 'trip-1', 'stop-1', {
@@ -1135,6 +1339,7 @@ describe('LogisticsService', () => {
   const storeReconciliation = () =>
     reconciliations.createWithClient.mockImplementation(async (_client, _by, fields) => ({
       ...fields,
+      backhaulCash: fields.backhaulCash ?? '0.00',
       id: 'recon-1',
       advanceAmount: String(fields.advanceAmount),
       totalExpenses: String(fields.totalExpenses),

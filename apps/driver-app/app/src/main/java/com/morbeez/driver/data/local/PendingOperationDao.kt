@@ -31,9 +31,17 @@ interface PendingOperationDao {
     @Query("DELETE FROM pending_operations WHERE idempotencyKey = :key")
     suspend fun delete(key: String)
 
+    /** Superseded before it was sent (the chat's read mark: only the latest matters). */
+    @Query("DELETE FROM pending_operations WHERE operationType = :type AND status = 'pending'")
+    suspend fun deletePending(type: String)
+
     /** Actions recorded on this phone that the server hasn't confirmed yet. */
     @Query("SELECT count(*) FROM pending_operations")
     suspend fun count(): Int
+
+    /** What's queued of these kinds — collections and disputes not sent yet count on the phone straight away (D4). */
+    @Query("SELECT * FROM pending_operations WHERE operationType IN (:types) ORDER BY sequence")
+    fun observeByTypes(types: List<String>): Flow<List<PendingOperationEntity>>
 
     @Query("SELECT count(*) FROM pending_operations WHERE status = 'pending'")
     fun observePendingCount(): Flow<Int>

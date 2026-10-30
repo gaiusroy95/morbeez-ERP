@@ -4,12 +4,16 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { assertRealDate } from '../../common/period';
-import { sumMoney } from '../../common/money';
+import { moneyFromNumber, sumMoney } from '../../common/money';
 import { AiRepository } from './repositories/ai.repository';
 import { AiDataRepository } from './repositories/ai-data.repository';
 import {
   AiSettings,
+  CallItem,
+  CallList,
   CustomerProfitReport,
+  PricingBoard,
+  PricingRow,
   DECIDE_PERMISSION,
   Draft,
   RECOMMENDATION_TYPES,
@@ -24,6 +28,7 @@ import {
   exceptions,
   logisticsLoad,
   logisticsRoute,
+  orders,
   pricing,
   procurement,
   ProducerContext,
@@ -31,6 +36,7 @@ import {
   Suppressed,
 } from './producers';
 import { addDays, backtest, DailySeries } from './math/forecast';
+import { costBuildUp, marginAt, priceStanding } from './math/pricing';
 import { AiSettingsDto, DecideRecommendationDto } from './dto/ai.dto';
 import { clampPageSize, PaginatedResult } from '../../common/persistence/pagination';
 
@@ -177,6 +183,7 @@ export class AiService {
       await guarded(['logistics_load'], () => logisticsLoad(ctx));
       await guarded(['customer_terms'], () => customerTerms(ctx));
       await guarded(['exception'], () => exceptions(ctx));
+      await guarded(['order'], () => orders(ctx));
     });
 
     const produced: Record<string, number> = {};
@@ -346,6 +353,92 @@ export class AiService {
         },
         pricing: { scored: diffs.length, realizedVsSuggestedPct: diffs.length ? Math.round((diffs.reduce((s, x) => s + x, 0) / diffs.length) * 10_000) / 100 : null },
       };
+    });
+  }
+
+  // ---- AI Pricing and AI Calling (owner Phase 8) ----
+
+  /**
+   * Each active product's price against what it costs to sell (requirements
+   * Part 15): the free stock's cost, what spoilage usually takes, delivery
+   * per kilo over the last 30 days, the owner's target margin — and the open
+   * price suggestion, which the owner acts on as anywhere else (DR.3).
+   */
+  async pricing(actor: AiActor): Promise<PricingBoard> {
+    const settings = await this.getSettings(actor.tenantId);
+    const open = await this.db.withTenant(actor.tenantId, (client) =>
+      this.repo.list(client, { status: 'open', type: 'pricing', includeSensitive: false, since: null, limit: 200, offset: 0 }),
+    );
+    const suggestion = new Map(open.recs.filter((r) => r.subjectId).map((r) => [r.subjectId as string, r.id]));
+    return this.db.withTenantReadOnly(actor.tenantId, 'morbeez_ai', async (client) => {
+      const books = await this.data.books(client);
+      const from = addDays(books.today, -29);
+      const products = await this.data.products(client);
+      const free = await this.data.freeStock(client);
+      const shrink = await this.data.shrinkRates(client, new Date(Date.now() - 56 * 86_400_000));
+      const realized = await this.data.realizedPrices(client, books.timezone, addDays(books.today, -13), books.today);
+      const delivery = await this.data.deliveryCost(client, books.timezone, from, books.today);
+      const perKg = Number(delivery.kg) > 0 ? moneyFromNumber(Number(delivery.cost) / Number(delivery.kg)) : null;
+      const rank: Record<PricingRow['standing'], number> = { below_cost: 0, no_price: 1, below_sustainable: 2, below_target: 3, on_target: 4, no_cost: 5 };
+      const rows: PricingRow[] = products.map((p) => {
+        const stock = free.get(p.id);
+        const b = stock?.unitCost
+          ? costBuildUp({ unitCost: stock.unitCost, shrinkRate: shrink.get(p.id) ?? 0, deliveryPerUnit: p.uom === 'kg' ? perKg : null, targetMarginPct: settings.targetMarginPct })
+          : null;
+        return {
+          productId: p.id,
+          name: p.name,
+          uom: p.uom,
+          currentPrice: p.base_price,
+          stockQty: stock?.qty ?? null,
+          unitCost: stock?.unitCost ?? null,
+          buildUp: b ? { shrinkRate: b.shrinkRate, spoilage: b.spoilage, delivery: b.delivery, sustainable: b.sustainable, target: b.target } : null,
+          standing: p.base_price === null ? 'no_price' : priceStanding(p.base_price, b),
+          marginPct: b && p.base_price !== null ? marginAt(p.base_price, b.sustainable) : null,
+          realized: realized.get(p.id) ?? null,
+          suggestionId: suggestion.get(p.id) ?? null,
+        };
+      });
+      rows.sort((a, b) => rank[a.standing] - rank[b.standing] || a.name.localeCompare(b.name));
+      return {
+        asOf: books.today,
+        currency: books.currency,
+        targetMarginPct: settings.targetMarginPct,
+        deliveryPerKg: perKg,
+        deliveryWindow: { from, to: books.today, cost: delivery.cost, kg: delivery.kg },
+        rows,
+      };
+    });
+  }
+
+  /**
+   * Today's calls (requirements Part 21–23): money fallen due — as Collections
+   * counts it, for those who see the money — customers whose usual order
+   * hasn't come, and orders to confirm. AI voice calls are not built: the
+   * owner makes these, from this list. Phones are read at request time (PIPE.5).
+   */
+  async calls(actor: AiActor): Promise<CallList> {
+    const open = await this.db.withTenant(actor.tenantId, (client) =>
+      this.repo.list(client, { status: 'open', type: 'order', includeSensitive: false, since: null, limit: 200, offset: 0 }),
+    );
+    return this.db.withTenantReadOnly(actor.tenantId, 'morbeez_ai', async (client) => {
+      const books = await this.data.books(client);
+      const due = actor.permissions.includes('finance:read') ? await this.data.dueCustomers(client, 30) : [];
+      const recs = open.recs.filter((r) => r.subjectId);
+      const contacts = await this.data.customerContacts(client, [...new Set([...due.map((d) => d.customer_id), ...recs.map((r) => r.subjectId as string)])]);
+      const person = (id: string) => contacts.get(id) ?? null;
+      const calls: CallItem[] = [];
+      for (const d of due) {
+        const c = person(d.customer_id);
+        if (c) calls.push({ kind: 'payment', customerId: d.customer_id, ...c, amount: d.due_now, dueDate: d.due_date, overdueDays: d.overdue_days, recommendationId: null, about: null });
+      }
+      for (const kind of ['order', 'quantity'] as const) {
+        for (const r of recs.filter((x) => x.proposal.action === (kind === 'order' ? 'delivery_order' : 'confirm_order'))) {
+          const c = person(r.subjectId as string);
+          if (c) calls.push({ kind, customerId: r.subjectId as string, ...c, amount: r.expectedImpact, dueDate: null, overdueDays: null, recommendationId: r.id, about: r.title });
+        }
+      }
+      return { voice: 'coming', date: books.today, calls };
     });
   }
 

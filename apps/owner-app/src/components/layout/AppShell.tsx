@@ -9,6 +9,7 @@ import { useUiStore } from '@/lib/stores/ui-store';
 import { useAccess } from '@/lib/hooks/use-access';
 import { displayLogin } from '@/lib/phone';
 import { BOTTOM_TABS, NAV, QUICK_CREATE } from './nav';
+import { useChatUnread } from '@/lib/hooks/use-chat';
 import { AlertBell } from './AlertBell';
 import { LanguageSwitch } from './LanguageSwitch';
 import { useI18n, useT } from '@/lib/i18n';
@@ -59,6 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const t = useT();
   const { lang } = useI18n();
   const allowed = (permission?: string) => !permission || !session || hasPermission(session, permission);
+  const chatUnread = useChatUnread(!!session && hasPermission(session, 'logistics:dispatch')).data?.unread ?? 0;
 
   // Close the drawer and the create sheet whenever the route changes.
   useEffect(() => {
@@ -72,10 +74,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.location.assign('/login');
   }
 
-  // The page's name, for the top bar.
-  const here = NAV.flatMap((g) => g.items.map((item) => ({ group: g.label, item }))).find(({ item }) =>
-    pathname.startsWith(item.href),
-  );
+  // The page's name, for the top bar: the most specific menu entry it's under (/ai/orders, not /ai).
+  const here = NAV.flatMap((g) => g.items.map((item) => ({ group: g.label, item })))
+    .filter(({ item }) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.item.href.length - a.item.href.length)[0];
   const isHome = pathname.startsWith('/dashboard');
   const quick = QUICK_CREATE.filter((item) => allowed(item.permission));
 
@@ -110,10 +112,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     key={item.href}
                     href={item.href}
                     className="nav-link"
-                    aria-current={pathname.startsWith(item.href) ? 'page' : undefined}
+                    aria-current={here?.item.href === item.href ? 'page' : undefined}
                   >
                     <Icon name={item.icon} className="nav-icon" />
                     {t(item.label)}
+                    {item.badge === 'chat' && chatUnread > 0 && (
+                      <span className="nav-badge" aria-label={t('{n} unread', { n: chatUnread })}>
+                        {chatUnread}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </div>

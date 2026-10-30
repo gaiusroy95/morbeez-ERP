@@ -13,6 +13,8 @@ import { PasswordService } from './security/password.service';
 import { TokenService } from './security/token.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PinAuthService } from './pin-auth.service';
+import { TeamRepository } from './repositories/team.repository';
+import { TeamService } from './team.service';
 import { AlertsModule } from '../alerts/alerts.module';
 
 // Bounded context: Users — identity, authentication, and access; not
@@ -47,6 +49,8 @@ import { AlertsModule } from '../alerts/alerts.module';
     TokenService,
     JwtStrategy,
     PinAuthService,
+    TeamRepository,
+    TeamService,
   ],
   exports: [UsersService, AuthService],
 })

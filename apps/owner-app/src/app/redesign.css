@@ -1014,6 +1014,11 @@
   border-bottom: 0;
 }
 
+/* A list of trips, not stops: no sequence number to make room for. */
+.stop-list.no-seq li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .route-stop-main,
 .stop-main {
   display: grid;
@@ -1873,4 +1878,726 @@ a.button {
   display: grid;
   gap: 6px;
   justify-items: start;
+}
+
+/* Driver app D5: each backhaul on the trip's Backhaul tab. */
+.backhaul-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.backhaul-card .detail-subhead,
+.backhaul-card p {
+  margin: 0;
+}
+.backhaul-steps {
+  list-style: none;
+  margin: 2px 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.backhaul-steps li {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+.backhaul-steps li[data-status='pending'] {
+  color: var(--ink-muted);
+}
+
+/* ---- Owner app Phase 7: Approvals, Reports, Settings, Profile, Workforce & Vehicles ---- */
+
+.link-list {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+.link-list > .panel {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+button.link-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.link-list > .link-row + .link-row,
+.link-list > .panel + .link-row {
+  border-top: 1px solid var(--border);
+}
+.link-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.link-row-title {
+  font-weight: 600;
+}
+.link-row-sub {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* Approvals & Exceptions (set 1 screen 17). */
+.inbox-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.inbox-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+.inbox-row[data-kind='expense'] .inbox-icon,
+.inbox-row[data-kind='dispute'] .inbox-icon {
+  background: var(--critical-tint);
+  color: var(--bad);
+}
+.inbox-row[data-kind='spot_price'] .inbox-icon,
+.inbox-row[data-kind='ai'] .inbox-icon {
+  background: var(--warning-tint);
+  color: var(--warning);
+}
+.inbox-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.inbox-title {
+  font-weight: 700;
+}
+.inbox-subject {
+  font-size: 14px;
+}
+.inbox-detail,
+.inbox-when {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+@media (max-width: 520px) {
+  .inbox-row {
+    grid-template-columns: 40px 1fr;
+  }
+  .inbox-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Reports (set 1 screen 18). */
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.report-head .page-title {
+  margin: 0;
+}
+.report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.report-table td,
+.report-table th {
+  white-space: nowrap;
+}
+.export-panel .action-bar {
+  margin-top: 8px;
+}
+.print-only {
+  display: none;
+}
+@media print {
+  .print-only {
+    display: inline;
+  }
+  .report-toolbar .range-controls,
+  .bottom-nav,
+  .create-bar {
+    display: none !important;
+  }
+}
+
+/* Settings (set 1 screen 19). */
+.logout-wide {
+  width: 100%;
+  justify-content: center;
+}
+.team-card {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.team-card[data-status='deactivated'] {
+  opacity: 0.7;
+}
+.team-card .party-side {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-tint);
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.role-chip-remove {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.role-add {
+  font-size: 12.5px;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+.rule-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.rule-field input[inputmode='decimal'] {
+  max-width: 160px;
+}
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+}
+
+/* My Profile (set 1 screen 20). */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.profile-card .profile-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+.profile-contact {
+  display: grid;
+  gap: 8px;
+}
+.profile-contact span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.activity-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+}
+.activity-list + .button {
+  margin-top: 12px;
+}
+.brand-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Workforce & Vehicles (set 1 screens 15, 22). */
+.day-tab-link {
+  flex: 1;
+  min-width: max-content;
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.day-tab-link[aria-pressed='true'] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+.search-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-add .search-filter {
+  flex: 1;
+}
+.round-add {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--on-primary);
+  cursor: pointer;
+}
+.vehicle-avatar {
+  border-radius: 12px;
+}
+
+/* Driver incentives (driver app D7): Settings → Rates & rules. */
+.incentive-table .percent-input {
+  width: 5.5rem;
+  text-align: right;
+}
+.incentive-table tr.muted-row td:first-child {
+  color: var(--ink-muted);
+}
+
+/* Chat with drivers (driver app D9): the drivers beside one conversation;
+   on a phone, one or the other. */
+.nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  height: calc(100dvh - 128px);
+  min-height: 460px;
+}
+.chat-list,
+.chat-thread {
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.chat-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.chat-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-row:hover {
+  background: var(--surface-2);
+}
+.chat-row[aria-current='true'] {
+  background: var(--primary-tint);
+}
+.chat-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.chat-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.chat-row-preview {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.chat-row-side {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  font-size: 12px;
+}
+.chat-row-side .nav-badge {
+  margin-left: 0;
+}
+.chat-trip-chip {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--info-tint);
+  color: var(--info);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chat-empty {
+  padding: 24px;
+  text-align: center;
+}
+.chat-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.chat-head-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.chat-head-main strong {
+  font-size: 15px;
+}
+.chat-back {
+  display: none;
+}
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--surface-2);
+}
+.chat-bubble {
+  display: grid;
+  gap: 4px;
+  max-width: min(78%, 520px);
+  padding: 8px 12px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+}
+.chat-bubble[data-side='office'] {
+  border-radius: 14px 14px 4px 14px;
+  background: var(--primary-tint);
+  border-color: transparent;
+  align-self: flex-end;
+}
+.chat-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-meta {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-align: right;
+}
+/* Every photo in the same frame, as on the driver's phone; opened, it's whole. */
+.chat-photo {
+  display: block;
+  width: min(260px, 100%);
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  background: var(--surface-3);
+  object-fit: cover;
+}
+.chat-photo-pending {
+  font-size: 13px;
+  font-style: italic;
+}
+.chat-compose {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.chat-compose textarea,
+.chat-about select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.chat-compose textarea {
+  width: 100%;
+  padding: 8px 10px;
+  resize: vertical;
+}
+.chat-compose textarea:focus,
+.chat-about select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--ring);
+}
+.chat-about {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.chat-about select {
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.chat-compose-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-photo-button {
+  max-width: 60%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+@media (max-width: 899px) {
+  .chat-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: calc(100dvh - 150px);
+  }
+  .chat-layout[data-open='thread'] .chat-list,
+  .chat-layout[data-open='list'] .chat-thread {
+    display: none;
+  }
+  .chat-back {
+    display: inline-grid;
+  }
+}
+
+/* Owner Phase 8: AI Orders, AI Pricing, AI Calling, Driver phones. */
+.small-block {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+}
+.order-lines input:not([type='checkbox']) {
+  width: 6.5rem;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.order-lines input:not([type='checkbox']):focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--ring);
+}
+.order-lines input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+.price-standing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.order-lines tr[data-dropped] td {
+  opacity: 0.5;
+}
+.pricing-table th[scope='row'] {
+  text-align: left;
+  white-space: nowrap;
+}
+.pricing-table tr[data-standing='below_cost'] th[scope='row'],
+.pricing-table tr[data-standing='below_sustainable'] th[scope='row'],
+.pricing-table tr[data-standing='no_price'] th[scope='row'] {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.coming-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--info-tint);
+  color: var(--info);
+}
+.coming-card h2 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 16px;
+}
+.coming-card p {
+  margin: 0;
+}
+.call-list,
+.phone-failures {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.call-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.call-row:first-child {
+  border-top: 0;
+}
+.call-why {
+  margin: 2px 0 0;
+}
+.call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.phone-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 12px;
+}
+.phone-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.phone-card[data-state='stuck'] {
+  border-left-color: var(--bad);
+}
+.phone-card[data-state='quiet'],
+.phone-card[data-state='waiting'] {
+  border-left-color: var(--warning);
+}
+.phone-card[data-state='synced'] {
+  border-left-color: var(--good);
+}
+.phone-card-head {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.phone-card-who {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  min-width: 0;
+}
+.phone-report p {
+  margin: 0 0 4px;
+}
+.phone-failures {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--critical-tint);
+  color: var(--ink);
+  font-size: 13px;
+}
+.phone-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+@media (max-width: 560px) {
+  .call-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .call-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }

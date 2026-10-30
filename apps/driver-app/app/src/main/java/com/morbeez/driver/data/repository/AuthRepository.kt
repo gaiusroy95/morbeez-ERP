@@ -10,6 +10,8 @@ import com.morbeez.driver.data.remote.dto.PreferencesBody
 import com.morbeez.driver.data.remote.dto.SetPinRequest
 import com.morbeez.driver.data.remote.dto.RefreshRequest
 import com.morbeez.driver.data.security.TokenStore
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,6 +22,7 @@ class AuthRepository @Inject constructor(
     private val database: AppDatabase,
     private val pendingOperationDao: PendingOperationDao,
     private val pendingPhotoDao: PendingPhotoDao,
+    @ApplicationContext private val appContext: Context,
 ) {
     val isLoggedIn: Boolean get() = tokenStore.isLoggedIn()
 
@@ -82,6 +85,8 @@ class AuthRepository @Inject constructor(
         // Every table here holds only this driver's own trip data — nothing
         // worth keeping once they've signed out (Driver App Architecture, DRV.13).
         database.clearAllTables()
+        // The conversation's photos (D9) are this driver's too.
+        ChatRepository.photoDir(appContext).deleteRecursively()
         if (refreshToken != null) {
             runCatching { api.logout(RefreshRequest(refreshToken)) }
         }

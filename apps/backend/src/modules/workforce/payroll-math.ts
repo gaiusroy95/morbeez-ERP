@@ -34,6 +34,8 @@ export interface EarningsInput {
   rates: PayRate[];
   work: WorkDay[];
   incentiveRules: IncentiveRule[];
+  /** A driver's trip incentives, worked out when each trip closed (driver app D7). */
+  tripIncentives?: { label: string; tripNumber: string; amount: string }[];
   minimumWages: MinimumWageRate[]; // any state/category; filtered here
   minWagePolicy: 'top_up' | 'warn';
   adjustments: { description: string; amount: string }[];
@@ -237,6 +239,12 @@ export function computeEarnings(input: EarningsInput): EarningsResult {
         incentiveRuleId: rule.id,
       }),
     );
+  }
+
+  // ---- A driver's trip incentives (D7): each as the trip's close worked it out ----
+  for (const ti of input.tripIncentives ?? []) {
+    if (toCents(ti.amount) === 0n) continue;
+    lines.push(line({ kind: 'incentive', description: `${ti.label} — trip ${ti.tripNumber}`, amount: fromCents(toCents(ti.amount)) }));
   }
 
   // ---- Minimum wage: basic pay never below the notified daily rate ----

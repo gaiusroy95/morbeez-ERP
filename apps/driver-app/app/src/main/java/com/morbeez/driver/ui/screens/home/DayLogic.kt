@@ -1,7 +1,9 @@
 package com.morbeez.driver.ui.screens.home
 
+import com.morbeez.driver.data.local.BackhaulEntity
 import com.morbeez.driver.data.local.TripEntity
 import com.morbeez.driver.data.local.TripStopEntity
+import com.morbeez.driver.ui.screens.backhaul.BackhaulLogic
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlin.math.asin
@@ -20,6 +22,10 @@ sealed interface NextAction {
     data object NoTrip : NextAction
     data object StartDay : NextAction
     data class GoTo(val stop: TripStopEntity) : NextAction
+    /** Every stop done: a backhaul to answer, run or be paid for (D5). */
+    data class Backhaul(val backhaul: BackhaulEntity) : NextAction
+    /** Every stop done, back at base: record the closing KM (D4). */
+    data object Return : NextAction
     /** Every stop done: hand over the cash and submit. */
     data object Handover : NextAction
     data object AwaitingOwner : NextAction
@@ -72,10 +78,13 @@ object DayLogic {
         else -> DayStep.COMPLETE
     }
 
-    fun nextActionOf(trip: TripEntity?, stops: List<TripStopEntity>): NextAction = when (trip?.status) {
+    /** After the last stop: the backhaul (answered, run, paid), then Return, then the handover. */
+    fun nextActionOf(trip: TripEntity?, stops: List<TripStopEntity>, backhauls: List<BackhaulEntity> = emptyList()): NextAction = when (trip?.status) {
         null -> NextAction.NoTrip
         "planned" -> NextAction.StartDay
-        "in_progress" -> nextStop(stops)?.let { NextAction.GoTo(it) } ?: NextAction.Handover
+        "in_progress" -> nextStop(stops)?.let { NextAction.GoTo(it) }
+            ?: BackhaulLogic.currentOf(backhauls)?.let { NextAction.Backhaul(it) }
+            ?: if (trip.openingKm != null && trip.closingKm == null) NextAction.Return else NextAction.Handover
         "on_hold" -> NextAction.OnHold(trip.reviewNote)
         else -> NextAction.AwaitingOwner
     }

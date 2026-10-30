@@ -30,6 +30,9 @@ import {
   emi as emiFor,
   firstOfMonth,
   fuelEconomy,
+  FullTankMileage,
+  lastFullTankMileage,
+  tripMileageSegment,
   monthlyInterest,
   remainingSchedule,
   splitPayment,
@@ -326,6 +329,25 @@ export class FleetService {
   }
 
   // ---- Fuel, maintenance, documents ----
+
+  /**
+   * A vehicle's mileage from all its fills, the fuel log's and those on
+   * trips (driver app D6): the latest full tank to full tank, and full tank
+   * to full tank over the last 90 days.
+   */
+  mileage(tenantId: string, vehicleId: string): Promise<{ last: FullTankMileage | null; averageKmPerLitre: string | null }> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const books = await this.repo.books(client);
+      const fills = await this.repo.fuel(client, vehicleId, null, null);
+      const since = addDays(books.today, -90);
+      return { last: lastFullTankMileage(fills), averageKmPerLitre: fuelEconomy(fills.filter((f) => f.filledOn >= since)).kmPerLitre };
+    });
+  }
+
+  /** The full tank before to the last full tank filled on the trip (the mileage incentive, D7); null when the trip filled none. */
+  async mileageForTripWithClient(client: PoolClient, vehicleId: string, tripId: string): Promise<{ km: number; litres: string; cost: string } | null> {
+    return tripMileageSegment(await this.repo.fuel(client, vehicleId, null, null), tripId);
+  }
 
   listFuel(tenantId: string, from: string, to: string, vehicleId?: string) {
     this.range(from, to);

@@ -184,6 +184,26 @@ describe('computeEarnings', () => {
       );
       expect(r.lines.find((l) => l.kind === 'minimum_wage_topup')?.amount).toBe('50.00');
     });
+
+    it("a driver's trip incentives are paid with the week, each as its trip's close worked it out (D7)", () => {
+      const r = computeEarnings(
+        base({
+          roleType: 'driver',
+          rates: [rate('daily', '1200.00')],
+          work: [day('2026-09-02', { kind: 'trip' })],
+          tripIncentives: [
+            { label: 'Backhaul incentive', tripNumber: 'T-20260902-001', amount: '350.00' },
+            { label: 'Night duty', tripNumber: 'T-20260902-001', amount: '0.00' },
+            { label: 'Trip completion', tripNumber: 'T-20260902-001', amount: '240.00' },
+          ],
+        }),
+      );
+      expect(r.lines.filter((l) => l.kind === 'incentive').map((l) => [l.description, l.amount])).toEqual([
+        ['Backhaul incentive — trip T-20260902-001', '350.00'],
+        ['Trip completion — trip T-20260902-001', '240.00'],
+      ]);
+      expect(r.gross).toBe('1790.00');
+    });
   });
 
   describe('deductions', () => {

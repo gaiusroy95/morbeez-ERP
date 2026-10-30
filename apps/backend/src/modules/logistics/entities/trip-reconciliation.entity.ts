@@ -3,9 +3,9 @@ import { ClosingStockLine } from './trip-planning.entity';
 // The owner's closure of a trip: its cash float settled, posted to the
 // ledger when recorded (LedgerService.postTripReconciliationWithClient), and
 // what was checked. variance = expected handover − cashReturned, where
-// expected handover = advanceAmount + cashCollections + spotCash −
-// totalExpenses − cashDeposited: zero means the driver handed over exactly
-// what they held; positive means cash is missing.
+// expected handover = advanceAmount + cashCollections + spotCash +
+// backhaulCash − totalExpenses − cashDeposited: zero means the driver handed
+// over exactly what they held; positive means cash is missing.
 export type ClosureOutcome = 'pass' | 'approved_exception';
 
 export interface ChecklistItem {
@@ -21,7 +21,8 @@ export type ChecklistArea =
   | 'collections'
   | 'handover'
   | 'expenses'
-  | 'returns';
+  | 'returns'
+  | 'backhaul';
 
 export interface TripReconciliationRecord {
   id: string;
@@ -31,8 +32,9 @@ export interface TripReconciliationRecord {
   cashReturned: string;
   spotCash: string; // cash taken for completed spot sales on the trip
   cashCollections: string; // cash collected at delivery stops, held by the driver
+  backhaulCash: string; // backhaul rent paid to the driver in cash
   cashDeposited: string; // cash the driver paid into the bank on the road
-  directPayments: string; // UPI/bank/cheque paid by customers on the trip — no handover
+  directPayments: string; // UPI/bank/cheque paid on the trip (customers, backhaul rent) — no handover
   cashDeclared: string | null; // what the driver said they were handing over
   variance: string;
   outcome: ClosureOutcome;

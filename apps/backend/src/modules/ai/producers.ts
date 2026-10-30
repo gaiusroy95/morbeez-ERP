@@ -7,8 +7,10 @@ import { suggestPrice, worthSuggesting } from './math/pricing';
 import { bestOrder, planLoads, Point, tourKm } from './math/routing';
 import { highOutliers, median } from './math/anomaly';
 import { adviseTerms, CustomerProfit, profit } from './math/profitability';
+import { DayOrder, unusualLines, usualOrder } from './math/orders';
+import { formatOrderNumber } from '../../common/persistence/document-number';
 
-// The six producers (AI System, section 03). Each reads through a
+// The producers (AI System, section 03; customers' orders, owner Phase 8). Each reads through a
 // read-only client and returns drafts; none can write (DR.1). Numbers are
 // computed here; the explanation is a template over the same evidence
 // (REC.1) — a language model may later rephrase it, never change it.
@@ -132,9 +134,11 @@ export async function pricing(ctx: ProducerContext, inp: ProductInputs): Promise
   const realized = await ctx.data.realizedPrices(ctx.client, ctx.tz, addDays(ctx.today, -13), ctx.today);
   if (![...inp.free.values()].some((f) => f.unitCost)) throw new Suppressed('No costed stock on hand to price');
   const drafts: Draft[] = [];
-  for (const p of inp.products) {
-    const stock = inp.free.get(p.id);
+  for (const product of inp.products) {
+    const stock = inp.free.get(product.id);
     if (!stock?.unitCost) continue;
+    // A product with no list price yet is priced from nothing: its suggestion sets one.
+    const p = { ...product, base_price: product.base_price ?? '0.00' };
     const r = realized.get(p.id) ?? null;
     const s = suggestPrice({ unitCost: stock.unitCost, basePrice: p.base_price, realized: r, targetMarginPct: ctx.settings.targetMarginPct, maxMovePct: ctx.settings.maxPriceMovePct });
     if (!worthSuggesting(s, p.base_price)) continue;
@@ -577,5 +581,138 @@ export async function exceptions(ctx: ProducerContext): Promise<Draft[]> {
       producer: 'baseline:bounced-payments@1',
     });
   }
+  return drafts;
+}
+
+// ---- 7. Customers' orders (owner Phase 8; requirements Part 14 and 23) ----
+
+const shortDay = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+/**
+ * Two kinds of order suggestion, both the customer's own pattern on that
+ * weekday. Expected: they ordered on most of the last four, not yet for
+ * tomorrow — their usual order, to ask for or place (Part 23, order
+ * calling). Check: an order for today or tomorrow under half or over twice
+ * what they usually take, or without a product they always take — "usually
+ * 180–220 kg every Monday and has ordered only 60 kg" (Part 14).
+ */
+export async function orders(ctx: ProducerContext): Promise<Draft[]> {
+  const target = ctx.tomorrow;
+  const history = await ctx.data.customerOrderDays(ctx.client, ctx.tz, addDays(ctx.today, -63), target);
+  const customers = new Map<string, { name: string; days: Map<string, DayOrder> }>();
+  for (const r of history) {
+    const c = customers.get(r.customer_id) ?? { name: r.customer_name, days: new Map<string, DayOrder>() };
+    const d = c.days.get(r.day) ?? new Map<string, number>();
+    d.set(r.product_id, (d.get(r.product_id) ?? 0) + r.qty);
+    c.days.set(r.day, d);
+    customers.set(r.customer_id, c);
+  }
+  const products = new Map((await ctx.data.products(ctx.client)).map((p) => [p.id, p]));
+  const name = (productId: string) => products.get(productId)?.name ?? 'a product';
+  const uom = (productId: string) => products.get(productId)?.uom ?? '';
+  const summary = (d: DayOrder) => [...d.entries()].map(([p, q]) => `${name(p)} ${qty(q, uom(p))}`).join(', ');
+  const prices = await ctx.data.lastPrices(ctx.client);
+  const drafts: Draft[] = [];
+
+  // Expected for tomorrow, not ordered yet.
+  const day = weekday(target);
+  const weeks = [7, 14, 21, 28].map((n) => addDays(target, -n));
+  for (const [customerId, c] of customers) {
+    if (c.days.has(target)) continue;
+    const usual = usualOrder(weeks.map((d) => c.days.get(d) ?? null));
+    if (!usual) continue;
+    const lines = usual.lines
+      .filter((l) => products.has(l.productId))
+      .map((l) => ({
+        productId: l.productId,
+        uom: uom(l.productId),
+        quantity: l.quantity.toFixed(3),
+        // As this customer was last charged; else today's list price (the order form shows either).
+        unitPrice: prices.get(`${customerId}:${l.productId}`) ?? products.get(l.productId)!.base_price ?? '0.00',
+        low: l.low.toFixed(3),
+        high: l.high.toFixed(3),
+      }));
+    if (!lines.length) continue;
+    const what = lines.map((l) => `${qty(l.quantity, l.uom)} ${name(l.productId)}`).join(', ');
+    drafts.push({
+      type: 'order',
+      subjectKind: 'customer',
+      subjectId: customerId,
+      targetDate: target,
+      title: `${c.name} usually orders on ${day}s — ${what}`,
+      proposal: {
+        action: 'delivery_order',
+        customerId,
+        deliveryDate: target,
+        lines,
+        compare: { lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })) },
+      },
+      evidence: [
+        ...weeks.map((d) => ({ fact: `${day}, ${shortDay(d)}`, value: c.days.get(d) ? summary(c.days.get(d)!) : 'No order', source: { kind: 'orders', label: c.name } })),
+        { fact: 'Priced as last charged', value: lines.map((l) => `${name(l.productId)} ${inr(l.unitPrice)}/${l.uom}`).join(', '), source: { kind: 'orders', label: c.name } },
+      ],
+      explanation:
+        `${c.name} ordered on ${usual.ordered} of the last ${usual.weeks} ${day}s and hasn't ordered for tomorrow yet. ` +
+        `What they usually take: ${what}. Ask them — or place it, if they've told you.`,
+      expectedImpact: sumMoney(lines.map((l) => multiplyToMoney(l.quantity, l.unitPrice))),
+      confidence: usual.confidence,
+      sensitive: false,
+      producer: 'baseline:order@1',
+      expiresAt: ctx.endOf(ctx.today),
+    });
+  }
+
+  // Orders for today and tomorrow, far from what the customer takes.
+  for (const on of [ctx.today, target]) {
+    const placed = new Map<string, { number: number; customerId: string; lines: DayOrder }>();
+    for (const r of await ctx.data.ordersFor(ctx.client, on)) {
+      const o = placed.get(r.order_id) ?? { number: r.number, customerId: r.customer_id, lines: new Map<string, number>() };
+      o.lines.set(r.product_id, (o.lines.get(r.product_id) ?? 0) + r.qty);
+      placed.set(r.order_id, o);
+    }
+    const onDay = weekday(on);
+    for (const [orderId, o] of placed) {
+      const c = customers.get(o.customerId);
+      if (!c) continue;
+      const past = [7, 14, 21, 28, 35, 42, 49, 56].map((n) => c.days.get(addDays(on, -n))).filter((d): d is DayOrder => !!d);
+      const flags = unusualLines(o.lines, past);
+      if (!flags.length) continue;
+      const said = (f: (typeof flags)[number]) =>
+        f.kind === 'missing'
+          ? `no ${name(f.productId)} — usually ${qty(f.usual, uom(f.productId))}`
+          : `${qty(f.quantity, uom(f.productId))} of ${name(f.productId)} — usually ${qty(f.low, uom(f.productId))}–${qty(f.high, uom(f.productId))}`;
+      const first = flags[0];
+      const number = formatOrderNumber(o.number);
+      drafts.push({
+        type: 'order',
+        subjectKind: 'customer',
+        subjectId: o.customerId,
+        targetDate: on,
+        title: `${number} for ${c.name}: ${said(first)}`,
+        proposal: {
+          action: 'confirm_order',
+          orderId,
+          orderNumber: number,
+          deliveryDate: on,
+          flags: flags.map((f) => ({ ...f, quantity: f.quantity.toFixed(3), low: f.low.toFixed(3), high: f.high.toFixed(3), usual: f.usual.toFixed(3) })),
+          link: { kind: 'order', id: orderId },
+        },
+        evidence: [
+          ...flags.map((f) => ({ fact: name(f.productId), value: said(f), source: { kind: 'orders', ids: [orderId] } })),
+          { fact: `Their last ${past.length} ${onDay} orders`, value: past.slice(0, 4).map(summary).join(' · '), source: { kind: 'orders', label: c.name } },
+        ],
+        explanation:
+          first.kind === 'missing'
+            ? `${c.name} took ${name(first.productId)} on each of their last ${past.length} ${onDay} orders (usually ${qty(first.usual, uom(first.productId))}); it isn't on ${number}. Confirm whether this is intentional.`
+            : `${c.name} usually orders ${qty(first.low, uom(first.productId))}–${qty(first.high, uom(first.productId))} of ${name(first.productId)} on ${onDay}s and has ordered ${first.kind === 'low' ? 'only ' : ''}${qty(first.quantity, uom(first.productId))} on ${number}. Confirm whether this is intentional.`,
+        expectedImpact: null,
+        confidence: past.length >= 6 ? 'solid' : 'rough_guide',
+        sensitive: false,
+        producer: 'baseline:order-check@1',
+        expiresAt: ctx.endOf(on),
+      });
+    }
+  }
+  if (!drafts.length) throw new Suppressed('No customer orders on a weekly pattern yet, and no order is far from one');
   return drafts;
 }

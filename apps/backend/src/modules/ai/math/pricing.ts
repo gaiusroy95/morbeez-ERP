@@ -71,6 +71,59 @@ export function suggestPrice(p: PriceInputs): PriceSuggestion {
   return { price: fromCents(price), bandMin: fromCents(bandMin), bandMax: fromCents(bandMax), reason, movePct, steps };
 }
 
+/**
+ * The minimum sustainable price (requirements Part 15) as far as the books
+ * show it today: what the stock cost, plus what's usually lost to spoilage
+ * (paid for, never sold, so carried by what is), plus delivery per unit;
+ * the target adds the owner's margin. Processing, packaging and the rest
+ * join when the books record them.
+ */
+export interface CostBuildUp {
+  unitCost: string;
+  /** Share of what's bought usually lost, 0–0.5. */
+  shrinkRate: number;
+  spoilage: string;
+  delivery: string | null;
+  sustainable: string;
+  target: string;
+}
+
+export function costBuildUp(p: { unitCost: string; shrinkRate: number; deliveryPerUnit: string | null; targetMarginPct: string }): CostBuildUp {
+  const cost = toCents(p.unitCost);
+  const s = Math.min(Math.max(p.shrinkRate, 0), 0.5);
+  const spoilage = BigInt(Math.round((Number(cost) * s) / (1 - s)));
+  const delivery = p.deliveryPerUnit === null ? 0n : toCents(p.deliveryPerUnit);
+  const sustainable = cost + spoilage + delivery;
+  const target = sustainable + pctOf(sustainable, bps(p.targetMarginPct));
+  return {
+    unitCost: fromCents(cost),
+    shrinkRate: Math.round(s * 1000) / 1000,
+    spoilage: fromCents(spoilage),
+    delivery: p.deliveryPerUnit === null ? null : fromCents(delivery),
+    sustainable: fromCents(sustainable),
+    target: fromCents(target),
+  };
+}
+
+export type PriceStanding = 'no_cost' | 'below_cost' | 'below_sustainable' | 'below_target' | 'on_target';
+
+/** Where today's price stands against the build-up. */
+export function priceStanding(currentPrice: string, b: CostBuildUp | null): PriceStanding {
+  if (!b) return 'no_cost';
+  const price = toCents(currentPrice);
+  if (price < toCents(b.unitCost)) return 'below_cost';
+  if (price < toCents(b.sustainable)) return 'below_sustainable';
+  if (price < toCents(b.target)) return 'below_target';
+  return 'on_target';
+}
+
+/** What today's price keeps over the sustainable price, as a share of it; null without a price. */
+export function marginAt(currentPrice: string, sustainable: string): number | null {
+  const price = toCents(currentPrice);
+  if (price <= 0n) return null;
+  return Math.round(Number(((price - toCents(sustainable)) * 1_000n) / price)) / 10;
+}
+
 /** Worth suggesting: the move is at least ₹0.50 and 2%, or today's price is below cost. */
 export function worthSuggesting(s: PriceSuggestion, basePrice: string): boolean {
   if (s.reason === 'below_cost' && toCents(basePrice) < toCents(s.price)) return true;

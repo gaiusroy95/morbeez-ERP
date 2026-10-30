@@ -15,3 +15,5 @@ export * from './crates';
 export * from './spot-sales';
 export * from './ai';
 export * from './delegation';
+export * from './chat';
+export * from './devices';

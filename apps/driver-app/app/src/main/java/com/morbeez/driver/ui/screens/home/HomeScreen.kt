@@ -68,6 +68,8 @@ import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.data.remote.dto.FarmStopOutcomeResponse
 import com.morbeez.driver.data.remote.dto.TripVehicleStockResponse
 import com.morbeez.driver.ui.screens.farm.farmSummaryOf
+import com.morbeez.driver.ui.screens.backhaul.BackhaulLogic
+import com.morbeez.driver.ui.screens.backhaul.BackhaulStage
 import com.morbeez.driver.ui.screens.deliver.DeliveryLogic
 import com.morbeez.driver.ui.screens.deliver.leftOnVehicle
 import androidx.compose.material3.AlertDialog
@@ -108,7 +110,13 @@ fun HomeScreen(
     onOpenExpenses: (tripId: String) -> Unit,
     onOpenSync: () -> Unit,
     onOpenVehicleStock: () -> Unit,
+    onOpenCollections: () -> Unit,
+    onReturn: () -> Unit,
+    onHandover: () -> Unit,
+    onTripSummary: () -> Unit,
+    onOpenBackhaul: () -> Unit,
     onSignedOut: () -> Unit,
+    links: DrawerLinks = DrawerLinks(),
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -143,9 +151,15 @@ fun HomeScreen(
         onOpenSync = onOpenSync,
         onOpenVehicleStock = onOpenVehicleStock,
         onStartDeliveries = viewModel::startDeliveries,
+        onOpenCollections = onOpenCollections,
+        onReturn = onReturn,
+        onHandover = onHandover,
+        onTripSummary = onTripSummary,
+        onOpenBackhaul = onOpenBackhaul,
         onSync = viewModel::requestSync,
         onSignOut = viewModel::signOut,
         onSignedOut = onSignedOut,
+        links = links,
     )
 }
 
@@ -166,6 +180,12 @@ internal fun HomeShell(
     onSignedOut: () -> Unit,
     onOpenVehicleStock: () -> Unit = {},
     onStartDeliveries: () -> Unit = {},
+    onOpenCollections: () -> Unit = {},
+    onReturn: () -> Unit = {},
+    onHandover: () -> Unit = {},
+    onTripSummary: () -> Unit = {},
+    onOpenBackhaul: () -> Unit = {},
+    links: DrawerLinks = DrawerLinks(),
 ) {
     val scope = rememberCoroutineScope()
     ModalNavigationDrawer(
@@ -183,6 +203,9 @@ internal fun HomeShell(
                 onSync = onSync,
                 onSignOut = onSignOut,
                 onSignedOut = onSignedOut,
+                onOpenCollections = onOpenCollections,
+                onOpenBackhaul = onOpenBackhaul,
+                links = links,
             )
         },
     ) {
@@ -192,6 +215,7 @@ internal fun HomeShell(
                 onMenu = { scope.launch { drawer.open() } },
                 onSync = onSync,
                 onOpenSync = onOpenSync,
+                onChat = links.chat,
             )
             Box(Modifier.weight(1f)) {
                 when (tab) {
@@ -204,6 +228,12 @@ internal fun HomeShell(
                         onSync = onSync,
                         onOpenSync = onOpenSync,
                         onOpenVehicleStock = onOpenVehicleStock,
+                        onOpenCollections = onOpenCollections,
+                        onReturn = onReturn,
+                        onHandover = onHandover,
+                        onTripSummary = onTripSummary,
+                        onOpenBackhaul = onOpenBackhaul,
+                        onOpenEarnings = links.earnings,
                     )
                     HomeTab.PROCUREMENT -> StopsTab(state, "pickup", onOpenStop, onStartDay, onOpenVehicleStock, onStartDeliveries)
                     HomeTab.DELIVERY -> StopsTab(state, "delivery", onOpenStop, onStartDay, onOpenVehicleStock, onStartDeliveries)
@@ -219,7 +249,7 @@ internal fun HomeShell(
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun StatusHeader(state: HomeUiState, onMenu: () -> Unit, onSync: () -> Unit, onOpenSync: () -> Unit) {
+private fun StatusHeader(state: HomeUiState, onMenu: () -> Unit, onSync: () -> Unit, onOpenSync: () -> Unit, onChat: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -253,6 +283,23 @@ private fun StatusHeader(state: HomeUiState, onMenu: () -> Unit, onSync: () -> U
                 Text(pluralStringResource(R.plurals.stuck, state.link.failed, state.link.failed), style = MaterialTheme.typography.labelMedium, color = Fresh.accentInk)
             }
         }
+        // The office's word (D9): what hasn't been read, on the button.
+        Box {
+            RoundIconButton(Glyph.Chat, stringResource(R.string.chat_title), onChat)
+            if (state.chatUnread > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Fresh.warningBright),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(if (state.chatUnread > 9) "9+" else "${state.chatUnread}", style = MaterialTheme.typography.labelSmall, color = Fresh.accentInk)
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
         RoundIconButton(
             glyph = Glyph.Sync,
             description = stringResource(if (state.link.syncing) R.string.syncing else R.string.sync_now),
@@ -293,6 +340,12 @@ private fun DashboardTab(
     onSync: () -> Unit,
     onOpenSync: () -> Unit,
     onOpenVehicleStock: () -> Unit,
+    onOpenCollections: () -> Unit,
+    onReturn: () -> Unit,
+    onHandover: () -> Unit,
+    onTripSummary: () -> Unit,
+    onOpenBackhaul: () -> Unit,
+    onOpenEarnings: () -> Unit = {},
 ) {
     val trip = state.trip
     val stops = state.stops
@@ -301,7 +354,7 @@ private fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         GreetingCard(state)
-        NextActionCard(state, DayLogic.nextActionOf(trip, stops), onStartDay, onOpenStop, onOpenExpenses, onSync)
+        NextActionCard(state, DayLogic.nextActionOf(trip, stops, state.backhauls), onStartDay, onOpenStop, onSync, onReturn, onHandover, onTripSummary, onOpenCollections, onOpenBackhaul)
         if (state.link.failed > 0) {
             Box(Modifier.clip(RoundedCornerShape(14.dp)).clickable(role = Role.Button, onClick = onOpenSync)) {
                 Callout(pluralStringResource(R.plurals.failed_ops, state.link.failed, state.link.failed), Tone.Bad)
@@ -317,7 +370,20 @@ private fun DashboardTab(
         }
         Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             val earned = state.day?.earnedThisWeek
-            Tile(Glyph.Rupee, Fresh.infoTint, Fresh.info, stringResource(R.string.tile_earned), if (earned == null) "—" else stringResource(R.string.rupees, DayLogic.rupees(earned)), Modifier.weight(1f))
+            if (trip != null) {
+                Tile(
+                    Glyph.Wallet,
+                    Fresh.warningTint,
+                    Fresh.warning,
+                    stringResource(R.string.drawer_collections),
+                    pluralStringResource(R.plurals.n_due, state.collectionsDue, state.collectionsDue),
+                    Modifier.weight(1f),
+                    onClick = onOpenCollections,
+                )
+            }
+            Tile(Glyph.Rupee, Fresh.infoTint, Fresh.info, stringResource(R.string.tile_earned), if (earned == null) "—" else stringResource(R.string.rupees, DayLogic.rupees(earned)), Modifier.weight(1f), onClick = onOpenEarnings)
+        }
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             // The phone's reckoning: the server's last count and what's been done since.
             val onVehicle = if (state.stock == null && state.stockLines.isEmpty()) null else leftOnVehicle(state.stockLines).toPlainString()
             Tile(
@@ -329,6 +395,7 @@ private fun DashboardTab(
                 Modifier.weight(1f),
                 onClick = if (trip != null) onOpenVehicleStock else null,
             )
+            Spacer(Modifier.weight(1f))
         }
         state.stock?.takeIf { it.rows.isNotEmpty() }?.let { StockCard(it, state.day?.refreshedAt) }
     }
@@ -430,8 +497,12 @@ private fun NextActionCard(
     action: NextAction,
     onStartDay: () -> Unit,
     onOpenStop: (String, String, Boolean) -> Unit,
-    onOpenExpenses: (String) -> Unit,
     onSync: () -> Unit,
+    onReturn: () -> Unit,
+    onHandover: () -> Unit,
+    onTripSummary: () -> Unit,
+    onOpenCollections: () -> Unit,
+    onOpenBackhaul: () -> Unit,
 ) {
     val trip = state.trip
     val goTo = action as? NextAction.GoTo
@@ -461,15 +532,58 @@ private fun NextActionCard(
                     DarkButton(stringResource(R.string.start_day), Glyph.Chevrons, onStartDay, Modifier.padding(top = 14.dp).fillMaxWidth())
                 }
                 is NextAction.GoTo -> NextStopBody(state, action.stop)
+                is NextAction.Backhaul -> {
+                    val b = action.backhaul
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+                        Pill(stringResource(R.string.drawer_backhaul), Tone.Lime)
+                        Spacer(Modifier.width(10.dp))
+                        Text(stringResource(R.string.rupees, DayLogic.rupees(b.rent)), style = MaterialTheme.typography.labelLarge, color = Fresh.onCarbon)
+                    }
+                    val stage = BackhaulLogic.stageOf(b)
+                    CardTitle(
+                        stringResource(
+                            when (stage) {
+                                BackhaulStage.OFFERED -> R.string.backhaul_available
+                                BackhaulStage.TO_PAY -> R.string.backhaul_payment
+                                else -> R.string.backhaul_in_progress
+                            },
+                        ),
+                    )
+                    CardBody(stringResource(R.string.backhaul_route, b.pickupPlace, b.dropPlace))
+                    DarkButton(
+                        stringResource(
+                            when (stage) {
+                                BackhaulStage.OFFERED -> R.string.see_backhaul
+                                BackhaulStage.TO_PAY -> R.string.receive_payment
+                                else -> R.string.continue_backhaul
+                            },
+                        ),
+                        if (stage == BackhaulStage.TO_PAY) Glyph.Rupee else Glyph.Truck,
+                        onOpenBackhaul,
+                        Modifier.padding(top = 14.dp).fillMaxWidth(),
+                    )
+                }
+                NextAction.Return -> {
+                    CardTitle(stringResource(R.string.all_stops_done))
+                    CardBody(
+                        if (state.collectionsDue > 0) pluralStringResource(R.plurals.collect_then_return, state.collectionsDue, state.collectionsDue)
+                        else stringResource(R.string.return_hint),
+                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (state.collectionsDue > 0) DarkButton(stringResource(R.string.drawer_collections), Glyph.Wallet, onOpenCollections, Modifier.weight(1f), emphasized = false)
+                        DarkButton(stringResource(R.string.return_to_base), Glyph.Truck, onReturn, Modifier.weight(1f))
+                    }
+                }
                 NextAction.Handover -> {
                     CardTitle(stringResource(R.string.all_stops_done))
                     CardBody(stringResource(R.string.all_stops_done_hint))
-                    if (trip != null) DarkButton(stringResource(R.string.handover_submit), Glyph.Rupee, { onOpenExpenses(trip.id) }, Modifier.padding(top = 14.dp).fillMaxWidth())
+                    DarkButton(stringResource(R.string.cash_handover), Glyph.Rupee, onHandover, Modifier.padding(top = 14.dp).fillMaxWidth())
                 }
                 NextAction.AwaitingOwner -> {
                     CardTitle(stringResource(R.string.status_completed))
                     val cash = trip?.cashDeclared
                     CardBody(if (cash != null) stringResource(R.string.submitted_callout_cash, DayLogic.rupees(cash)) else stringResource(R.string.submitted_callout))
+                    DarkButton(stringResource(R.string.summary_title), Glyph.File, onTripSummary, Modifier.padding(top = 14.dp).fillMaxWidth(), emphasized = false)
                 }
                 is NextAction.OnHold -> {
                     CardTitle(stringResource(R.string.status_on_hold))

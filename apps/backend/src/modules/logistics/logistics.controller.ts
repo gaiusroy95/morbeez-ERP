@@ -29,14 +29,17 @@ import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
 import { VersionDto } from './dto/version.dto';
 import { ReorderStopsDto } from './dto/reorder-stops.dto';
-import { RecordExpenseDto } from './dto/record-expense.dto';
+import { DecideExpenseDto, RecordExpenseDto, UploadExpensePhotoDto } from './dto/record-expense.dto';
 import { ReconcileTripDto } from './dto/reconcile-trip.dto';
 import { CompleteDeliveryDto } from './dto/complete-delivery.dto';
 import { UploadPhotoDto } from './dto/upload-photo.dto';
+import { RaiseStopDisputeDto, ReturnTripDto } from './dto/return-trip.dto';
+import { TripCollections } from './entities/trip-collections.entity';
+import { InvoiceDispute } from '../finance/disputes.service';
 import { RecordCollectionDto } from './dto/record-collection.dto';
 import { TripRecord } from './entities/trip.entity';
 import { TripStopRecord } from './entities/trip-stop.entity';
-import { TripExpenseRecord } from './entities/trip-expense.entity';
+import { TripExpensePhotoRecord, TripExpenseRecord } from './entities/trip-expense.entity';
 import { TripReconciliationRecord } from './entities/trip-reconciliation.entity';
 import { TripStopPhotoRecord } from './entities/trip-stop-photo.entity';
 import { CustomerCollectionRecord } from './entities/customer-collection.entity';
@@ -51,8 +54,21 @@ import { CompletePickupStopDto } from './dto/complete-pickup-stop.dto';
 import { ReportProblemDto } from './dto/report-problem.dto';
 import { Authority } from './delegation';
 import { TripPlanQueryDto, TripsBoardQueryDto } from './dto/trip-planning.dto';
-import { DriverDay, TripPlan, TripQuantities, TripsBoard, TripVehicleStock } from './entities/trip-planning.entity';
+import { DriverDay, OnTheRoad, TripPlan, TripQuantities, TripsBoard, TripVehicleStock, VehicleTrips } from './entities/trip-planning.entity';
 import { StartTripDto } from './dto/start-trip.dto';
+import { DriverRecordsService } from './driver-records.service';
+import { DriverRangeQueryDto, EarningsQueryDto } from './dto/driver-records.dto';
+import {
+  DriverApprovals,
+  DriverProfile,
+  DriverSettlement,
+  DriverTripSummary,
+  MyEarnings,
+  MyExpenses,
+  MyVehicle,
+  TripHistory,
+  TripIncentives,
+} from './entities/driver-records.entity';
 
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
@@ -65,7 +81,10 @@ function isDispatcher(user: AuthContext): boolean {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('logistics/trips')
 export class LogisticsController {
-  constructor(private readonly logisticsService: LogisticsService) {}
+  constructor(
+    private readonly logisticsService: LogisticsService,
+    private readonly driverRecords: DriverRecordsService,
+  ) {}
 
   // ---- Trips ----
 
@@ -93,6 +112,77 @@ export class LogisticsController {
   @RequirePermissions('logistics:read')
   myDay(@CurrentUser() user: AuthContext): Promise<DriverDay> {
     return this.logisticsService.getDriverDay(user.tenantId, user.userId);
+  }
+
+  // ---- The driver's own records (driver app D6) ----
+
+  /** My Expenses: what the driver spent, and the vehicle's mileage. */
+  @Get('mine/expenses')
+  @RequirePermissions('logistics:read')
+  myExpenses(@CurrentUser() user: AuthContext, @Query() q: DriverRangeQueryDto): Promise<MyExpenses> {
+    return this.driverRecords.myExpenses(user.tenantId, user.userId, q.from, q.to);
+  }
+
+  /** What the driver raised that the owner decides: expenses, disputes, handovers. */
+  @Get('mine/approvals')
+  @RequirePermissions('logistics:read')
+  myApprovals(@CurrentUser() user: AuthContext): Promise<DriverApprovals> {
+    return this.driverRecords.myApprovals(user.tenantId, user.userId);
+  }
+
+  /** Trip History: the driver's past trips, each with what it did. */
+  @Get('mine/history')
+  @RequirePermissions('logistics:read')
+  myHistory(@CurrentUser() user: AuthContext, @Query() q: DriverRangeQueryDto): Promise<TripHistory> {
+    return this.driverRecords.myHistory(user.tenantId, user.userId, q.from, q.to);
+  }
+
+  /** The vehicle the driver drives: what's due, what's in force, its mileage. None before their first trip. */
+  @Get('mine/vehicle')
+  @RequirePermissions('logistics:read')
+  async myVehicle(@CurrentUser() user: AuthContext): Promise<MyVehicle> {
+    return { vehicle: await this.driverRecords.myVehicle(user.tenantId, user.userId) };
+  }
+
+  /** My Earnings (D7): fixed pay and each incentive — today, this week or this month. */
+  @Get('mine/earnings')
+  @RequirePermissions('logistics:read')
+  myEarnings(@CurrentUser() user: AuthContext, @Query() q: EarningsQueryDto): Promise<MyEarnings> {
+    return this.driverRecords.myEarnings(user.tenantId, user.userId, q.period ?? 'today');
+  }
+
+  /** The driver's weekly pay: approved and paid settlements. */
+  @Get('mine/settlements')
+  @RequirePermissions('logistics:read')
+  mySettlements(@CurrentUser() user: AuthContext): Promise<DriverSettlement[]> {
+    return this.driverRecords.mySettlements(user.tenantId, user.userId);
+  }
+
+  /** "I received it": the driver confirms a paid settlement reached them. */
+  @Post('mine/settlements/:settlementId/received')
+  @RequirePermissions('logistics:write')
+  acknowledgeSettlement(@CurrentUser() user: AuthContext, @Param('settlementId', ParseUUIDPipe) settlementId: string): Promise<DriverSettlement> {
+    return this.driverRecords.acknowledgeSettlement(user.tenantId, user.userId, settlementId);
+  }
+
+  @Get('mine/profile')
+  @RequirePermissions('logistics:read')
+  myProfile(@CurrentUser() user: AuthContext): Promise<DriverProfile> {
+    return this.driverRecords.myProfile(user.tenantId, user.userId);
+  }
+
+  /** Trips on the road now and their crew: who is on a trip, which vehicles are out (redesign Phase 7). */
+  @Get('on-the-road')
+  @RequirePermissions('logistics:dispatch')
+  onTheRoad(@CurrentUser() user: AuthContext): Promise<OnTheRoad[]> {
+    return this.logisticsService.onTheRoad(user.tenantId);
+  }
+
+  /** A vehicle's trips: totals, its latest crew and trips (Vehicle details, redesign Phase 7). */
+  @Get('vehicles/:vehicleId')
+  @RequirePermissions('logistics:dispatch')
+  vehicleTrips(@CurrentUser() user: AuthContext, @Param('vehicleId', ParseUUIDPipe) vehicleId: string): Promise<VehicleTrips> {
+    return this.logisticsService.vehicleTrips(user.tenantId, vehicleId);
   }
 
   /** The owner's Trips list: Today / Tomorrow / All, with search (redesign V1.1). */
@@ -155,6 +245,20 @@ export class LogisticsController {
   // ---- Route: stops ----
 
   /** Product by product: loaded, picked up, delivered, came back, and what should be on the vehicle. */
+  /** Trip Details (driver app D6): one trip in full, its stops, collections, backhauls and expenses. */
+  @Get(':id/summary')
+  @RequirePermissions('logistics:read')
+  tripSummary(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<DriverTripSummary> {
+    return this.driverRecords.tripSummary(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** What the driver earned on the trip (D7): kept at the owner's close, else an estimate. */
+  @Get(':id/incentives')
+  @RequirePermissions('logistics:read')
+  tripIncentives(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<TripIncentives> {
+    return this.driverRecords.tripIncentives(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
   @Get(':id/quantities')
   @RequirePermissions('logistics:read')
   quantities(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) tripId: string): Promise<TripQuantities> {
@@ -213,6 +317,32 @@ export class LogisticsController {
     @Body() dto: CompletePickupStopDto,
   ): Promise<TripStopRecord> {
     return this.logisticsService.completePickupStop(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto ?? {});
+  }
+
+  /** Return (driver app D4): the closing KM when the vehicle is back. (':id/return' is the owner sending a trip back to the driver.) */
+  @Post(':id/closing-km')
+  @RequirePermissions('logistics:write')
+  returnTrip(@CurrentUser() user: AuthContext, @Param('id') tripId: string, @Body() dto: ReturnTripDto): Promise<TripRecord> {
+    return this.logisticsService.returnTrip(user.tenantId, user.userId, isDispatcher(user), tripId, dto);
+  }
+
+  /** Collections (driver app D4): the customers delivered on the trip, with what each owes in all. */
+  @Get(':id/collections')
+  @RequirePermissions('logistics:read')
+  tripCollections(@CurrentUser() user: AuthContext, @Param('id') tripId: string): Promise<TripCollections> {
+    return this.logisticsService.getTripCollections(user.tenantId, user.userId, isDispatcher(user), tripId);
+  }
+
+  /** A customer disputes part of what they owe (driver app D4): it goes to the owner. */
+  @Post(':id/stops/:stopId/disputes')
+  @RequirePermissions('logistics:write')
+  raiseStopDispute(
+    @CurrentUser() user: AuthContext,
+    @Param('id') tripId: string,
+    @Param('stopId') stopId: string,
+    @Body() dto: RaiseStopDisputeDto,
+  ): Promise<InvoiceDispute> {
+    return this.logisticsService.raiseStopDispute(user.tenantId, user.userId, isDispatcher(user), tripId, stopId, dto);
   }
 
   /** Start Trip (driver app D3): the delivery run sets off. */
@@ -313,6 +443,34 @@ export class LogisticsController {
     @Headers('idempotency-key') key?: string,
   ): Promise<TripExpenseRecord> {
     return this.logisticsService.recordExpense(user.tenantId, user.userId, isDispatcher(user), tripId, dto, idempotencyKey(key));
+  }
+
+  /** The bill, kept with the expense (driver app D6). */
+  @Post(':id/expenses/:expenseId/photos')
+  @RequirePermissions('logistics:write')
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PHOTO_BYTES } }))
+  uploadExpensePhoto(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) tripId: string,
+    @Param('expenseId', ParseUUIDPipe) expenseId: string,
+    @Body() _dto: UploadExpensePhotoDto,
+    @UploadedFile() file?: UploadedPhoto,
+  ): Promise<TripExpensePhotoRecord> {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.logisticsService.addExpensePhoto(user.tenantId, user.userId, isDispatcher(user), tripId, expenseId, file);
+  }
+
+  /** The owner approves or rejects an expense beyond the driver's authority (Approvals inbox). */
+  @Post(':id/expenses/:expenseId/decision')
+  @RequirePermissions('logistics:reconcile')
+  decideExpense(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) tripId: string,
+    @Param('expenseId', ParseUUIDPipe) expenseId: string,
+    @Body() dto: DecideExpenseDto,
+  ): Promise<TripExpenseRecord> {
+    return this.logisticsService.decideExpense(user.tenantId, user.userId, tripId, expenseId, dto);
   }
 
   // ---- Collections ----

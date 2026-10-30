@@ -10,6 +10,7 @@ import { TripReconciliationsRepository } from './repositories/trip-reconciliatio
 import { TripStopPhotosRepository } from './repositories/trip-stop-photos.repository';
 import { FarmStopsRepository } from './repositories/farm-stops.repository';
 import { DeliveryStopsRepository } from './repositories/delivery-stops.repository';
+import { TripCollectionsRepository } from './repositories/trip-collections.repository';
 import { CratesModule } from '../crates/crates.module';
 import { TripStopPodsRepository } from './repositories/trip-stop-pods.repository';
 import { CustomerCollectionsRepository } from './repositories/customer-collections.repository';
@@ -26,19 +27,26 @@ import { OrdersModule } from '../orders/orders.module';
 import { FinanceModule } from '../finance/finance.module';
 import { RoutesModule } from '../routes/routes.module';
 import { TripPlanningRepository } from './repositories/trip-planning.repository';
+import { BackhaulsRepository } from './repositories/backhauls.repository';
+import { BackhaulService } from './backhaul.service';
+import { BackhaulController } from './backhaul.controller';
+import { DriverRecordsRepository } from './repositories/driver-records.repository';
+import { DriverRecordsService } from './driver-records.service';
+import { TripIncentivesRepository } from './repositories/trip-incentives.repository';
+import { TripIncentivesService } from './trip-incentives.service';
 
 // Bounded context: Logistics — trip planning (vehicle, driver, route),
 // stop execution (a Procurement pickup or a customer delivery), photos,
 // proof of delivery, cash collections, expenses, and reconciliation. Owns
 // fulfilment.trip/trip_stop/trip_expense/trip_reconciliation/
-// trip_stop_photo/trip_stop_pod and money.customer_collection; reaches
+// trip_stop_photo/trip_stop_pod/backhaul/trip_expense_photo and money.customer_collection; reaches
 // Vehicles/Workforce for assignment validation and trip-ownership
 // resolution, and Procurement/Orders for completing the stops themselves —
 // their public service APIs only (Constitution I.3-I.4). A collection is
 // also recorded as a Finance customer payment, in the same transaction.
 @Module({
   imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule, RoutesModule, CratesModule],
-  controllers: [LogisticsController, PinsController, DelegationController],
+  controllers: [LogisticsController, PinsController, DelegationController, BackhaulController],
   providers: [
     LogisticsService,
     PinsService,
@@ -49,6 +57,7 @@ import { TripPlanningRepository } from './repositories/trip-planning.repository'
     TripStopPhotosRepository,
     FarmStopsRepository,
     DeliveryStopsRepository,
+    TripCollectionsRepository,
     TripStopPodsRepository,
     CustomerCollectionsRepository,
     TripCashDepositsRepository,
@@ -56,6 +65,12 @@ import { TripPlanningRepository } from './repositories/trip-planning.repository'
     DelegationService,
     DeliveryMeasuresRepository,
     TripPlanningRepository,
+    BackhaulsRepository,
+    BackhaulService,
+    DriverRecordsRepository,
+    DriverRecordsService,
+    TripIncentivesRepository,
+    TripIncentivesService,
   ],
   exports: [LogisticsService, DelegationService],
 })

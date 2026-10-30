@@ -16,6 +16,7 @@ jest.mock('./producers', () => {
     logisticsLoad: jest.fn(),
     customerTerms: jest.fn(),
     exceptions: jest.fn(),
+    orders: jest.fn(),
   };
 });
 
@@ -99,6 +100,7 @@ describe('AiService.run', () => {
     (producers.logisticsRoute as jest.Mock).mockRejectedValue(new Error('boom'));
     (producers.logisticsLoad as jest.Mock).mockResolvedValue([]);
     (producers.exceptions as jest.Mock).mockResolvedValue([{ type: 'exception', title: 'Short' }]);
+    (producers.orders as jest.Mock).mockResolvedValue([{ type: 'order', title: 'Hotel Sagar usually orders on Tuesdays' }]);
 
     const r = await service.run(owner);
     expect(db.withTenantReadOnly).toHaveBeenCalledWith('t', 'morbeez_ai', expect.any(Function));
@@ -107,10 +109,10 @@ describe('AiService.run', () => {
       procurement: 'No sales in the last 4 weeks to forecast from',
       logistics_route: 'Could not compute: boom',
     });
-    expect(r.produced).toMatchObject({ pricing: 1, exception: 1, logistics_load: 0 });
+    expect(r.produced).toMatchObject({ pricing: 1, exception: 1, logistics_load: 0, order: 1 });
     expect(producers.customerTerms).not.toHaveBeenCalled();
     expect(queries.filter((q) => q === 'ROLLBACK TO SAVEPOINT producer')).toHaveLength(2);
     expect(repo.expireOpen).toHaveBeenCalledWith(expect.anything(), 't', expect.not.arrayContaining(['customer_terms']));
-    expect(repo.insert).toHaveBeenCalledTimes(2);
+    expect(repo.insert).toHaveBeenCalledTimes(3);
   });
 });
