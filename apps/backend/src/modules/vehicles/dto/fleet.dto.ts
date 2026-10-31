@@ -20,6 +20,26 @@ export class VehicleProfileDto {
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1950) @Max(2100) manufactureYear?: number | null;
 }
 
+export class FastagDto {
+  @ApiProperty({ description: "The tag's number, or the bank's id for it, as on its statement" }) @IsString() @MinLength(1) @MaxLength(40) tagId!: string;
+  @ApiPropertyOptional({ description: 'The bank or wallet that issued it' }) @IsOptional() @IsString() @MaxLength(60) issuer?: string | null;
+  @ApiProperty({ description: 'Tell the owner when the balance falls below this' }) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) lowBalance!: number;
+}
+
+export class FastagRechargeDto {
+  @ApiProperty() @IsNumber({ maxDecimalPlaces: 2 }) @Min(1) @Max(1_000_000) amount!: number;
+  @ApiProperty() @Matches(ISO_DATE, DATE) rechargedOn!: string;
+  @ApiProperty({ enum: PAID_FROM }) @IsIn(PAID_FROM) paidFrom!: 'bank' | 'cash_on_hand';
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) reference?: string;
+}
+
+export class FastagChargeDto {
+  @ApiProperty() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(1_000_000) amount!: number;
+  @ApiProperty() @Matches(ISO_DATE, DATE) chargedOn!: string;
+  @ApiProperty({ description: "What it was, as on the tag's statement: a toll plaza no trip recorded, the bank's fee" }) @IsString() @MinLength(3) @MaxLength(200) notes!: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(80) reference?: string;
+}
+
 export class RecordFuelDto {
   @ApiProperty() @IsUUID() vehicleId!: string;
   @ApiProperty() @Matches(ISO_DATE, DATE) filledOn!: string;

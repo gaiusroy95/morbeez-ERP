@@ -6,7 +6,8 @@
 //
 //   1. E2E_RESET_CMD  — empty database → migrations → dev seed → master data;
 //      then the local Redis is emptied (rate-limit counters, reset-redis.js)
-//   2. start the API  — E2E_API_CMD (as morbeez_app, so RLS applies)
+//   2. start the API  — E2E_API_CMD (as morbeez_app, so RLS applies), with
+//      the chain's own settings (CHAIN_ENV) on top of the run's
 //   3. the chain's suites, in order — each module's API suite, then its UI
 //   4. stop the API
 //
@@ -51,7 +52,8 @@ const CHAINS = {
   // the farmer stop (D2), delivery (D3), collections, return and handover (D4), backhaul (D5), then the owner's
   // Approvals, Reports, Settings, Profile, Workforce & Vehicles (Phase 7), then the driver's expenses, approvals,
   // trips and vehicle (D6), then the incentive engine and the driver's earnings (D7), then the driver–owner chat (D9),
-  // then AI Orders, AI Pricing, AI Calling and driver phones' sync (Phase 8); runs on the seed, in this order.
+  // then AI Orders, AI Pricing, AI Calling and driver phones' sync (Phase 8), then what the phone's offline queue
+  // counts on from the server (D8), then the driver's requests and the FASTag (D10); runs on the seed, in this order.
   redesign: [
     'redesign-home-e2e.js',
     'redesign-procurement-e2e.js',
@@ -70,7 +72,33 @@ const CHAINS = {
     'driver-earnings-e2e.js',
     'driver-chat-e2e.js',
     'redesign-ai-e2e.js',
+    'field-hardening-e2e.js',
+    'driver-requests-fastag-e2e.js',
   ],
+  // WhatsApp orders, Claude reading them, automated calls — against local
+  // stand-ins for Meta, Anthropic and Twilio (CHAIN_ENV); makes its own data.
+  integrations: ['integrations-e2e.js'],
+};
+
+// What a chain's API needs beyond the run's environment. The integrations
+// chain points every outside service at the stand-in its suite starts on
+// STANDIN (nothing leaves the machine), with test keys only.
+const STANDIN = `http://127.0.0.1:${process.env.E2E_STANDIN_PORT || 3998}`;
+const CHAIN_ENV = {
+  integrations: {
+    PUBLIC_API_URL: API,
+    WHATSAPP_VERIFY_TOKEN: 'e2e-verify-token',
+    WHATSAPP_APP_SECRET: 'e2e-app-secret-0123',
+    WHATSAPP_ACCESS_TOKEN: 'e2e-access-token',
+    WHATSAPP_API_BASE: `${STANDIN}/graph`,
+    ANTHROPIC_API_KEY: 'e2e-anthropic-key',
+    ANTHROPIC_BASE_URL: `${STANDIN}/anthropic`,
+    TWILIO_ACCOUNT_SID: `AC${'0'.repeat(32)}`,
+    TWILIO_AUTH_TOKEN: 'e2e-twilio-token',
+    TWILIO_FROM_NUMBER: '+10000000000',
+    TWILIO_API_BASE: `${STANDIN}/twilio`,
+    E2E_STANDIN_URL: STANDIN,
+  },
 };
 
 const REPO = path.resolve(__dirname, '../..');
@@ -83,8 +111,8 @@ function sh(cmd) {
   if (r.status !== 0) throw new Error(`"${cmd}" exited ${r.status}`);
 }
 
-function background(cmd, name) {
-  const child = spawn(cmd, { cwd: REPO, shell: true, env: process.env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+function background(cmd, name, env = process.env) {
+  const child = spawn(cmd, { cwd: REPO, shell: true, env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
   const tail = [];
   const keep = (d) => {
     tail.push(...d.toString().split('\n'));
@@ -112,9 +140,9 @@ async function waitFor(url, child, seconds = 90) {
   throw new Error(`${url} did not answer within ${seconds}s\n${child.tail()}`);
 }
 
-function runSuite(file) {
+function runSuite(file, env = process.env) {
   console.log(`\n== ${file}`);
-  const r = spawnSync(process.execPath, [path.join(__dirname, 'suites', file)], { cwd: REPO, env: process.env, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(__dirname, 'suites', file)], { cwd: REPO, env, encoding: 'utf8' });
   process.stdout.write(r.stdout);
   process.stderr.write(r.stderr);
   const failed = r.status !== 0 || /^(FAIL|FAILED)\b/m.test(r.stdout);
@@ -135,11 +163,12 @@ function runSuite(file) {
       console.log(`\n##### ${c}`);
       sh(RESET);
       sh(`node ${path.join(__dirname, 'reset-redis.js')}`);
-      const api = background(API_CMD, 'API');
+      const env = { ...process.env, ...(CHAIN_ENV[c] ?? {}) };
+      const api = background(API_CMD, 'API', env);
       try {
         await waitFor(`${API}/health`, api);
         await waitFor(`${BASE}/login`, web);
-        for (const file of CHAINS[c]) results.push({ chain: c, ...runSuite(file) });
+        for (const file of CHAINS[c]) results.push({ chain: c, ...runSuite(file, env) });
       } catch (err) {
         results.push({ chain: c, file: '(setup)', failed: true, summary: err.message });
       } finally {

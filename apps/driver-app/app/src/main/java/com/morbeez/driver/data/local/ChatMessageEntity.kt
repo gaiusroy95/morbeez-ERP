@@ -56,4 +56,8 @@ interface ChatDao {
     /** The server's list replaces what it last said; what this phone hasn't sent stays. */
     @Query("DELETE FROM chat_messages WHERE pendingSync = 0")
     suspend fun clearSynced()
+
+    /** A message the office refused, removed from the phone by the driver (D8). */
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun delete(id: String)
 }

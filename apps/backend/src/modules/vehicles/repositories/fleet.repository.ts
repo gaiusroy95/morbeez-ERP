@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import {
   DocumentRecord,
+  FastagEntry,
   FleetSettings,
   FuelRecord,
   HireBill,
@@ -260,6 +261,85 @@ export class FleetRepository {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [f.id, f.tenantId, f.vehicleId, f.filledOn, f.litres, f.amount, f.odometerKm, f.station, f.paidFrom, f.tripId, f.entryId, f.userId],
     );
+  }
+
+  // ---- FASTag ----
+
+  async fastag(client: PoolClient, vehicleId: string): Promise<{ tag_id: string; issuer: string | null; low_balance: string } | null> {
+    const r = await client.query('SELECT tag_id, issuer, low_balance::text AS low_balance FROM fleet.fastag WHERE vehicle_id = $1', [vehicleId]);
+    return r.rows[0] ?? null;
+  }
+
+  async saveFastag(client: PoolClient, f: { tenantId: string; vehicleId: string; tagId: string; issuer: string | null; lowBalance: string; userId: string }): Promise<void> {
+    await client.query(
+      `INSERT INTO fleet.fastag (vehicle_id, tenant_id, tag_id, issuer, low_balance, updated_by) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (vehicle_id) DO UPDATE SET tag_id = EXCLUDED.tag_id, issuer = EXCLUDED.issuer, low_balance = EXCLUDED.low_balance,
+         updated_by = EXCLUDED.updated_by, updated_at = now()`,
+      [f.vehicleId, f.tenantId, f.tagId, f.issuer, f.lowBalance, f.userId],
+    );
+  }
+
+  /** Each vehicle's tag balance: those with a tag, and any with something taken off one. */
+  async fastagBalances(client: PoolClient, vehicleId: string | null): Promise<Map<string, { balance: string; lowBalance: string | null }>> {
+    const r = await client.query(
+      `SELECT v.id AS vehicle_id, COALESCE((SELECT SUM(e.amount) FROM fleet.fastag_entry e WHERE e.vehicle_id = v.id), 0)::numeric(12,2)::text AS balance,
+              t.low_balance::text AS low_balance
+         FROM trading_partners.vehicle v
+         LEFT JOIN fleet.fastag t ON t.vehicle_id = v.id
+        WHERE ($1::uuid IS NULL OR v.id = $1)
+          AND (t.vehicle_id IS NOT NULL OR EXISTS (SELECT 1 FROM fleet.fastag_entry e WHERE e.vehicle_id = v.id))`,
+      [vehicleId],
+    );
+    return new Map(r.rows.map((x) => [x.vehicle_id as string, { balance: x.balance as string, lowBalance: x.low_balance as string | null }]));
+  }
+
+  async fastagEntries(client: PoolClient, vehicleId: string, limit: number): Promise<FastagEntry[]> {
+    const r = await client.query(
+      `SELECT e.id, e.kind, e.amount::text AS amount, e.occurred_on::text AS occurred_on, e.paid_from, e.reference, e.notes, e.created_at,
+              x.trip_id, t.number AS trip_number
+         FROM fleet.fastag_entry e
+         LEFT JOIN fulfilment.trip_expense x ON x.id = e.trip_expense_id
+         LEFT JOIN fulfilment.trip t ON t.id = x.trip_id
+        WHERE e.vehicle_id = $1
+        ORDER BY e.occurred_on DESC, e.created_at DESC
+        LIMIT $2`,
+      [vehicleId, limit],
+    );
+    return r.rows.map((x) => ({
+      id: x.id,
+      kind: x.kind,
+      amount: x.amount,
+      occurredOn: x.occurred_on,
+      paidFrom: x.paid_from,
+      reference: x.reference,
+      notes: x.notes,
+      tripId: x.trip_id ?? null,
+      tripNumber: x.trip_number ?? null,
+      createdAt: x.created_at,
+    }));
+  }
+
+  /** The latest recharge: one low-balance alert per recharge, however many tolls follow it. */
+  async lastFastagRecharge(client: PoolClient, vehicleId: string): Promise<string | null> {
+    const r = await client.query(`SELECT id FROM fleet.fastag_entry WHERE vehicle_id = $1 AND kind = 'recharge' ORDER BY created_at DESC LIMIT 1`, [vehicleId]);
+    return r.rows[0]?.id ?? null;
+  }
+
+  async insertFastagEntry(
+    client: PoolClient,
+    f: { id: string; tenantId: string; vehicleId: string; kind: 'recharge' | 'toll' | 'charge'; amount: string; occurredOn: string; paidFrom: string | null; tripExpenseId: string | null; reference: string | null; notes: string | null; entryId: string; userId: string },
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO fleet.fastag_entry (id, tenant_id, vehicle_id, kind, amount, occurred_on, paid_from, trip_expense_id, reference, notes, ledger_entry_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [f.id, f.tenantId, f.vehicleId, f.kind, f.amount, f.occurredOn, f.paidFrom, f.tripExpenseId, f.reference, f.notes, f.entryId, f.userId],
+    );
+  }
+
+  /** A moment's date in the business's own time zone. */
+  async localDate(client: PoolClient, timezone: string, at: Date): Promise<string> {
+    const r = await client.query<{ d: string }>('SELECT ($1::timestamptz AT TIME ZONE $2)::date::text AS d', [at, timezone]);
+    return r.rows[0].d;
   }
 
   async tripVehicle(client: PoolClient, tripId: string): Promise<string | null> {

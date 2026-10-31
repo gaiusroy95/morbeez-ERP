@@ -25,4 +25,6 @@ data class PendingPhotoEntity(
     val productId: String? = null,
     /** stop | backhaul (D5) | expense (D6, the bill): which upload it goes to. */
     @ColumnInfo(defaultValue = "stop") val target: String = "stop",
+    /** Why the office refused it, in its words (D8). */
+    val lastError: String? = null,
 )

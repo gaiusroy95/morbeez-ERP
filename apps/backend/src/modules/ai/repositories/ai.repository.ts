@@ -85,40 +85,47 @@ export class AiRepository {
     return (r.rowCount ?? 0) === 1;
   }
 
-  async insertRun(client: PoolClient, r: { id: string; tenantId: string; startedAt: Date; produced: Record<string, number>; suppressed: Record<string, string>; userId: string }): Promise<void> {
+  /** The owner's run, or one a customer's WhatsApp message started (no one's session: no user). */
+  async insertRun(
+    client: PoolClient,
+    r: { id: string; tenantId: string; startedAt: Date; produced: Record<string, number>; suppressed: Record<string, string>; userId: string | null; source?: 'owner' | 'whatsapp' },
+  ): Promise<void> {
     await client.query(
-      'INSERT INTO ai.run (id, tenant_id, started_at, produced, suppressed, created_by) VALUES ($1, $2, $3, $4, $5, $6)',
-      [r.id, r.tenantId, r.startedAt, JSON.stringify(r.produced), JSON.stringify(r.suppressed), r.userId],
+      'INSERT INTO ai.run (id, tenant_id, started_at, produced, suppressed, created_by, source) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [r.id, r.tenantId, r.startedAt, JSON.stringify(r.produced), JSON.stringify(r.suppressed), r.userId, r.source ?? 'owner'],
     );
   }
 
   async lastRun(client: PoolClient): Promise<{ id: string; startedAt: Date; finishedAt: Date; produced: Record<string, number>; suppressed: Record<string, string>; byEmail: string | null } | null> {
     const r = await client.query(
       `SELECT r.id, r.started_at, r.finished_at, r.produced, r.suppressed, COALESCE(u.phone, u.email::text) AS email FROM ai.run r LEFT JOIN identity.app_user u ON u.id = r.created_by
+       WHERE r.source = 'owner'
        ORDER BY r.started_at DESC LIMIT 1`,
     );
     const x = r.rows[0];
     return x ? { id: x.id, startedAt: x.started_at, finishedAt: x.finished_at, produced: x.produced, suppressed: x.suppressed, byEmail: x.email } : null;
   }
 
-  /** Open recommendations of these types are superseded by a fresh run. */
+  /** Open recommendations of these types are superseded by a fresh run — but not an order a customer sent on WhatsApp. */
   async expireOpen(client: PoolClient, tenantId: string, types: RecommendationType[]): Promise<number> {
     if (!types.length) return 0;
     const r = await client.query(
       `INSERT INTO ai.recommendation_decision (recommendation_id, tenant_id, decision, reason)
        SELECT r.id, $1, 'expired', 'Superseded by a newer suggestion'
        FROM ai.recommendation r
-       WHERE r.type = ANY($2::text[]) AND NOT EXISTS (SELECT 1 FROM ai.recommendation_decision d WHERE d.recommendation_id = r.id)`,
+       WHERE r.type = ANY($2::text[]) AND NOT EXISTS (SELECT 1 FROM ai.recommendation_decision d WHERE d.recommendation_id = r.id)
+         AND r.run_id IN (SELECT id FROM ai.run WHERE source = 'owner')`,
       [tenantId, types],
     );
     return r.rowCount ?? 0;
   }
 
-  async insert(client: PoolClient, tenantId: string, runId: string, d: Draft): Promise<void> {
-    await client.query(
+  async insert(client: PoolClient, tenantId: string, runId: string, d: Draft): Promise<string> {
+    const r = await client.query<{ id: string }>(
       `INSERT INTO ai.recommendation (tenant_id, run_id, type, subject_kind, subject_id, target_date, title, proposal, evidence, explanation,
          expected_impact, confidence, sensitive, producer, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       RETURNING id`,
       [
         tenantId,
         runId,
@@ -137,6 +144,7 @@ export class AiRepository {
         d.expiresAt,
       ],
     );
+    return r.rows[0].id;
   }
 
   async list(

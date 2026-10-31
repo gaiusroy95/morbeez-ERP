@@ -6,11 +6,14 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { FleetService } from './fleet.service';
-import { EconomicsReport, FleetSettings, FuelRecord, HireBill, HireSuggestion, LoanView, VehicleDetail, VehicleOverview } from './entities/fleet.entity';
+import { EconomicsReport, FastagView, FleetSettings, FuelRecord, HireBill, HireSuggestion, LoanView, VehicleDetail, VehicleOverview } from './entities/fleet.entity';
 import {
   CapitalizeVehicleDto,
   CreateLoanDto,
   DisposeVehicleDto,
+  FastagChargeDto,
+  FastagDto,
+  FastagRechargeDto,
   FleetRangeQueryDto,
   FleetSettingsDto,
   HireBillsQueryDto,
@@ -68,6 +71,32 @@ export class FleetController {
   @RequirePermissions('vehicles:write')
   saveProfile(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: VehicleProfileDto): Promise<VehicleDetail> {
     return this.fleet.saveProfile(user.tenantId, user.userId, id, dto);
+  }
+
+  // ---- FASTag ----
+
+  @Get('vehicles/:id/fastag')
+  @RequirePermissions('vehicles:read')
+  fastag(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<FastagView> {
+    return this.fleet.getFastag(user.tenantId, id);
+  }
+
+  @Put('vehicles/:id/fastag')
+  @RequirePermissions('vehicles:write')
+  saveFastag(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: FastagDto): Promise<FastagView> {
+    return this.fleet.saveFastag(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post('vehicles/:id/fastag/recharges')
+  @RequirePermissions('vehicles:write')
+  rechargeFastag(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: FastagRechargeDto): Promise<FastagView> {
+    return this.fleet.rechargeFastag(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post('vehicles/:id/fastag/charges')
+  @RequirePermissions('vehicles:write')
+  chargeFastag(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: FastagChargeDto): Promise<FastagView> {
+    return this.fleet.chargeFastag(user.tenantId, user.userId, id, dto);
   }
 
   // ---- Running costs ----

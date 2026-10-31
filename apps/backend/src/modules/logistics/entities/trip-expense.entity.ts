@@ -6,6 +6,8 @@ export type ExpenseCategory = 'fuel' | 'toll' | 'parking' | 'labour' | 'repair' 
 
 export type FuelType = 'diesel' | 'petrol' | 'cng' | 'electric';
 
+export type ExpensePaidBy = 'cash' | 'fastag';
+
 /** A fuel expense's pump details (driver app D6): what the vehicle's mileage is worked out from. */
 export interface ExpenseFuel {
   odometerKm: number | null;
@@ -35,6 +37,8 @@ export interface TripExpenseRecord {
   fuel: ExpenseFuel | null;
   /** Bill photos kept with it. */
   photos: number;
+  /** Paid from the driver's cash, or off the vehicle's FASTag (a toll or parking only): only cash comes out of the float. */
+  paidBy: ExpensePaidBy;
 }
 
 export interface TripExpensePhotoRecord {

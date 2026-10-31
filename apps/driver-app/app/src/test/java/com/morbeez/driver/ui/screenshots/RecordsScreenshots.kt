@@ -24,6 +24,7 @@ import com.morbeez.driver.data.remote.dto.DriverProfileResponse
 import com.morbeez.driver.data.remote.dto.DriverTripCardResponse
 import com.morbeez.driver.data.remote.dto.DriverTripSummaryResponse
 import com.morbeez.driver.data.remote.dto.DriverVehicleResponse
+import com.morbeez.driver.data.remote.dto.FastagBalanceResponse
 import com.morbeez.driver.data.remote.dto.FullTankMileageResponse
 import com.morbeez.driver.data.remote.dto.MaintenanceDueResponse
 import com.morbeez.driver.data.remote.dto.MyExpensesResponse
@@ -55,6 +56,11 @@ import com.morbeez.driver.ui.screens.records.TripDetailsContent
 import com.morbeez.driver.ui.screens.records.TripDetailsUiState
 import com.morbeez.driver.ui.screens.records.TripHistoryContent
 import com.morbeez.driver.ui.screens.records.VehicleContent
+import com.morbeez.driver.ui.screens.requests.RequestContent
+import com.morbeez.driver.ui.screens.requests.RequestForm
+import com.morbeez.driver.ui.screens.requests.RequestUiState
+import com.morbeez.driver.ui.screens.requests.TripCustomer
+import com.morbeez.driver.ui.screens.requests.UnsentRequest
 import com.morbeez.driver.ui.theme.MorbeezTheme
 import org.junit.Rule
 import org.junit.Test
@@ -86,6 +92,17 @@ class RecordsScreenshots {
         ) { _, _ -> }
     }
 
+    // Field hardening (D8): Save reads the expense back before it's sent.
+    @Test fun newExpenseReview() = draw {
+        NewExpenseContent(
+            expenses,
+            onBack = {},
+            photo = noCamera,
+            initial = ExpenseForm(odometer = "48812", fullTank = true, litres = "65.40", rate = "92.50", notes = "IOCL, Gundlupet", billPath = "bill.jpg"),
+            initialReview = true,
+        ) { _, _ -> }
+    }
+
     @Test fun newExpenseToll() = draw {
         NewExpenseContent(expenses, onBack = {}, photo = noCamera, initial = ExpenseForm(category = "toll", amount = "120", notes = "NH 766, Gundlupet")) { _, _ -> }
     }
@@ -98,6 +115,11 @@ class RecordsScreenshots {
         NewExpenseContent(expenses, onBack = {}, photo = noCamera, initial = ExpenseForm(odometer = "48812", litres = "65.40", rate = "92.50", billPath = "bill.jpg")) { _, _ -> }
     }
 
+    // A toll off the vehicle's FASTag: not the driver's cash, and no bill needed.
+    @Test fun newExpenseTollByFastag() = draw {
+        NewExpenseContent(expenses, onBack = {}, photo = noCamera, initial = ExpenseForm(category = "toll", amount = "235", notes = "Walayar plaza", paidBy = "fastag")) { _, _ -> }
+    }
+
     @Test fun myExpensesThisTrip() = draw(TALL) { MyExpensesContent(expenses, onBack = {}, onNew = {}) }
 
     @Test fun myExpensesWaitingForOwner() = draw(TALL) {
@@ -108,6 +130,52 @@ class RecordsScreenshots {
 
     @Test fun approvalsOffline() = draw { ApprovalsContent(RecordsUiState(day = day, online = false), onBack = {}, onRefresh = {}) }
 
+    // Asked of the office (D10): one decided, one waiting, one not sent yet.
+    @Test fun approvalsWithRequests() = draw(TALL) {
+        ApprovalsContent(
+            records.copy(
+                approvals = DriverApprovalsResponse(
+                    "2026-08-30",
+                    listOf(
+                        DriverApprovalResponse(id = "r1", kind = "advance", status = "pending", amount = "2000.00", detail = "Tyre puncture at Gundlupet, need cash for the repair", tripId = "t1", tripNumber = "T-0042", at = "2026-09-12T09:40:00Z"),
+                        DriverApprovalResponse(id = "r2", kind = "new_customer", status = "pending", customerName = "Sri Krishna Stores", detail = "Asked for 20 kg tomato daily", at = "2026-09-12T08:15:00Z"),
+                    ),
+                    ApprovalCountsResponse(pending = 2, approved = 0, rejected = 0),
+                ),
+                unsentRequests = listOf(UnsentRequest("k1", "credit_limit", "15000.00", "Hotel Sagar", "Big wedding order this week", 0L, refused = false)),
+            ),
+            onBack = {},
+            onRefresh = {},
+        )
+    }
+
+    @Test fun askTheOfficeAdvance() = draw {
+        RequestContent(RequestUiState(), onBack = {}, onPin = {}, initial = RequestForm(amount = "2000", reason = "Tyre puncture, need cash for the repair")) {}
+    }
+
+    @Test fun askTheOfficeNewCustomer() = draw(TALL) {
+        RequestContent(
+            RequestUiState(),
+            onBack = {},
+            onPin = {},
+            initial = RequestForm(kind = "new_customer", name = "Sri Krishna Stores", phone = "98000 00041", place = "Gundlupet", reason = "Wants 20 kg tomato daily", latitude = 11.80871, longitude = 76.68834),
+        ) {}
+    }
+
+    @Test fun askTheOfficeCreditLimitReview() = draw {
+        RequestContent(
+            RequestUiState(customers = listOf(TripCustomer("c1", "Hotel Sagar"), TripCustomer("c2", "Green Mart"))),
+            onBack = {},
+            onPin = {},
+            initial = RequestForm(kind = "credit_limit", customerId = "c1", amount = "15000", reason = "Big wedding order this week"),
+            initialReview = true,
+        ) {}
+    }
+
+    @Test fun askTheOfficeMalayalam() = draw(PHONE.copy(locale = "ml")) {
+        RequestContent(RequestUiState(), onBack = {}, onPin = {}, initial = RequestForm(amount = "2000", reason = "ടയർ പഞ്ചർ")) {}
+    }
+
     @Test fun tripHistory() = draw(TALL) { TripHistoryContent(HistoryUiState(loading = false, history = history), onBack = {}, onOpen = {}, onRange = {}) }
 
     @Test fun tripHistoryOffline() = draw { TripHistoryContent(HistoryUiState(loading = false, history = null), onBack = {}, onOpen = {}, onRange = {}) }
@@ -115,6 +183,8 @@ class RecordsScreenshots {
     @Test fun tripDetails() = draw(TALL) { TripDetailsContent(TripDetailsUiState(loading = false, summary = summary), onBack = {}, onRetry = {}) }
 
     @Test fun vehicle() = draw(TALL) { VehicleContent(records, onBack = {}, onRefresh = {}) }
+
+    @Test fun vehicleFastagLow() = draw(TALL) { VehicleContent(records.copy(vehicle = vehicle.copy(fastag = FastagBalanceResponse("320.00", low = true))), onBack = {}, onRefresh = {}) }
 
     @Test fun profile() = draw { ProfileContent(records, onBack = {}, onRefresh = {}) }
 

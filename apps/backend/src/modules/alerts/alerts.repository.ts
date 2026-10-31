@@ -13,7 +13,9 @@ export type AlertKind =
   | 'security'
   | 'shrinkage'
   | 'breakage'
-  | 'dispute_stale';
+  | 'dispute_stale'
+  | 'driver_request'
+  | 'fastag_low';
 export type AlertSeverity = 'critical' | 'warning';
 
 export interface OwnerAlert {

@@ -25,7 +25,7 @@ function setup(overrides: Partial<Record<keyof FleetRepository, jest.Mock>> = {}
   const taxRulesRepo = { tdsSection: jest.fn() };
   const audit = { record: jest.fn() };
   const db = { withTenant: jest.fn((_t: string, work: (c: PoolClient) => unknown) => work(client)) };
-  const service = new FleetService(db as never, repo, ledger as never, taxRules as never, taxRulesRepo as never, audit as never);
+  const service = new FleetService(db as never, repo, ledger as never, taxRules as never, taxRulesRepo as never, audit as never, { raiseWithClient: jest.fn() } as never);
   // detail() is exercised by the e2e suite; here the postings are the point.
   jest.spyOn(service as unknown as { detail: () => Promise<unknown> }, 'detail').mockResolvedValue({});
   return { service, repo, ledger, taxRules, taxRulesRepo };

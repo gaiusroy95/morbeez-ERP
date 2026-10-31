@@ -13,6 +13,7 @@ import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.data.remote.dto.CrateTypeResponse
 import com.morbeez.driver.data.remote.dto.DeliveryOutcomeResponse
 import com.morbeez.driver.data.remote.dto.StopItemResponse
+import com.morbeez.driver.data.repository.QueueRepository
 import com.morbeez.driver.data.repository.TripRepository
 import com.morbeez.driver.data.sync.SyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -58,9 +60,13 @@ class DeliveryStopViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val trips: TripRepository,
     private val location: LocationReader,
+    queue: QueueRepository,
 ) : ViewModel() {
     private val tripId: String = checkNotNull(savedState["tripId"])
     private val stopId: String = checkNotNull(savedState["stopId"])
+
+    /** What the office said, if it refused something done at this stop (DRV.8, D8). */
+    val refused: StateFlow<String?> = queue.observeRefusedStops().map { it[stopId] }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val draft = MutableStateFlow<DeliveryDraft?>(null)
     private val position = MutableStateFlow<Position?>(null)
     private val wrongQr = MutableStateFlow(false)

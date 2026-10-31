@@ -466,6 +466,10 @@ export class LogisticsService {
     dto: StartTripDto,
   ): Promise<TripRecord> {
     const before = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, id);
+    // Said plainly before the version check (driver app D8): a phone that was
+    // offline while the office cancelled or started the trip shows the driver why.
+    if (before.status === 'cancelled') throw new ConflictException(`The office cancelled trip ${before.number}`);
+    if (before.status !== 'planned') throw new ConflictException(`Trip ${before.number} has already started`);
     // Setting off needs authority for this trip — standing, or the owner's approval.
     await this.delegation.assertCan(tenantId, callerIsDispatcher, before, 'deliver');
 
@@ -1377,6 +1381,10 @@ export class LogisticsService {
         }
         const fuelProblem = fuelProblemOf(dto);
         if (fuelProblem) throw new BadRequestException(fuelProblem);
+        const paidBy = dto.paidBy ?? 'cash';
+        if (paidBy === 'fastag' && dto.category !== 'toll' && dto.category !== 'parking') {
+          throw new BadRequestException('Only a toll or parking can be paid by FASTag');
+        }
         // Spending is a full route operator's call (level 4). Below that the
         // driver still records what they paid — the money is gone either
         // way — and the owner approves it at closure.
@@ -1401,15 +1409,29 @@ export class LogisticsService {
             fullTank: isFuel && dto.litres !== undefined ? (dto.fullTank ?? true) : null,
             litres: isFuel ? (dto.litres ?? null) : null,
             ratePerLitre: isFuel ? (dto.ratePerLitre ?? null) : null,
+            paidBy,
           });
-          await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
+          const entryId = await this.ledger.postTripExpenseWithClient(client, tenantId, actorUserId, {
             id: expense.id,
             tripId,
             category: expense.category,
             amount: expense.amount,
             notes: expense.notes,
             occurredAt: expense.recordedAt,
+            paidBy,
           });
+          // Off the tag, not the float: on the vehicle's FASTag statement, and the owner told when it runs low.
+          if (paidBy === 'fastag') {
+            await this.fleet.recordFastagTollWithClient(client, tenantId, actorUserId, {
+              vehicleId: trip.vehicleId,
+              expenseId: expense.id,
+              amount: expense.amount,
+              occurredAt: expense.recordedAt,
+              tripId,
+              memo: `${trip.number} ${expense.category}`,
+              entryId,
+            });
+          }
           return expense;
         });
       },
@@ -1886,7 +1908,7 @@ export interface TripReview {
 
 // Same action retried, or a different one under a reused key? Amounts compared in paise.
 function sameExpense(prior: TripExpenseRecord, dto: RecordExpenseDto): boolean {
-  return prior.category === dto.category && toCents(prior.amount) === toCents(String(dto.amount));
+  return prior.category === dto.category && toCents(prior.amount) === toCents(String(dto.amount)) && prior.paidBy === (dto.paidBy ?? 'cash');
 }
 
 function sameCollection(prior: CustomerCollectionRecord, dto: RecordCollectionDto): boolean {

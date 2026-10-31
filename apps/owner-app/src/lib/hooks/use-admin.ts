@@ -1,11 +1,16 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { ActivityEntry, ApprovalsInbox, DriverIncentiveSettings, OnTheRoad, ReportKind, ReportTable, RoleSummary, TeamMember, TripIncentives, VehicleTrips } from '@morbeez/shared-types';
+import type { ActivityEntry, ApprovalsInbox, DriverRequest, DriverIncentiveSettings, OnTheRoad, ReportKind, ReportTable, RoleSummary, TeamMember, TripIncentives, VehicleTrips } from '@morbeez/shared-types';
 import { apiGet } from '../api/client';
 
 // The owner's management screens (redesign Phase 7): Approvals & Exceptions,
 // Reports, Users & permissions, My Profile, Workforce & Vehicles.
+
+/** What a driver asked for from the road (D10), with what the owner needs to decide it. */
+export function useDriverRequest(id: string | null) {
+  return useQuery({ queryKey: ['approvals', 'driver-request', id], queryFn: () => apiGet<DriverRequest>(`driver-requests/${id}`), enabled: id !== null });
+}
 
 export function useApprovalsInbox() {
   return useQuery({

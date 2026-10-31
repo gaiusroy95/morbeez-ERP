@@ -1,5 +1,8 @@
 package com.morbeez.driver.ui.screens.expenses
 
+import com.morbeez.driver.ui.components.rememberLeaveGuard
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.morbeez.driver.R
 import com.morbeez.driver.data.remote.dto.VehicleMileageResponse
+import com.morbeez.driver.data.repository.FASTAG_CATEGORIES
 import com.morbeez.driver.data.repository.FuelDetails
 import com.morbeez.driver.data.repository.NewExpense
 import com.morbeez.driver.ui.components.Callout
@@ -191,6 +195,7 @@ private fun ExpenseLine(row: ExpenseRow, showTrip: Boolean) {
             }
             row.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted) }
             val extras = listOfNotNull(
+                stringResource(R.string.exp_paid_fastag).takeIf { row.paidBy == "fastag" },
                 row.tripNumber?.takeIf { showTrip }?.let { stringResource(R.string.trip_number, it) },
                 row.photos.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.n_photos, it, it) },
             )
@@ -303,6 +308,8 @@ data class ExpenseForm(
     val rate: String = "",
     val notes: String = "",
     val billPath: String? = null,
+    /** cash | fastag (a toll or parking). */
+    val paidBy: String = "cash",
 )
 
 /**
@@ -316,6 +323,7 @@ internal fun NewExpenseContent(
     onBack: () -> Unit,
     photo: PhotoSlot,
     initial: ExpenseForm = ExpenseForm(),
+    initialReview: Boolean = false,
     onSave: (NewExpense, bill: Pair<String, String>?) -> Unit,
 ) {
     val trip = state.trip
@@ -329,6 +337,7 @@ internal fun NewExpenseContent(
     var notes by rememberSaveable { mutableStateOf(initial.notes) }
     var billPath by rememberSaveable { mutableStateOf(initial.billPath) }
     var billType by rememberSaveable { mutableStateOf("image/jpeg") }
+    var paidBy by rememberSaveable { mutableStateOf(initial.paidBy) }
 
     val isFuel = category == "fuel"
     val litres = ExpenseLogic.positive(litresText, 3)
@@ -338,25 +347,23 @@ internal fun NewExpenseContent(
     val total = ExpenseLogic.fuelTotal(litres, rate)
     val amount = if (isFuel) total else ExpenseLogic.positive(amountText, 2)
     val fuelReady = !isFuel || (km != null && odometerProblem == null && litres != null && rate != null)
-    val ready = trip != null && state.canRecord && amount != null && fuelReady && billPath != null
+    // Off the FASTag: only a toll or parking, and the tag's statement is its receipt.
+    val byTag = paidBy == "fastag" && category in FASTAG_CATEGORIES
+    val ready = trip != null && state.canRecord && amount != null && fuelReady && (billPath != null || byTag)
     val level = trip?.authorityLevel
+    // Edit before it's saved (D8): Save shows what will be sent; the driver confirms or goes back to change it.
+    var reviewing by rememberSaveable { mutableStateOf(initialReview) }
+    val dirty = category != initial.category || paidBy != initial.paidBy || amountText.isNotBlank() || odometerText.isNotBlank() || litresText.isNotBlank() || rateText.isNotBlank() || notes.isNotBlank() || billPath != null
+    val leave = rememberLeaveGuard(dirty && initial == ExpenseForm(), onBack)
 
     FieldScreen(
         title = stringResource(R.string.exp_new_title),
         eyebrow = trip?.number?.let { stringResource(R.string.trip_number, it) },
-        onBack = onBack,
+        onBack = leave,
         bottomBar = {
             PrimaryAction(
                 stringResource(R.string.exp_save),
-                onClick = {
-                    val expense = NewExpense(
-                        category = category,
-                        amount = amount?.toDouble() ?: 0.0,
-                        notes = notes,
-                        fuel = if (isFuel && km != null && litres != null && rate != null) FuelDetails(km, fuelType, fullTank, litres.toDouble(), rate.toDouble()) else null,
-                    )
-                    onSave(expense, billPath?.let { it to billType })
-                },
+                onClick = { reviewing = true },
                 enabled = ready,
                 glyph = Glyph.Check,
             )
@@ -413,15 +420,60 @@ internal fun NewExpenseContent(
             } else {
                 FreshTextField(amountText, { amountText = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, stringResource(R.string.amount_rupees), keyboardType = KeyboardType.Decimal, prefix = "₹", modifier = Modifier.padding(top = 14.dp))
             }
+            if (category in FASTAG_CATEGORIES) {
+                Eyebrow(stringResource(R.string.exp_paid_by), modifier = Modifier.padding(top = 14.dp, bottom = 8.dp))
+                ChoiceTiles(listOf("cash" to stringResource(R.string.exp_paid_cash), "fastag" to stringResource(R.string.exp_paid_fastag)), paidBy) { paidBy = it }
+                if (byTag) Text(stringResource(R.string.exp_fastag_hint), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted, modifier = Modifier.padding(top = 6.dp))
+            }
         }
         photo(stringResource(if (billPath != null) R.string.exp_bill_taken else R.string.exp_bill_photo), billPath != null) { path, mime ->
             billPath = path
             billType = mime
         }
-        if (billPath == null) Text(stringResource(R.string.exp_bill_needed), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted)
+        if (billPath == null && !byTag) Text(stringResource(R.string.exp_bill_needed), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted)
         FreshTextField(notes, { notes = it.take(300) }, stringResource(if (isFuel) R.string.exp_notes_fuel else R.string.notes_optional), singleLine = false)
         if (state.canRecord && level != null && level in 1..3) Callout(stringResource(R.string.exp_owner_approves), Tone.Active)
         Spacer(Modifier.height(4.dp))
+    }
+
+    if (reviewing && ready) {
+        val lines = buildList {
+            add(categoryLabel(category))
+            add(stringResource(R.string.rupees, DayLogic.rupees(amount!!.toPlainString())))
+            if (isFuel && km != null && litres != null && rate != null) {
+                add(fuelTypeLabel(fuelType))
+                add(stringResource(R.string.exp_review_fuel, litres.stripTrailingZeros().toPlainString(), DayLogic.rupees(rate.toPlainString())))
+                add(stringResource(if (fullTank) R.string.exp_full_tank_at else R.string.exp_part_fill_at, DayLogic.quantity("$km")))
+            }
+            if (byTag) add(stringResource(R.string.exp_paid_fastag))
+            if (billPath != null) add(stringResource(R.string.exp_bill_taken))
+            notes.trim().ifBlank { null }?.let { add(it) }
+        }
+        AlertDialog(
+            onDismissRequest = { reviewing = false },
+            containerColor = Fresh.surface,
+            title = { Text(stringResource(R.string.exp_review_title), style = MaterialTheme.typography.titleLarge, color = Fresh.ink) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    lines.forEach { Text(it, style = MaterialTheme.typography.bodyLarge, color = Fresh.ink) }
+                    Text(stringResource(R.string.exp_review_note), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted, modifier = Modifier.padding(top = 6.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reviewing = false
+                    val expense = NewExpense(
+                        category = category,
+                        amount = amount?.toDouble() ?: 0.0,
+                        notes = notes,
+                        fuel = if (isFuel && km != null && litres != null && rate != null) FuelDetails(km, fuelType, fullTank, litres.toDouble(), rate.toDouble()) else null,
+                        paidBy = if (byTag) "fastag" else "cash",
+                    )
+                    onSave(expense, billPath?.let { it to billType })
+                }) { Text(stringResource(R.string.exp_save), color = Fresh.primary) }
+            },
+            dismissButton = { TextButton(onClick = { reviewing = false }) { Text(stringResource(R.string.edit), color = Fresh.inkMuted) } },
+        )
     }
 }
 

@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type {
   AssetRow,
+  FastagView,
   FleetSettings,
   FuelRecord,
   HireBill,
@@ -24,6 +25,10 @@ export const useFleet = (enabled = true) =>
 
 export const useFleetVehicle = (id: string | null) =>
   useQuery({ queryKey: ['fleet', 'vehicle', id], queryFn: () => apiGet<VehicleDetail>(`fleet/vehicles/${id}`), enabled: id !== null });
+
+/** A vehicle's FASTag: its balance and statement. */
+export const useFastag = (id: string | null) =>
+  useQuery({ queryKey: ['fleet', 'fastag', id], queryFn: () => apiGet<FastagView>(`fleet/vehicles/${id}/fastag`), enabled: id !== null });
 
 export const useFuelLog = (range: DateRange | null) =>
   useQuery({

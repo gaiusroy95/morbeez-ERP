@@ -179,6 +179,10 @@ interface ApiService {
     // The queued operation's key goes with every attempt, so a retry after a
     // lost response returns the first expense instead of recording a second
     // (Security Audit SA-03; Constitution I.7, IV.3).
+    /** What the driver asks the office for (D10): an advance, a new customer, a credit limit. Its own id makes it once. */
+    @POST("driver-requests/mine")
+    suspend fun createRequest(@Body body: CreateDriverRequest): DriverRequestResponse
+
     @POST("logistics/trips/{tripId}/expenses")
     suspend fun recordExpense(
         @Path("tripId") tripId: String,

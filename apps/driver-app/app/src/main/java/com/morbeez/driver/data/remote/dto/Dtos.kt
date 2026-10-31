@@ -346,6 +346,8 @@ data class RecordExpenseRequest(
     val fullTank: Boolean? = null,
     val litres: Double? = null,
     val ratePerLitre: Double? = null,
+    /** cash | fastag — a toll or parking taken off the vehicle's FASTag (null: cash). */
+    val paidBy: String? = null,
 )
 data class TripExpenseResponse(
     val id: String,
@@ -360,6 +362,7 @@ data class TripExpenseResponse(
     val decisionNote: String? = null,
     val fuel: ExpenseFuelResponse? = null,
     val photos: Int = 0,
+    val paidBy: String = "cash",
 )
 data class ExpenseFuelResponse(
     val odometerKm: Int? = null,
@@ -459,6 +462,8 @@ data class DriverExpenseResponse(
     val photos: Int = 0,
     /** recorded | pending | approved | rejected */
     val status: String = "recorded",
+    /** cash | fastag */
+    val paidBy: String = "cash",
 )
 data class ExpenseTotalsResponse(val all: String = "0.00", val fuel: String = "0.00", val other: String = "0.00")
 data class VehicleMileageResponse(
@@ -479,7 +484,7 @@ data class DriverApprovalsResponse(
 data class ApprovalCountsResponse(val pending: Int = 0, val approved: Int = 0, val rejected: Int = 0)
 data class DriverApprovalResponse(
     val id: String,
-    /** expense | collection | handover */
+    /** expense | collection | handover | advance | new_customer | credit_limit */
     val kind: String,
     /** pending | approved | rejected */
     val status: String,
@@ -549,7 +554,10 @@ data class DriverVehicleResponse(
     val lastFullTank: FullTankMileageResponse? = null,
     val maintenance: List<MaintenanceDueResponse> = emptyList(),
     val documents: List<DriverDocumentResponse> = emptyList(),
+    /** What's on the vehicle's FASTag; null with no tag. */
+    val fastag: FastagBalanceResponse? = null,
 )
+data class FastagBalanceResponse(val balance: String, val low: Boolean = false)
 data class MaintenanceDueResponse(
     val kind: String,
     val description: String,
@@ -672,3 +680,39 @@ data class SyncReportRequest(
     val syncedAt: String,
 )
 data class SyncFailure(val type: String, val error: String, val at: String)
+
+// ---- What the driver asks the office for (D10) ----
+
+/** A customer met on the road, as the driver describes them. */
+data class NewCustomerDetails(
+    val name: String,
+    val phone: String? = null,
+    val place: String? = null,
+    val address: String? = null,
+    val language: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+)
+
+data class CreateDriverRequest(
+    val id: String,
+    /** advance | new_customer | credit_limit */
+    val kind: String,
+    val tripId: String? = null,
+    val amount: Double? = null,
+    val customerId: String? = null,
+    val customer: NewCustomerDetails? = null,
+    val reason: String,
+)
+
+data class DriverRequestResponse(
+    val id: String,
+    val kind: String,
+    /** pending | approved | rejected */
+    val status: String,
+    val amount: String? = null,
+    val customerName: String? = null,
+    val reason: String,
+    val requestedAt: String,
+    val decisionNote: String? = null,
+)

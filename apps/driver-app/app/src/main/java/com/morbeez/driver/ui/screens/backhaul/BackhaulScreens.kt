@@ -1,5 +1,6 @@
 package com.morbeez.driver.ui.screens.backhaul
 
+import com.morbeez.driver.ui.components.rememberLeaveGuard
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -536,14 +537,17 @@ internal fun AddBackhaulContent(
     var hirer by rememberSaveable { mutableStateOf("") }
     var notes by rememberSaveable { mutableStateOf("") }
     val problem = BackhaulLogic.addProblem(pickup, drop, rent)
+    // Read back before it's added (D8): a job the office is told about at once.
+    var reviewing by rememberSaveable { mutableStateOf(false) }
+    val leave = rememberLeaveGuard(listOf(pickup, drop, rent, hirer, notes).any { it.isNotBlank() }, onBack)
     FieldScreen(
         title = stringResource(R.string.add_backhaul),
         eyebrow = state.trip?.number,
-        onBack = onBack,
+        onBack = leave,
         bottomBar = {
             PrimaryAction(
                 stringResource(R.string.add_backhaul),
-                { rent.trim().toDoubleOrNull()?.let { onAdd(pickup, drop, it, hirer.ifBlank { null }, notes.ifBlank { null }) } },
+                { reviewing = true },
                 enabled = problem == null && state.onTheRoad,
                 glyph = Glyph.Check,
             )
@@ -556,5 +560,29 @@ internal fun AddBackhaulContent(
         if (problem == AddProblem.RENT && rent.isNotBlank()) Text(stringResource(R.string.number_only), style = MaterialTheme.typography.bodySmall, color = Fresh.critical)
         FreshTextField(hirer, { hirer = it.take(120) }, stringResource(R.string.hirer_optional), leading = Glyph.User)
         FreshTextField(notes, { notes = it.take(500) }, stringResource(R.string.notes_optional), singleLine = false)
+    }
+
+    val amount = rent.trim().toDoubleOrNull()
+    if (reviewing && problem == null && amount != null) {
+        AlertDialog(
+            onDismissRequest = { reviewing = false },
+            containerColor = Fresh.surface,
+            title = { Text(stringResource(R.string.add_backhaul_review), style = MaterialTheme.typography.titleLarge, color = Fresh.ink) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.backhaul_from_to, pickup.trim(), drop.trim()), style = MaterialTheme.typography.bodyLarge, color = Fresh.ink)
+                    Text(stringResource(R.string.rupees, DayLogic.rupees(rent.trim())), style = MaterialTheme.typography.bodyLarge, color = Fresh.ink)
+                    hirer.trim().ifBlank { null }?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = Fresh.ink) }
+                    Text(stringResource(R.string.add_backhaul_review_note), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted, modifier = Modifier.padding(top = 6.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reviewing = false
+                    onAdd(pickup, drop, amount, hirer.ifBlank { null }, notes.ifBlank { null })
+                }) { Text(stringResource(R.string.add_backhaul), color = Fresh.primary) }
+            },
+            dismissButton = { TextButton(onClick = { reviewing = false }) { Text(stringResource(R.string.edit), color = Fresh.inkMuted) } },
+        )
     }
 }

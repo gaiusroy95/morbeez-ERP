@@ -171,8 +171,8 @@ export interface CallItem {
 }
 
 export interface CallList {
-  /** AI voice calls are Part 7 of the plan — not built; these are for the owner to make. */
-  voice: 'coming';
+  /** Automated calls: Twilio set up on the server and turned on by the business; else these are for the owner to make. */
+  voice: 'ready' | 'off' | 'not_set_up';
   date: string;
   calls: CallItem[];
 }

@@ -72,6 +72,6 @@ import { TripIncentivesService } from './trip-incentives.service';
     TripIncentivesRepository,
     TripIncentivesService,
   ],
-  exports: [LogisticsService, DelegationService],
+  exports: [LogisticsService, DelegationService, PinsService],
 })
 export class LogisticsModule {}

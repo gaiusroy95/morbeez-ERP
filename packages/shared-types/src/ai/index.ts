@@ -154,7 +154,8 @@ export interface CallItem {
 }
 
 export interface CallList {
-  voice: 'coming';
+  /** Automated calls: Twilio set up on the server and turned on by the business; else these are for the owner to make. */
+  voice: 'ready' | 'off' | 'not_set_up';
   date: IsoDate;
   calls: CallItem[];
 }
@@ -165,4 +166,68 @@ export interface PlacePin {
   name: string;
   latitude: string | null;
   longitude: string | null;
+}
+
+// ---- The AI's channels to customers: WhatsApp orders, automated calls ----
+
+export interface IntegrationSettings {
+  whatsappPhoneNumberId: string | null;
+  whatsappReply: boolean;
+  callsEnabled: boolean;
+  version: number;
+}
+
+/** GET integrations — what this server has keys for, and the business's choices. */
+export interface IntegrationsStatus {
+  publicApiUrl: string | null;
+  whatsapp: { receives: boolean; replies: boolean; webhookUrl: string | null; messagesLast7Days: number };
+  reader: { claude: boolean; model: string | null };
+  calls: { ready: boolean; fromNumber: string | null; callsLast7Days: number };
+  settings: IntegrationSettings;
+}
+
+export type InboundStatus = 'received' | 'suggested' | 'no_customer' | 'no_order' | 'not_text' | 'failed';
+
+/** GET ai/whatsapp/messages — a message a customer sent, and what came of it. */
+export interface InboundMessage {
+  id: string;
+  channel: 'whatsapp';
+  fromPhone: string;
+  senderName: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  messageType: string;
+  body: string;
+  receivedAt: IsoDateTime;
+  status: InboundStatus;
+  reader: 'claude' | 'rules' | null;
+  extraction: { delivery?: string; lines?: { productId: string; quantity: number; said: string }[]; notUnderstood?: string[] } | null;
+  recommendationId: string | null;
+  note: string | null;
+  repliedAt: IsoDateTime | null;
+}
+
+export type CallPurpose = 'payment_reminder' | 'order_reminder' | 'order_confirm';
+export type VoiceCallStatus = 'queued' | 'ringing' | 'in_progress' | 'completed' | 'busy' | 'no_answer' | 'failed' | 'canceled';
+export type CallOutcome = 'confirmed' | 'callback' | 'no_response';
+
+/** GET ai/calls/voice — an automated call placed, and what the customer pressed. */
+export interface VoiceCall {
+  id: string;
+  customerId: string;
+  customerName: string;
+  purpose: CallPurpose;
+  language: string;
+  toPhone: string;
+  script: { business: string; amount?: string; lines?: { name: string; quantity: string; uom: string }[]; orderNumber?: string; deliveryDate?: string };
+  orderId: string | null;
+  status: VoiceCallStatus;
+  digits: string | null;
+  outcome: CallOutcome | null;
+  answeredAt: IsoDateTime | null;
+  endedAt: IsoDateTime | null;
+  durationSeconds: number | null;
+  error: string | null;
+  requestedBy: string | null;
+  createdAt: IsoDateTime;
 }

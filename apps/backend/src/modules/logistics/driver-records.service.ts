@@ -89,7 +89,9 @@ export class DriverRecordsService {
     const items: DriverApproval[] = [];
     for (const r of rows) {
       const status: DriverApprovalStatus | null =
-        r.kind === 'expense'
+        r.kind === 'advance' || r.kind === 'new_customer' || r.kind === 'credit_limit'
+          ? (r.raw_status as DriverApprovalStatus)
+          : r.kind === 'expense'
           ? (expenseStatusOf({ needsApproval: true, decision: r.decision }, r.trip_status as NonNullable<typeof r.trip_status>) as DriverApprovalStatus)
           : r.kind === 'collection'
             ? disputeStatusOf(r.raw_status as 'open' | 'resolved' | 'withdrawn')
@@ -257,6 +259,7 @@ export class DriverRecordsService {
         daysLeft: d.validUntil ? daysFrom(today, d.validUntil) : null,
         state: d.state,
       })),
+      fastag: v.fastag,
     };
   }
 

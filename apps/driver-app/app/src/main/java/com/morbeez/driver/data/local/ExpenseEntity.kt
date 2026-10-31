@@ -39,6 +39,8 @@ data class ExpenseEntity(
     val photos: Int = 0,
     /** Recorded on this phone, not sent yet. */
     val pendingSync: Boolean = false,
+    /** cash | fastag: a toll or parking taken off the vehicle's FASTag isn't out of the driver's cash. */
+    val paidBy: String = "cash",
 )
 
 @Dao
@@ -61,6 +63,10 @@ interface ExpenseDao {
 
     @Query("DELETE FROM expenses WHERE tripId != :keepTripId")
     suspend fun deleteAllExceptTrip(keepTripId: String)
+
+    /** One the office refused, removed from the phone by the driver (D8). */
+    @Query("DELETE FROM expenses WHERE id = :id")
+    suspend fun delete(id: String)
 
     @Query("DELETE FROM expenses")
     suspend fun clear()

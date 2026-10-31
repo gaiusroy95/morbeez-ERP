@@ -664,7 +664,10 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
                 <tbody>
                   {expenses.map((expense) => (
                     <tr key={expense.id}>
-                      <td>{t(EXPENSE_LABEL[expense.category])}</td>
+                      <td>
+                        {t(EXPENSE_LABEL[expense.category])}
+                        {expense.paidBy === 'fastag' && <div className="cell-sub">{t('Paid by FASTag')}</div>}
+                      </td>
                       <td className="muted">
                         {expense.notes ?? ''}
                         {expenseFacts(expense, currency, t).map((fact) => (

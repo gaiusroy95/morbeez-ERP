@@ -41,6 +41,8 @@ data class ExpenseRow(
     val standing: Standing,
     /** The owner's reason, when rejected. */
     val decisionNote: String?,
+    /** cash | fastag */
+    val paidBy: String = "cash",
 )
 
 data class ExpenseTotals(val all: BigDecimal, val fuel: BigDecimal, val other: BigDecimal)
@@ -120,6 +122,7 @@ object ExpenseLogic {
         photos = e.photos,
         standing = standingOf(e),
         decisionNote = e.decisionNote,
+        paidBy = e.paidBy,
     )
 
     fun rowOf(e: DriverExpenseResponse) = ExpenseRow(
@@ -137,6 +140,7 @@ object ExpenseLogic {
         photos = e.photos,
         standing = standingOf(e.status),
         decisionNote = e.decisionNote,
+        paidBy = e.paidBy,
     )
 
     /**

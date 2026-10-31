@@ -33,6 +33,8 @@ data class TripStopEntity(
     val itemsJson: String? = null,
     /** Who's there and where: to call them, and to navigate to their map pin (or address). */
     val partyPhone: String? = null,
+    /** The customer's or farmer's id — a credit limit is asked for a customer on the trip (D10). */
+    val partyId: String? = null,
     val partyPlace: String? = null,
     val partyAddress: String? = null,
     val partyLatitude: Double? = null,

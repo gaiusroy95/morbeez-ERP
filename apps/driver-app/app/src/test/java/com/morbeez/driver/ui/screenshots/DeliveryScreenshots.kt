@@ -1,5 +1,9 @@
 package com.morbeez.driver.ui.screenshots
 
+import com.morbeez.driver.ui.screens.home.DayLogic
+import com.morbeez.driver.ui.screens.route.RouteUiState
+import com.morbeez.driver.ui.screens.route.RouteContent
+import com.morbeez.driver.ui.components.WithRefusal
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -46,8 +50,8 @@ class DeliveryScreenshots {
         paparazzi.snapshot { MorbeezTheme(darkBars = true) { content() } }
     }
 
-    private fun deliver(state: DeliveryUiState, step: DeliveryStep, device: DeviceConfig = PHONE) = draw(device) {
-        DeliveryStopContent(
+    private fun deliver(state: DeliveryUiState, step: DeliveryStep, device: DeviceConfig = PHONE, refused: String? = null) = draw(device) {
+        WithRefusal(refused, {}) { DeliveryStopContent(
             state = state,
             step = step,
             onStep = {},
@@ -62,7 +66,7 @@ class DeliveryScreenshots {
             onComplete = {},
             onCollect = {},
             photo = noCamera,
-        )
+        ) }
     }
 
     private fun deliveryTab(state: HomeUiState) = draw(TALL) {
@@ -89,6 +93,28 @@ class DeliveryScreenshots {
     @Test fun nextStop() = deliver(base, DeliveryStep.NEXT)
 
     @Test fun nextStopLocked() = deliver(base.copy(stop = shopB, next = shopA), DeliveryStep.NEXT)
+
+    // Field hardening (D8): the office refused what was done here — said above the screen (DRV.8).
+    @Test fun deliveryRefusedByOffice() = deliver(base, DeliveryStep.NEXT, refused = "This delivery was already completed from another phone")
+
+    // The route with when the driver gets to each stop, and a stop the office refused.
+    @Test fun routeWithArrivalTimes() = draw(TALL) {
+        RouteContent(
+            state = RouteUiState(
+                trip = started,
+                stops = stops,
+                refused = mapOf("b" to "Green Leaf Mess is on credit hold"),
+                etas = DayLogic.routeEtas(here.latitude, here.longitude, stops, NOW),
+            ),
+            onOpenStop = { _, _, _ -> },
+            onHandover = {},
+            onTripSummary = {},
+            onBack = {},
+            onOpenSync = {},
+            onSync = {},
+            onReportProblem = { _, _ -> },
+        )
+    }
 
     @Test fun scanWrongQr() = deliver(base.copy(stop = arrived, wrongQr = true), DeliveryStep.QR)
 
@@ -124,6 +150,8 @@ class DeliveryScreenshots {
         val PHONE = DeviceConfig.PIXEL_5
         val TALL = DeviceConfig.PIXEL_5.copy(screenHeight = 3300)
         val here = Position(12.3108, 76.6402, 8.0)
+        // A fixed "now" for the arrival times (drawn in the test JVM's time zone; a phone shows its own).
+        val NOW = java.time.Instant.parse("2026-10-28T05:30:00Z").toEpochMilli()
 
         val trip = TripEntity(
             id = "t1",

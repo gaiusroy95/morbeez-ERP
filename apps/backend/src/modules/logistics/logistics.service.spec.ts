@@ -349,7 +349,7 @@ describe('LogisticsService', () => {
             crewOptionsWithClient: jest.fn().mockResolvedValue([]),
           },
         },
-        { provide: FleetService, useValue: { assertRoadworthyWithClient: jest.fn() } },
+        { provide: FleetService, useValue: { assertRoadworthyWithClient: jest.fn(), recordFastagTollWithClient: jest.fn() } },
         { provide: DelegationService, useValue: delegation },
         { provide: DeliveryMeasuresRepository, useValue: measures },
         { provide: AlertsRepository, useValue: alertsRepo },
@@ -667,6 +667,7 @@ describe('LogisticsService', () => {
       fuel: null,
       photos: 0,
       needsApproval: false,
+      paidBy: 'cash',
     });
 
     await service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'toll', amount: 85 });
@@ -675,8 +676,34 @@ describe('LogisticsService', () => {
       expect.anything(),
       'tenant-1',
       'dispatcher-1',
-      expect.objectContaining({ id: 'expense-1', category: 'toll', amount: '85.00', occurredAt: recordedAt }),
+      expect.objectContaining({ id: 'expense-1', category: 'toll', amount: '85.00', occurredAt: recordedAt, paidBy: 'cash' }),
     );
+  });
+
+  it('recordExpense takes a toll paid by FASTag off the tag, not the float', async () => {
+    const recordedAt = new Date();
+    const fleet = (service as unknown as { fleet: { recordFastagTollWithClient: jest.Mock } }).fleet;
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    ledger.postTripExpenseWithClient.mockResolvedValue('entry-1');
+    expenses.createWithClient.mockResolvedValue({
+      id: 'expense-2', tripId: 'trip-1', category: 'toll', amount: '120.00', notes: null, recordedBy: 'dispatcher-1', recordedAt,
+      clientRef: null, decision: null, decisionNote: null, decidedAt: null, fuel: null, photos: 0, needsApproval: false, paidBy: 'fastag',
+    });
+
+    await service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'toll', amount: 120, paidBy: 'fastag' });
+
+    expect(ledger.postTripExpenseWithClient).toHaveBeenCalledWith(expect.anything(), 'tenant-1', 'dispatcher-1', expect.objectContaining({ paidBy: 'fastag' }));
+    expect(fleet.recordFastagTollWithClient).toHaveBeenCalledWith(
+      expect.anything(),
+      'tenant-1',
+      'dispatcher-1',
+      expect.objectContaining({ vehicleId: baseTrip.vehicleId, expenseId: 'expense-2', amount: '120.00', entryId: 'entry-1' }),
+    );
+  });
+
+  it('recordExpense refuses fuel paid by FASTag', async () => {
+    trips.findById.mockResolvedValue({ ...baseTrip, status: 'in_progress' });
+    await expect(service.recordExpense('tenant-1', 'dispatcher-1', true, 'trip-1', { category: 'fuel', amount: 500, paidBy: 'fastag' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('addPickupStop requires the trip to still be planned', async () => {

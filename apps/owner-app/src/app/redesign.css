@@ -2601,3 +2601,112 @@ button.link-row {
     justify-content: flex-start;
   }
 }
+
+/* ---- The remaining tasks: driver requests, FASTag, WhatsApp orders, automated calls ---- */
+
+/* A driver's request in the Approvals dialog. */
+.request-facts {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+dl.request-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+}
+dl.request-facts dt {
+  color: var(--ink-muted);
+}
+dl.request-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Settings → Integrations. */
+.integration-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.integration-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+}
+.integration-list p {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 14px;
+}
+.integration-list code {
+  overflow-wrap: anywhere;
+}
+
+/* What an automated call will say. */
+.call-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--primary-tint);
+  color: var(--ink);
+  line-height: 1.5;
+}
+.call-preview footer {
+  margin-top: 6px;
+  font-size: 13px;
+}
+.coming-card[data-state='ready'] {
+  border-color: var(--good);
+}
+
+/* WhatsApp messages on AI Orders. */
+.wa-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wa-message {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.wa-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.wa-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.wa-note {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* A vehicle's FASTag. */
+.fastag-balance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+}
+.fastag-balance strong {
+  font-size: 24px;
+}
+.fastag-balance[data-low='true'] strong {
+  color: var(--bad);
+}

@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
+import { AlertsRepository } from '../alerts/alerts.repository';
 import { LedgerService } from '../finance/ledger.service';
 import { LedgerLineInput } from '../finance/repositories/ledger.repository';
 import { TaxRulesService } from '../tax-rules/tax-rules.service';
@@ -43,6 +44,7 @@ import {
   DocType,
   EconomicsReport,
   EconomicsRow,
+  FastagView,
   FleetSettings,
   HireBill,
   HireContract,
@@ -55,6 +57,9 @@ import {
   CapitalizeVehicleDto,
   CreateLoanDto,
   DisposeVehicleDto,
+  FastagChargeDto,
+  FastagDto,
+  FastagRechargeDto,
   FleetSettingsDto,
   HireContractDto,
   PayEmiDto,
@@ -96,6 +101,11 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
 }
 
+/** Below the owner's threshold — or overdrawn, when no threshold is set. */
+export function fastagLow(balance: string, lowBalance: string | null): boolean {
+  return compareMoney(balance, lowBalance ?? '0') < 0;
+}
+
 /** Where a document stands today: past its date, inside the reminder window, fine, or never expiring. */
 export function documentState(validUntil: string | null, today: string, reminderDays: number): DocState {
   if (!validUntil) return 'no_expiry';
@@ -124,6 +134,7 @@ export class FleetService {
     private readonly taxRules: TaxRulesService,
     private readonly taxRulesRepo: TaxRulesRepository,
     private readonly audit: AuditService,
+    private readonly alerts: AlertsRepository,
   ) {}
 
   private notFuture(date: string, field: string, books: Books, what: string): void {
@@ -184,13 +195,14 @@ export class FleetService {
   private async overviews(client: PoolClient, vehicleId: string | null): Promise<VehicleOverview[]> {
     const books = await this.repo.books(client);
     const settings = await this.repo.settings(client);
-    const [vehicles, documents, maintenance, loans, contracts, unpaid] = await Promise.all([
+    const [vehicles, documents, maintenance, loans, contracts, unpaid, fastags] = await Promise.all([
       this.repo.vehicles(client, vehicleId),
       this.repo.documents(client, vehicleId),
       this.repo.maintenance(client, vehicleId),
       this.repo.loans(client, vehicleId),
       this.repo.contracts(client, vehicleId),
       this.repo.bills(client, vehicleId, 'unpaid'),
+      this.repo.fastagBalances(client, vehicleId),
     ]);
     const out: VehicleOverview[] = [];
     for (const v of vehicles) {
@@ -220,6 +232,9 @@ export class FleetService {
         if (d.state === 'expiring') issues.push(`${DOC_LABEL[d.docType]} expires on ${d.validUntil}`);
       }
       if (maintenanceDue?.overdue) issues.push(`Maintenance overdue${maintenanceDue.date ? ` (due ${maintenanceDue.date})` : ` (due at ${maintenanceDue.km!.toLocaleString('en-IN')} km)`}`);
+      const tag = fastags.get(id);
+      const tagLow = tag ? fastagLow(tag.balance, tag.lowBalance) : false;
+      if (tag && tagLow) issues.push(`FASTag balance low: ₹${Number(tag.balance).toLocaleString('en-IN')}`);
 
       let netBookValue: string | null = null;
       if (v.ownership === 'owned') {
@@ -248,6 +263,7 @@ export class FleetService {
         loanOutstanding: sumMoney(vehicleLoans.map((l) => subtractMoney(l.principal as string, l.principal_repaid as string))),
         hireContract: contract,
         unpaidHire: sumMoney(unpaid.filter((b) => b.vehicleId === id).map((b) => b.amount)),
+        fastag: tag ? { balance: tag.balance, low: tagLow } : null,
       });
     }
     return out;
@@ -511,6 +527,174 @@ export class FleetService {
       });
       await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'vehicle_document', entityId: id, after: { ...dto, amount, entryId, today: books.today } });
       return this.detail(client, dto.vehicleId);
+    });
+  }
+
+  // ---- FASTag ----
+
+  getFastag(tenantId: string, vehicleId: string): Promise<FastagView> {
+    return this.db.withTenant(tenantId, (client) => this.fastagView(client, vehicleId));
+  }
+
+  private async fastagView(client: PoolClient, vehicleId: string): Promise<FastagView> {
+    const v = await this.vehicle(client, vehicleId);
+    const tag = await this.repo.fastag(client, vehicleId);
+    const balance = (await this.repo.fastagBalances(client, vehicleId)).get(vehicleId)?.balance ?? '0.00';
+    return {
+      vehicleId,
+      registrationNumber: v.registration_number,
+      tagId: tag?.tag_id ?? null,
+      issuer: tag?.issuer ?? null,
+      lowBalance: tag?.low_balance ?? null,
+      balance,
+      low: fastagLow(balance, tag?.low_balance ?? null),
+      entries: await this.repo.fastagEntries(client, vehicleId, 100),
+    };
+  }
+
+  /** The vehicle's tag and when to warn. The balance is never typed in: it's what the entries add up to. */
+  saveFastag(tenantId: string, userId: string, vehicleId: string, dto: FastagDto): Promise<FastagView> {
+    return this.db.withTenant(tenantId, async (client) => {
+      await this.liveVehicle(client, vehicleId);
+      const before = await this.repo.fastag(client, vehicleId);
+      const after = { tagId: dto.tagId.trim(), issuer: clean(dto.issuer), lowBalance: moneyFromNumber(dto.lowBalance) };
+      await this.repo.saveFastag(client, { tenantId, vehicleId, userId, ...after });
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId: userId,
+        action: before ? 'update' : 'create',
+        entityType: 'fastag',
+        entityId: vehicleId,
+        before: before ?? undefined,
+        after,
+      });
+      return this.fastagView(client, vehicleId);
+    });
+  }
+
+  /** Dr FASTag balance / Cr bank or cash. */
+  rechargeFastag(tenantId: string, userId: string, vehicleId: string, dto: FastagRechargeDto): Promise<FastagView> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const books = await this.repo.books(client);
+      this.notFuture(dto.rechargedOn, 'rechargedOn', books, 'A recharge');
+      const v = await this.liveVehicle(client, vehicleId);
+      const amount = moneyFromNumber(dto.amount);
+      const id = randomUUID();
+      const entryId = await this.ledger.postSystemWithClient(client, {
+        tenantId,
+        entryType: 'fastag_recharged',
+        sourceType: 'fastag_entry',
+        sourceId: id,
+        occurredAt: await this.repo.instant(client, books.timezone, books.today, dto.rechargedOn),
+        memo: `FASTag recharge for ${v.registration_number}${dto.reference ? ` (${dto.reference.trim()})` : ''}`,
+        createdBy: userId,
+        lines: [
+          { account: 'fastag_balance', debit: amount },
+          { account: dto.paidFrom, credit: amount },
+        ],
+      });
+      await this.repo.insertFastagEntry(client, {
+        id,
+        tenantId,
+        vehicleId,
+        kind: 'recharge',
+        amount,
+        occurredOn: dto.rechargedOn,
+        paidFrom: dto.paidFrom,
+        tripExpenseId: null,
+        reference: clean(dto.reference),
+        notes: null,
+        entryId,
+        userId,
+      });
+      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'fastag_entry', entityId: id, after: { ...dto, amount, entryId } });
+      return this.fastagView(client, vehicleId);
+    });
+  }
+
+  /** Something on the tag's statement no trip recorded: Dr Transport — tolls / Cr FASTag balance. */
+  chargeFastag(tenantId: string, userId: string, vehicleId: string, dto: FastagChargeDto): Promise<FastagView> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const books = await this.repo.books(client);
+      this.notFuture(dto.chargedOn, 'chargedOn', books, 'A charge');
+      const v = await this.liveVehicle(client, vehicleId);
+      const amount = moneyFromNumber(dto.amount);
+      const id = randomUUID();
+      const entryId = await this.ledger.postSystemWithClient(client, {
+        tenantId,
+        entryType: 'fastag_charged',
+        sourceType: 'fastag_entry',
+        sourceId: id,
+        occurredAt: await this.repo.instant(client, books.timezone, books.today, dto.chargedOn),
+        memo: `FASTag ${v.registration_number}: ${dto.notes.trim()}`,
+        createdBy: userId,
+        lines: [
+          { account: 'trip_expense_toll', debit: amount },
+          { account: 'fastag_balance', credit: amount },
+        ],
+      });
+      await this.repo.insertFastagEntry(client, {
+        id,
+        tenantId,
+        vehicleId,
+        kind: 'charge',
+        amount: `-${amount}`,
+        occurredOn: dto.chargedOn,
+        paidFrom: null,
+        tripExpenseId: null,
+        reference: clean(dto.reference),
+        notes: dto.notes.trim(),
+        entryId,
+        userId,
+      });
+      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'fastag_entry', entityId: id, after: { ...dto, amount, entryId } });
+      await this.warnIfFastagLow(client, tenantId, vehicleId, v.registration_number);
+      return this.fastagView(client, vehicleId);
+    });
+  }
+
+  /**
+   * A trip's toll or parking the driver paid by tag — called by Logistics in
+   * the expense's own transaction, whose ledger entry already credits the tag.
+   */
+  async recordFastagTollWithClient(
+    client: PoolClient,
+    tenantId: string,
+    userId: string,
+    toll: { vehicleId: string; expenseId: string; amount: string; occurredAt: Date; tripId: string; memo: string; entryId: string },
+  ): Promise<void> {
+    const v = await this.vehicle(client, toll.vehicleId);
+    const books = await this.repo.books(client);
+    await this.repo.insertFastagEntry(client, {
+      id: randomUUID(),
+      tenantId,
+      vehicleId: toll.vehicleId,
+      kind: 'toll',
+      amount: `-${toll.amount}`,
+      occurredOn: await this.repo.localDate(client, books.timezone, toll.occurredAt),
+      paidFrom: null,
+      tripExpenseId: toll.expenseId,
+      reference: null,
+      notes: toll.memo,
+      entryId: toll.entryId,
+      userId,
+    });
+    await this.warnIfFastagLow(client, tenantId, toll.vehicleId, v.registration_number, toll.tripId);
+  }
+
+  /** Below the tag's threshold the owner is told to top it up — once per recharge, however many tolls follow. */
+  private async warnIfFastagLow(client: PoolClient, tenantId: string, vehicleId: string, registration: string, tripId: string | null = null): Promise<void> {
+    const tag = (await this.repo.fastagBalances(client, vehicleId)).get(vehicleId);
+    if (!tag || !fastagLow(tag.balance, tag.lowBalance)) return;
+    const recharge = await this.repo.lastFastagRecharge(client, vehicleId);
+    const inr = (v: string) => `₹${Number(v).toLocaleString('en-IN')}`;
+    await this.alerts.raiseWithClient(client, tenantId, {
+      kind: 'fastag_low',
+      severity: 'warning',
+      title: `FASTag low on ${registration}`,
+      detail: `${inr(tag.balance)} left${tag.lowBalance ? ` — below the ${inr(tag.lowBalance)} you set` : ''}. Recharge it under Vehicles → ${registration} → FASTag.`,
+      tripId,
+      dedupeKey: `fastag_low:${vehicleId}:${recharge ?? 'none'}`,
     });
   }
 

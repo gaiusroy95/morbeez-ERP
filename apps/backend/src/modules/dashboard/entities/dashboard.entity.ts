@@ -179,7 +179,7 @@ export interface ProfitInsights {
 }
 
 /** What waits for the owner in the Approvals & Exceptions inbox (redesign Phase 7, screen 17). */
-export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close';
+export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close' | 'driver_request';
 export type InboxTab = 'expense' | 'price' | 'other';
 
 export interface InboxItem {
@@ -202,6 +202,9 @@ export interface InboxItem {
     purchaseOrderId?: string;
     orderId?: string;
     spotSaleId?: string;
+    driverRequestId?: string;
+    /** A driver's request: advance, new_customer or credit_limit. */
+    requestKind?: string;
     recommendationId?: string;
     disputeId?: string;
     customerId?: string;

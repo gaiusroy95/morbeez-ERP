@@ -388,42 +388,48 @@ export class PayrollService {
 
   /** Dr Advances to workers / Cr bank or cash — an asset until recovered from pay. */
   recordAdvance(tenantId: string, userId: string, dto: RecordAdvanceDto): Promise<AdvanceRecord[]> {
-    assertRealDate(dto.paidOn, 'paidOn');
-    const amount = moneyFromNumber(dto.amount);
     return this.db.withTenant(tenantId, async (client) => {
-      const worker = await this.repo.employeeExists(client, dto.employeeId);
-      if (!worker) throw new NotFoundException('Worker not found');
-      if (worker.status !== 'active') throw new ConflictException(`${worker.name} is archived`);
-      const { today, timezone } = await this.repo.today(client);
-      if (dto.paidOn > today) throw new BadRequestException("An advance can't be dated in the future");
-      const id = randomUUID();
-      const entryId = await this.ledger.postSystemWithClient(client, {
-        tenantId,
-        entryType: 'worker_advance_paid',
-        sourceType: 'worker_advance',
-        sourceId: id,
-        occurredAt: await this.instant(client, timezone, today, dto.paidOn),
-        memo: `Advance to ${worker.name}${dto.notes ? ` — ${dto.notes.trim()}` : ''}`,
-        createdBy: userId,
-        lines: [
-          { account: 'employee_advance', debit: amount },
-          { account: dto.paidFrom, credit: amount },
-        ],
-      });
-      await this.repo.insertAdvance(client, {
-        id,
-        tenantId,
-        employeeId: dto.employeeId,
-        amount,
-        paidOn: dto.paidOn,
-        paidFrom: dto.paidFrom,
-        notes: clean(dto.notes),
-        entryId,
-        userId,
-      });
-      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'worker_advance', entityId: id, after: { ...dto, amount, entryId } });
+      await this.recordAdvanceWithClient(client, tenantId, userId, dto);
       return this.repo.advances(client, dto.employeeId, false);
     });
+  }
+
+  /** The advance and its posting, in the caller's transaction (a driver's request approved, D10); its id. */
+  async recordAdvanceWithClient(client: PoolClient, tenantId: string, userId: string, dto: RecordAdvanceDto): Promise<string> {
+    assertRealDate(dto.paidOn, 'paidOn');
+    const amount = moneyFromNumber(dto.amount);
+    const worker = await this.repo.employeeExists(client, dto.employeeId);
+    if (!worker) throw new NotFoundException('Worker not found');
+    if (worker.status !== 'active') throw new ConflictException(`${worker.name} is archived`);
+    const { today, timezone } = await this.repo.today(client);
+    if (dto.paidOn > today) throw new BadRequestException("An advance can't be dated in the future");
+    const id = randomUUID();
+    const entryId = await this.ledger.postSystemWithClient(client, {
+      tenantId,
+      entryType: 'worker_advance_paid',
+      sourceType: 'worker_advance',
+      sourceId: id,
+      occurredAt: await this.instant(client, timezone, today, dto.paidOn),
+      memo: `Advance to ${worker.name}${dto.notes ? ` — ${dto.notes.trim()}` : ''}`,
+      createdBy: userId,
+      lines: [
+        { account: 'employee_advance', debit: amount },
+        { account: dto.paidFrom, credit: amount },
+      ],
+    });
+    await this.repo.insertAdvance(client, {
+      id,
+      tenantId,
+      employeeId: dto.employeeId,
+      amount,
+      paidOn: dto.paidOn,
+      paidFrom: dto.paidFrom,
+      notes: clean(dto.notes),
+      entryId,
+      userId,
+    });
+    await this.audit.record(client, { tenantId, actorUserId: userId, action: 'create', entityType: 'worker_advance', entityId: id, after: { ...dto, amount, entryId } });
+    return id;
   }
 
   // ---- Earnings and settlements ----

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { ExpenseCategory, FuelType, TripExpensePhotoRecord, TripExpenseRecord } from '../entities/trip-expense.entity';
+import { ExpenseCategory, ExpensePaidBy, FuelType, TripExpensePhotoRecord, TripExpenseRecord } from '../entities/trip-expense.entity';
 
 export interface TripExpenseRow {
   id: string;
@@ -20,6 +20,7 @@ export interface TripExpenseRow {
   full_tank: boolean | null;
   litres: string | null;
   rate_per_litre: string | null;
+  paid_by: ExpensePaidBy;
   photos: number;
 }
 
@@ -42,6 +43,7 @@ export function toExpenseRecord(row: TripExpenseRow): TripExpenseRecord {
       ? { odometerKm: row.odometer_km, fuelType: row.fuel_type, fullTank: row.full_tank, litres: row.litres, ratePerLitre: row.rate_per_litre }
       : null,
     photos: row.photos ?? 0,
+    paidBy: row.paid_by ?? 'cash',
   };
 }
 
@@ -62,6 +64,7 @@ export interface NewTripExpense {
   fullTank?: boolean | null;
   litres?: number | null;
   ratePerLitre?: number | null;
+  paidBy?: ExpensePaidBy;
 }
 
 @Injectable()
@@ -74,8 +77,8 @@ export class TripExpensesRepository {
   async createWithClient(client: PoolClient, recordedBy: string, fields: NewTripExpense): Promise<TripExpenseRecord> {
     const result = await client.query<{ id: string }>(
       `INSERT INTO fulfilment.trip_expense
-         (id, trip_id, category, amount, notes, recorded_by, client_ref, needs_approval, odometer_km, fuel_type, full_tank, litres, rate_per_litre)
-       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         (id, trip_id, category, amount, notes, recorded_by, client_ref, needs_approval, odometer_km, fuel_type, full_tank, litres, rate_per_litre, paid_by)
+       VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id`,
       [
         fields.id ?? null,
@@ -91,6 +94,7 @@ export class TripExpensesRepository {
         fields.fullTank ?? null,
         fields.litres ?? null,
         fields.ratePerLitre ?? null,
+        fields.paidBy ?? 'cash',
       ],
     );
     return (await this.findByIdWithClient(client, result.rows[0].id)) as TripExpenseRecord;
@@ -124,9 +128,10 @@ export class TripExpensesRepository {
     return result.rows[0] ? this.findByIdWithClient(client, id) : null;
   }
 
+  /** What the driver paid in cash on this trip — a toll paid by FASTag never came out of the float. */
   async sumByTripWithClient(client: PoolClient, tripId: string): Promise<number> {
     const result = await client.query<{ total: string }>(
-      'SELECT COALESCE(SUM(amount), 0) AS total FROM fulfilment.trip_expense WHERE trip_id = $1',
+      "SELECT COALESCE(SUM(amount), 0) AS total FROM fulfilment.trip_expense WHERE trip_id = $1 AND paid_by = 'cash'",
       [tripId],
     );
     return Number(result.rows[0].total);

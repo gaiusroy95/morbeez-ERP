@@ -7,7 +7,12 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.morbeez.driver.data.local.TripEntity
 import com.morbeez.driver.data.local.TripStopEntity
+import com.morbeez.driver.data.device.LocationReader
+import com.morbeez.driver.data.device.Position
+import com.morbeez.driver.data.repository.QueueRepository
 import com.morbeez.driver.data.repository.TripRepository
+import com.morbeez.driver.ui.screens.home.DayLogic
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.morbeez.driver.data.sync.SyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,6 +31,10 @@ data class RouteUiState(
     val trip: TripEntity? = null,
     val stops: List<TripStopEntity> = emptyList(),
     val isSyncing: Boolean = false,
+    /** Stops with an action the office refused, and its words (DRV.8, D8). */
+    val refused: Map<String, String> = emptyMap(),
+    /** When the driver should reach each stop still to do, epoch millis (D8). */
+    val etas: Map<String, Long> = emptyMap(),
 )
 
 /**
@@ -39,7 +48,10 @@ data class RouteUiState(
 class RouteViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val tripRepository: TripRepository,
+    queue: QueueRepository,
+    private val location: LocationReader,
 ) : ViewModel() {
+    private val position = MutableStateFlow<Position?>(null)
 
     // Syncing while the requested pass is waiting for a network or running.
     private val isSyncing = WorkManager.getInstance(appContext)
@@ -54,9 +66,22 @@ class RouteViewModel @Inject constructor(
         }
     }
 
-    val state: StateFlow<RouteUiState> = combine(tripWithStops, isSyncing) { base, syncing ->
-        base.copy(isSyncing = syncing)
+    val state: StateFlow<RouteUiState> = combine(tripWithStops, isSyncing, queue.observeRefusedStops(), position) { base, syncing, refused, here ->
+        base.copy(
+            isSyncing = syncing,
+            refused = refused,
+            etas = DayLogic.routeEtas(here?.latitude, here?.longitude, base.stops, System.currentTimeMillis()),
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RouteUiState())
+
+    /** Where the phone is, for the arrival times; quietly nothing without permission. */
+    fun refreshPosition() {
+        if (!location.hasPermission()) return
+        viewModelScope.launch {
+            location.lastKnown(maxAgeMillis = 10 * 60_000)?.let { position.value = it }
+            location.current(timeoutMillis = 15_000)?.let { position.value = it }
+        }
+    }
 
     /**
      * Refresh goes through the same single sync as everything else. It used

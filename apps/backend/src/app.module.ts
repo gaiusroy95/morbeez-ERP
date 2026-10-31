@@ -34,6 +34,7 @@ import { AlertsModule } from './modules/alerts/alerts.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { RoutesModule } from './modules/routes/routes.module';
+import { DriverRequestsModule } from './modules/driver-requests/driver-requests.module';
 
 // The modular monolith root. Each import below is a bounded context
 // (Domain Model) with its own module boundary enforced by Nest's DI
@@ -76,6 +77,7 @@ import { RoutesModule } from './modules/routes/routes.module';
     ChatModule,
     DevicesModule,
     RoutesModule,
+    DriverRequestsModule,
   ],
   providers: [
     // Validation: every request DTO is checked before it reaches a

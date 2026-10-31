@@ -7,6 +7,7 @@ import { FleetService } from './fleet.service';
 import { FleetRepository } from './repositories/fleet.repository';
 import { FinanceModule } from '../finance/finance.module';
 import { TaxRulesModule } from '../tax-rules/tax-rules.module';
+import { AlertsModule } from '../alerts/alerts.module';
 
 // Bounded context: Vehicles — the fleet (Domain Model, Trading Partners
 // & Catalog tier) and what it costs to run: fuel, maintenance, documents,
@@ -14,7 +15,7 @@ import { TaxRulesModule } from '../tax-rules/tax-rules.module';
 // posts through Finance's LedgerService; TDS on hire through the tax rules.
 // Exports FleetService so Logistics can refuse a trip on an unfit vehicle.
 @Module({
-  imports: [FinanceModule, TaxRulesModule],
+  imports: [FinanceModule, TaxRulesModule, AlertsModule],
   controllers: [VehiclesController, FleetController],
   providers: [VehiclesService, VehiclesRepository, FleetService, FleetRepository],
   exports: [VehiclesService, FleetService],

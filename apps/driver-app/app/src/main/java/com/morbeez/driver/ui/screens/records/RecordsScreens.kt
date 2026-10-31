@@ -55,6 +55,8 @@ import com.morbeez.driver.ui.screens.expenses.categoryLabel
 import com.morbeez.driver.ui.screens.expenses.fuelTypeLabel
 import com.morbeez.driver.ui.screens.home.DayLogic
 import com.morbeez.driver.ui.screens.home.clockOf
+import com.morbeez.driver.ui.screens.requests.UnsentRequest
+import com.morbeez.driver.ui.screens.requests.requestKindLabel
 import com.morbeez.driver.ui.theme.Fresh
 
 /** "Updated 08:15 AM" — when the server last answered — or that the phone is offline. */
@@ -77,18 +79,20 @@ private fun UpdatedLine(state: RecordsUiState, onRefresh: () -> Unit) {
 // ---------------------------------------------------------------------------
 
 @Composable
-fun ApprovalsScreen(onBack: () -> Unit, viewModel: RecordsViewModel = hiltViewModel()) {
+fun ApprovalsScreen(onBack: () -> Unit, onNewRequest: () -> Unit, viewModel: RecordsViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ApprovalsContent(state, onBack, viewModel::refresh)
+    ApprovalsContent(state, onBack, viewModel::refresh, onNewRequest)
 }
 
 /**
  * Approvals: what the driver raised that the owner decides — an expense
- * beyond their authority, a customer's dispute, a trip handed over — waiting,
- * approved or rejected, with the owner's word. The driver decides nothing here.
+ * beyond their authority, a customer's dispute, a trip handed over, what
+ * they asked the office for (an advance, a new customer, a credit limit) —
+ * waiting, approved or rejected, with the owner's word. The driver decides
+ * nothing here; Ask the office makes a new request.
  */
 @Composable
-internal fun ApprovalsContent(state: RecordsUiState, onBack: () -> Unit, onRefresh: () -> Unit) {
+internal fun ApprovalsContent(state: RecordsUiState, onBack: () -> Unit, onRefresh: () -> Unit, onNewRequest: () -> Unit = {}) {
     var status by rememberSaveable { mutableStateOf("pending") }
     var kind by rememberSaveable { mutableStateOf("all") }
     val items = state.approvals?.items.orEmpty()
@@ -124,6 +128,8 @@ internal fun ApprovalsContent(state: RecordsUiState, onBack: () -> Unit, onRefre
             kind,
             { kind = it },
         )
+        SecondaryAction(stringResource(R.string.req_title), onClick = onNewRequest, glyph = Glyph.Plus)
+        if (status == "pending" && (kind == "all" || kind == "handover")) state.unsentRequests.forEach { UnsentRequestCard(it) }
         if (state.approvals == null) Callout(stringResource(R.string.records_not_yet), Tone.Active, Glyph.Sync)
         val shown = RecordsLogic.approvals(items, status, kind)
         if (state.approvals != null && shown.isEmpty()) Text(stringResource(R.string.appr_none), style = MaterialTheme.typography.bodyMedium, color = Fresh.inkMuted)
@@ -140,7 +146,9 @@ private fun ApprovalCard(a: DriverApprovalResponse) {
                 GlyphIcon(
                     when (a.kind) {
                         "expense" -> categoryGlyph(a.category)
-                        "collection" -> Glyph.Rupee
+                        "collection", "advance" -> Glyph.Rupee
+                        "new_customer" -> Glyph.User
+                        "credit_limit" -> Glyph.Wallet
                         else -> Glyph.Truck
                     },
                     Fresh.primary,
@@ -153,16 +161,21 @@ private fun ApprovalCard(a: DriverApprovalResponse) {
                     when (a.kind) {
                         "expense" -> stringResource(R.string.appr_expense_title, categoryLabel(a.category))
                         "collection" -> stringResource(R.string.appr_dispute_title, a.customerName ?: "—")
+                        "advance" -> requestKindLabel("advance")
+                        "new_customer" -> stringResource(R.string.appr_new_customer_title, a.customerName ?: "—")
+                        "credit_limit" -> stringResource(R.string.appr_credit_title, a.customerName ?: "—")
                         else -> stringResource(R.string.appr_handover_title)
                     },
                     style = MaterialTheme.typography.titleMedium,
                     color = Fresh.ink,
                 )
-                Text(
-                    a.amount?.let { stringResource(R.string.rupees, DayLogic.rupees(it)) } ?: "—",
-                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                    color = Fresh.ink,
-                )
+                if (a.kind != "new_customer") {
+                    Text(
+                        a.amount?.let { stringResource(R.string.rupees, DayLogic.rupees(it)) } ?: "—",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = Fresh.ink,
+                    )
+                }
             }
             when (a.status) {
                 "approved" -> Pill(stringResource(R.string.exp_approved), Tone.Good)
@@ -193,7 +206,45 @@ private fun ownerWord(a: DriverApprovalResponse): Pair<String, Tone>? = when {
     a.kind == "handover" && a.status == "approved" -> stringResource(R.string.appr_closed) to Tone.Good
     a.kind == "handover" && a.status == "rejected" -> stringResource(R.string.appr_sent_back, a.note ?: "—") to Tone.Bad
     a.kind == "handover" && a.note != null -> stringResource(R.string.appr_on_hold, a.note) to Tone.Bad
+    a.kind in REQUEST_KINDS && a.status == "rejected" -> stringResource(R.string.owner_said, a.note ?: "—") to Tone.Bad
+    a.kind in REQUEST_KINDS && a.status == "approved" -> (a.note?.let { stringResource(R.string.req_approved_note, it) } ?: stringResource(requestDone(a.kind))) to Tone.Good
     else -> null
+}
+
+private val REQUEST_KINDS = setOf("advance", "new_customer", "credit_limit")
+
+/** What approving it did. */
+private fun requestDone(kind: String): Int = when (kind) {
+    "advance" -> R.string.req_done_advance
+    "new_customer" -> R.string.req_done_customer
+    else -> R.string.req_done_limit
+}
+
+/** Asked on this phone, not with the office yet — or refused by it (Sync says why). */
+@Composable
+private fun UnsentRequestCard(r: UnsentRequest) {
+    FieldCard {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(Fresh.surface2), contentAlignment = Alignment.Center) {
+                GlyphIcon(if (r.kind == "new_customer") Glyph.User else Glyph.Rupee, Fresh.primary, size = 20.dp)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when (r.kind) {
+                        "new_customer" -> stringResource(R.string.appr_new_customer_title, r.customerName ?: "—")
+                        "credit_limit" -> stringResource(R.string.appr_credit_title, r.customerName ?: "—")
+                        else -> requestKindLabel(r.kind)
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Fresh.ink,
+                )
+                r.amount?.let { Text(stringResource(R.string.rupees, DayLogic.rupees(it)), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = Fresh.ink) }
+            }
+            if (r.refused) Pill(stringResource(R.string.req_refused), Tone.Bad) else Pill(stringResource(R.string.exp_unsent), Tone.Neutral)
+        }
+        Text(r.reason, style = MaterialTheme.typography.bodyMedium, color = Fresh.ink, modifier = Modifier.padding(top = 8.dp))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +358,20 @@ private fun VehicleOverview(v: DriverVehicleResponse, dueCount: Int) {
             MiniStat(stringResource(R.string.veh_current_km), v.currentKm?.let { stringResource(R.string.km_value, DayLogic.quantity(it)) } ?: "—", Modifier.weight(1f))
             MiniStat(stringResource(R.string.exp_avg_mileage), v.averageKmPerLitre?.let { stringResource(R.string.kmpl_value, it) } ?: "—", Modifier.weight(1f))
             MiniStat(stringResource(R.string.veh_last_tank), v.lastFullTank?.kmPerLitre?.let { stringResource(R.string.kmpl_value, it) } ?: "—", Modifier.weight(1f))
+        }
+    }
+    v.fastag?.let { tag ->
+        FieldCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GlyphIcon(Glyph.Wallet, if (tag.low) Fresh.critical else Fresh.primary, size = 22.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.veh_fastag), style = MaterialTheme.typography.bodySmall, color = Fresh.inkMuted)
+                    Text(stringResource(R.string.rupees, DayLogic.rupees(tag.balance)), style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = if (tag.low) Fresh.critical else Fresh.ink)
+                }
+                if (tag.low) Pill(stringResource(R.string.veh_fastag_low), Tone.Bad)
+            }
+            Text(stringResource(R.string.veh_fastag_note), style = MaterialTheme.typography.bodySmall, color = Fresh.inkFaint, modifier = Modifier.padding(top = 8.dp))
         }
     }
     if (dueCount > 0) Callout(pluralStringResource(R.plurals.veh_dues_callout, dueCount, dueCount), Tone.Attention)

@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ExpenseEntity::class,
         ChatMessageEntity::class,
     ],
-    version = 12,
+    version = 14,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -167,6 +167,21 @@ abstract class AppDatabase : RoomDatabase() {
                         "`writtenAt` TEXT NOT NULL, `createdAt` TEXT, `pendingSync` INTEGER NOT NULL, PRIMARY KEY(`id`))",
                 )
                 db.execSQL("ALTER TABLE driver_day ADD COLUMN chatReadAt TEXT")
+            }
+        }
+
+        /** Driver app V1 (D8): why the office refused a photo, so the driver sees it. */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_photos ADD COLUMN lastError TEXT")
+            }
+        }
+
+        /** The remaining tasks: a toll or parking paid by FASTag rather than the driver's cash; whose a stop is (D10). */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE expenses ADD COLUMN paidBy TEXT NOT NULL DEFAULT 'cash'")
+                db.execSQL("ALTER TABLE trip_stops ADD COLUMN partyId TEXT")
             }
         }
     }

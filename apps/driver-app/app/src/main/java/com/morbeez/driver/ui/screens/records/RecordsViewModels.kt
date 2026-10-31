@@ -13,6 +13,7 @@ import com.morbeez.driver.data.remote.dto.DriverVehicleResponse
 import com.morbeez.driver.data.remote.dto.TripHistoryResponse
 import com.morbeez.driver.data.repository.TripRepository
 import com.morbeez.driver.data.sync.SyncWorker
+import com.morbeez.driver.ui.screens.requests.UnsentRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -32,6 +33,8 @@ data class RecordsUiState(
     val vehicle: DriverVehicleResponse? = null,
     val profile: DriverProfileResponse? = null,
     val online: Boolean = true,
+    /** Asked on this phone, not with the office yet (D10). */
+    val unsentRequests: List<UnsentRequest> = emptyList(),
 ) {
     /** When the server last answered, epoch millis. */
     val refreshedAt: Long? get() = day?.refreshedAt
@@ -43,8 +46,8 @@ class RecordsViewModel @Inject constructor(
     trips: TripRepository,
     network: NetworkMonitor,
 ) : ViewModel() {
-    val state: StateFlow<RecordsUiState> = combine(trips.observeDay(), network.online) { day, online ->
-        RecordsUiState(day, trips.approvalsOf(day), trips.vehicleOf(day), trips.profileOf(day), online)
+    val state: StateFlow<RecordsUiState> = combine(trips.observeDay(), network.online, trips.observeUnsentRequests()) { day, online, unsent ->
+        RecordsUiState(day, trips.approvalsOf(day), trips.vehicleOf(day), trips.profileOf(day), online, unsent)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecordsUiState())
 
     /** Read again from the server (the queue goes first). */

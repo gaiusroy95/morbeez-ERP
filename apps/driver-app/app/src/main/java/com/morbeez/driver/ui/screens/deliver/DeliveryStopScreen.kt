@@ -44,6 +44,7 @@ import com.morbeez.driver.data.local.DeliveryDraft
 import com.morbeez.driver.data.local.DeliveryLineDraft
 import com.morbeez.driver.data.local.QrState
 import com.morbeez.driver.data.remote.dto.StopItemResponse
+import com.morbeez.driver.ui.components.WithRefusal
 import com.morbeez.driver.ui.components.Callout
 import com.morbeez.driver.ui.components.ChoiceTiles
 import com.morbeez.driver.ui.components.Eyebrow
@@ -78,9 +79,11 @@ fun DeliveryStopScreen(
     onDone: () -> Unit,
     onCollect: () -> Unit,
     onReport: () -> Unit,
+    onOpenSync: () -> Unit = {},
     viewModel: DeliveryStopViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val refused by viewModel.refused.collectAsStateWithLifecycle()
     var chosen by rememberSaveable { mutableStateOf<DeliveryStep?>(null) }
     val step = chosen ?: initialStepOf(state)
     val prompt = stringResource(R.string.scan_prompt)
@@ -90,7 +93,7 @@ fun DeliveryStopScreen(
         chosen = if (step == DeliveryStep.ITEMS) DeliveryStep.QR else DeliveryStep.NEXT
     }
 
-    DeliveryStopContent(
+    WithRefusal(refused, onOpenSync) { DeliveryStopContent(
         state = state,
         step = step,
         onStep = { chosen = it },
@@ -116,7 +119,7 @@ fun DeliveryStopScreen(
         onComplete = { viewModel.complete(onDone) },
         onCollect = onCollect,
         onReport = onReport,
-    )
+    ) }
 }
 
 /** Where a delivery picks up: on the way, at the door for the QR, or with the goods. */

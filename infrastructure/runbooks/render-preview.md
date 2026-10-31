@@ -125,6 +125,27 @@ what each may do.
 Then close public sign-up: Render → `morbeez-api` → Environment →
 `SIGNUP_ENABLED` = `false`.
 
+## 8a. WhatsApp orders, Claude, automated calls (optional)
+
+Each is optional; Settings → Integrations in the owner app shows what's on.
+Where each key comes from is in `apps/backend/.env.example`, section 4.
+
+1. Render → `morbeez-api` → **Environment**: `PUBLIC_API_URL` = the API
+   address from 4.4 (no trailing slash), then any of:
+   - WhatsApp: `WHATSAPP_VERIFY_TOKEN` (make one up), `WHATSAPP_APP_SECRET`,
+     `WHATSAPP_ACCESS_TOKEN` (for replies);
+   - Claude: `ANTHROPIC_API_KEY`;
+   - calls: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`.
+   **Save** (it redeploys).
+2. Meta's app → WhatsApp → Configuration → Webhook: Callback URL =
+   `<API address>/webhooks/whatsapp`, Verify token = `WHATSAPP_VERIFY_TOKEN`,
+   **Verify and save**; subscribe to **messages**.
+3. Owner app → Settings → Integrations: the number's **Phone number ID**
+   (Meta → WhatsApp → API Setup), replies on or off, automated calls on or off.
+4. Check: send "Tomato 2 kg" to the business's WhatsApp number from a phone
+   that's on a customer — it appears on AI Orders within seconds. A free
+   Render instance asleep takes about a minute to wake; Meta retries.
+
 ## 8. The .apk
 
 From `apps/driver-app`:

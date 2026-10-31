@@ -35,7 +35,7 @@ export interface MyExpenses {
   mileage: VehicleMileage | null;
 }
 
-export type DriverApprovalKind = 'expense' | 'collection' | 'handover';
+export type DriverApprovalKind = 'expense' | 'collection' | 'handover' | 'advance' | 'new_customer' | 'credit_limit';
 export type DriverApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 /**
@@ -147,6 +147,8 @@ export interface DriverVehicle {
   lastFullTank: FullTankMileage | null;
   maintenance: DriverMaintenanceDue[];
   documents: DriverDocument[];
+  /** What's on the vehicle's FASTag, and whether it's below the owner's threshold; null with no tag. */
+  fastag: { balance: string; low: boolean } | null;
 }
 
 /** The vehicle the driver drives; null before their first trip. */

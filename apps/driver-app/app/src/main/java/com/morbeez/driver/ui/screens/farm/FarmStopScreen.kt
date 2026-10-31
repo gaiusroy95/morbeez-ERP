@@ -52,6 +52,7 @@ import com.morbeez.driver.data.local.FarmLineDraft
 import com.morbeez.driver.data.remote.dto.CrewOptionResponse
 import com.morbeez.driver.data.remote.dto.FarmStopOutcomeResponse
 import com.morbeez.driver.data.remote.dto.StopItemResponse
+import com.morbeez.driver.ui.components.WithRefusal
 import com.morbeez.driver.ui.components.Callout
 import com.morbeez.driver.ui.components.Eyebrow
 import com.morbeez.driver.ui.components.FieldCard
@@ -86,9 +87,11 @@ fun FarmStopScreen(
     onBack: () -> Unit,
     onDone: () -> Unit,
     onReport: () -> Unit,
+    onOpenSync: () -> Unit = {},
     viewModel: FarmStopViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val refused by viewModel.refused.collectAsStateWithLifecycle()
     var step by rememberSaveable { mutableStateOf(FarmStep.PRODUCTS) }
     var rejecting by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -97,7 +100,7 @@ fun FarmStopScreen(
         if (rejecting != null) rejecting = null else step = previousOf(step, state)
     }
 
-    FarmStopContent(
+    WithRefusal(refused, onOpenSync) { FarmStopContent(
         state = state,
         step = step,
         onStep = { step = it },
@@ -110,7 +113,7 @@ fun FarmStopScreen(
         onRejectionPhoto = viewModel::rejectionPhoto,
         onComplete = { viewModel.complete(onDone) },
         onReport = onReport,
-    )
+    ) }
 }
 
 /** The step before [step]: the Weigh tab's "back" is the Pack tab; a farm with nothing loaded skips both. */

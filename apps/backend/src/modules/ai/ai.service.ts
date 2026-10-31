@@ -7,6 +7,8 @@ import { assertRealDate } from '../../common/period';
 import { moneyFromNumber, sumMoney } from '../../common/money';
 import { AiRepository } from './repositories/ai.repository';
 import { AiDataRepository } from './repositories/ai-data.repository';
+import { ChannelsConfig } from './channels/channels.config';
+import { ChannelsRepository } from './channels/channels.repository';
 import {
   AiSettings,
   CallItem,
@@ -78,6 +80,8 @@ export class AiService {
     private readonly repo: AiRepository,
     private readonly data: AiDataRepository,
     private readonly audit: AuditService,
+    private readonly channels?: ChannelsConfig,
+    private readonly channelsRepo?: ChannelsRepository,
   ) {}
 
   // ---- Settings ----
@@ -418,9 +422,11 @@ export class AiService {
    * owner makes these, from this list. Phones are read at request time (PIPE.5).
    */
   async calls(actor: AiActor): Promise<CallList> {
-    const open = await this.db.withTenant(actor.tenantId, (client) =>
-      this.repo.list(client, { status: 'open', type: 'order', includeSensitive: false, since: null, limit: 200, offset: 0 }),
-    );
+    const { open, callsEnabled } = await this.db.withTenant(actor.tenantId, async (client) => ({
+      open: await this.repo.list(client, { status: 'open', type: 'order', includeSensitive: false, since: null, limit: 200, offset: 0 }),
+      callsEnabled: this.channelsRepo ? (await this.channelsRepo.settings(client)).callsEnabled : false,
+    }));
+    const voice: CallList['voice'] = !this.channels?.callsReady ? 'not_set_up' : callsEnabled ? 'ready' : 'off';
     return this.db.withTenantReadOnly(actor.tenantId, 'morbeez_ai', async (client) => {
       const books = await this.data.books(client);
       const due = actor.permissions.includes('finance:read') ? await this.data.dueCustomers(client, 30) : [];
@@ -433,12 +439,13 @@ export class AiService {
         if (c) calls.push({ kind: 'payment', customerId: d.customer_id, ...c, amount: d.due_now, dueDate: d.due_date, overdueDays: d.overdue_days, recommendationId: null, about: null });
       }
       for (const kind of ['order', 'quantity'] as const) {
-        for (const r of recs.filter((x) => x.proposal.action === (kind === 'order' ? 'delivery_order' : 'confirm_order'))) {
+        // An order the customer sent on WhatsApp is the owner's to place, not a call to make.
+        for (const r of recs.filter((x) => x.proposal.action === (kind === 'order' ? 'delivery_order' : 'confirm_order') && x.proposal.source !== 'whatsapp')) {
           const c = person(r.subjectId as string);
           if (c) calls.push({ kind, customerId: r.subjectId as string, ...c, amount: r.expectedImpact, dueDate: null, overdueDays: null, recommendationId: r.id, about: r.title });
         }
       }
-      return { voice: 'coming', date: books.today, calls };
+      return { voice, date: books.today, calls };
     });
   }
 

@@ -151,4 +151,25 @@ class DayLogicTest {
         assertEquals("R", DayLogic.initialsOf("raju"))
         assertEquals("", DayLogic.initialsOf(null))
     }
+
+    @Test
+    fun `an arrival time for each stop still to do, leg by leg with time at each stop`() {
+        // From the depot, a farm 0.1 degree north (about 11.1 km, 14.5 km by road ≈ 29 min), then a shop beside it.
+        val now = 1_000_000_000L
+        val stops = listOf(
+            stop(1, "pickup", "completed", 12.30, 76.60),
+            stop(2, "pickup", lat = 12.40, lng = 76.60),
+            stop(3, "delivery", lat = 12.40, lng = 76.60),
+            stop(4, "delivery"),
+            stop(5, "delivery", lat = 12.50, lng = 76.60),
+        )
+        val etas = DayLogic.routeEtas(12.30, 76.60, stops, now)
+        val toFarm = etas.getValue("s2") - now
+        assertTrue(toFarm in 28 * 60_000L..30 * 60_000L)
+        // The shop next door: the farm's 20 minutes, then no driving.
+        assertEquals(etas.getValue("s2") + DayLogic.FARM_MINUTES * 60_000L, etas.getValue("s3"))
+        // A stop without a pin breaks the chain — it and the ones after it have no estimate.
+        assertEquals(setOf("s2", "s3"), etas.keys)
+        assertTrue(DayLogic.routeEtas(null, null, stops, now).isEmpty())
+    }
 }

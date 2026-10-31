@@ -72,6 +72,13 @@ import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.morbeez.driver.data.sync.CreateRequestPayload
+import com.morbeez.driver.data.remote.dto.NewCustomerDetails
+import com.morbeez.driver.ui.screens.requests.RequestForm
+import com.morbeez.driver.ui.screens.requests.RequestLogic
+import com.morbeez.driver.ui.screens.requests.TripCustomer
+import com.morbeez.driver.ui.screens.requests.UnsentRequest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -360,6 +367,7 @@ class TripRepository @Inject constructor(
         decision = e.decision,
         decisionNote = e.decisionNote,
         photos = e.photos + unsentBills,
+        paidBy = e.paidBy,
     )
 
     // ---- The driver's own records (D6) ----
@@ -423,6 +431,8 @@ class TripRepository @Inject constructor(
         val id = UUID.randomUUID().toString()
         val note = expense.notes?.trim()?.ifBlank { null }
         val fuel = expense.fuel?.takeIf { expense.category == "fuel" }
+        // Only a toll or parking comes off the tag.
+        val paidBy = if (expense.paidBy == "fastag" && expense.category in FASTAG_CATEGORIES) "fastag" else "cash"
         expenseDao.upsert(
             ExpenseEntity(
                 id = id,
@@ -437,15 +447,85 @@ class TripRepository @Inject constructor(
                 litres = fuel?.litres?.let { String.format(Locale.ROOT, "%.3f", it) },
                 ratePerLitre = fuel?.ratePerLitre?.let { String.format(Locale.ROOT, "%.2f", it) },
                 pendingSync = true,
+                paidBy = paidBy,
             ),
         )
         enqueue<RecordExpensePayload>(
             tripId,
             PendingOperationType.RECORD_EXPENSE,
-            RecordExpensePayload(expense.category, expense.amount, note, id, fuel?.odometerKm, fuel?.fuelType, fuel?.fullTank, fuel?.litres, fuel?.ratePerLitre),
+            RecordExpensePayload(expense.category, expense.amount, note, id, fuel?.odometerKm, fuel?.fuelType, fuel?.fullTank, fuel?.litres, fuel?.ratePerLitre, paidBy),
         )
         return id
     }
+
+    // ---- What the driver asks the office for (D10) ----
+
+    private val requestAdapter by lazy { moshi.adapter(CreateRequestPayload::class.java) }
+
+    /** The customers on the trip's deliveries — whose credit limit the driver may ask about. */
+    suspend fun tripCustomers(): List<TripCustomer> {
+        val trip = tripDao.observeActiveTrip().first() ?: return emptyList()
+        return stopDao.observeByTrip(trip.id).first()
+            .filter { it.stopType == "delivery" && it.partyId != null }
+            .distinctBy { it.partyId }
+            .map { TripCustomer(it.partyId!!, it.counterpartyName) }
+    }
+
+    /**
+     * An advance, a new customer, a credit limit: on the phone at once, sent
+     * when there's signal — on the office's lane, never behind a trip action
+     * the server refused. Its id is the phone's own, so it's asked once.
+     */
+    suspend fun queueRequest(form: RequestForm): String {
+        val id = UUID.randomUUID().toString()
+        val tripId = tripDao.observeActiveTrip().first()?.id
+        val amount = RequestLogic.amountOf(form)?.toDouble()
+        val payload = when (form.kind) {
+            "advance" -> CreateRequestPayload(id, "advance", amount = amount, reason = form.reason.trim(), tripId = tripId)
+            "credit_limit" -> CreateRequestPayload(
+                id,
+                "credit_limit",
+                amount = amount,
+                customerId = form.customerId,
+                customerName = tripCustomers().firstOrNull { it.id == form.customerId }?.name,
+                reason = form.reason.trim(),
+                tripId = tripId,
+            )
+            else -> CreateRequestPayload(
+                id,
+                "new_customer",
+                customer = NewCustomerDetails(
+                    name = form.name.trim(),
+                    phone = RequestLogic.phoneOf(form.phone),
+                    place = form.place.trim().ifBlank { null },
+                    address = form.address.trim().ifBlank { null },
+                    latitude = form.latitude,
+                    longitude = form.longitude,
+                ),
+                reason = form.reason.trim(),
+                tripId = tripId,
+            )
+        }
+        enqueue(tripId.orEmpty(), PendingOperationType.CREATE_REQUEST, payload)
+        return id
+    }
+
+    /** Requests on this phone the office hasn't had yet (Approvals shows them as waiting). */
+    fun observeUnsentRequests(): Flow<List<UnsentRequest>> =
+        pendingOperationDao.observeByTypes(listOf(PendingOperationType.CREATE_REQUEST.name)).map { ops ->
+            ops.mapNotNull { op ->
+                val p = runCatching { requestAdapter.fromJson(op.payloadJson) }.getOrNull() ?: return@mapNotNull null
+                UnsentRequest(
+                    key = op.idempotencyKey,
+                    kind = p.kind,
+                    amount = p.amount?.let { String.format(Locale.ROOT, "%.2f", it) },
+                    customerName = p.customerName ?: p.customer?.name,
+                    reason = p.reason,
+                    createdAt = op.createdAt,
+                    refused = op.status == "failed_needs_review",
+                )
+            }
+        }
 
     /** The bill: queued for upload once its expense has reached the server, counted at once. */
     suspend fun queueExpensePhoto(tripId: String, expenseId: String, localPath: String, mimeType: String) {
@@ -632,6 +712,7 @@ class TripRepository @Inject constructor(
             collectAmount = stop.collect?.amount,
             itemsJson = itemsAdapter.toJson(stop.items),
             partyPhone = stop.party?.phone?.ifBlank { null },
+            partyId = stop.party?.id,
             partyPlace = stop.party?.place?.ifBlank { null },
             partyAddress = stop.party?.address?.ifBlank { null },
             partyLatitude = stop.party?.latitude?.toDoubleOrNull(),
@@ -810,8 +891,11 @@ class TripRepository @Inject constructor(
     }
 }
 
-/** What the driver records on New Expense (D6); [fuel] only for fuel. */
-data class NewExpense(val category: String, val amount: Double, val notes: String?, val fuel: FuelDetails? = null)
+/** What the driver records on New Expense (D6); [fuel] only for fuel; [paidBy] cash, or fastag for a toll or parking. */
+data class NewExpense(val category: String, val amount: Double, val notes: String?, val fuel: FuelDetails? = null, val paidBy: String = "cash")
+
+/** What may be paid by FASTag. */
+val FASTAG_CATEGORIES = setOf("toll", "parking")
 
 /** At the pump: the odometer, the fuel, full tank or not, litres and the rate. */
 data class FuelDetails(val odometerKm: Int, val fuelType: String, val fullTank: Boolean, val litres: Double, val ratePerLitre: Double)

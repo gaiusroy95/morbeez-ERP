@@ -10,6 +10,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.LaunchedEffect
+import com.morbeez.driver.ui.components.Callout
+import com.morbeez.driver.ui.components.SecondaryAction
+import com.morbeez.driver.ui.screens.home.clockOf
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -77,9 +81,27 @@ fun RouteScreen(
     onHandover: () -> Unit,
     onTripSummary: () -> Unit,
     onBack: (() -> Unit)? = null,
+    onOpenSync: () -> Unit = {},
     viewModel: RouteViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.refreshPosition() }
+    RouteContent(state, onOpenStop, onHandover, onTripSummary, onBack, onOpenSync, onSync = viewModel::requestSync, onReportProblem = viewModel::reportProblem)
+}
+
+/** The route from state alone (the screenshot tests draw it with sample stops, arrival times and a refusal). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun RouteContent(
+    state: RouteUiState,
+    onOpenStop: (tripId: String, stopId: String, isPickup: Boolean) -> Unit,
+    onHandover: () -> Unit,
+    onTripSummary: () -> Unit,
+    onBack: (() -> Unit)?,
+    onOpenSync: () -> Unit,
+    onSync: () -> Unit,
+    onReportProblem: (kind: String, note: String) -> Unit,
+) {
     val trip = state.trip
     val stops = state.stops
     val done = stops.count { it.status != "pending" }
@@ -97,7 +119,7 @@ fun RouteScreen(
                 RoundIconButton(
                     glyph = Glyph.Sync,
                     description = stringResource(if (state.isSyncing) R.string.syncing else R.string.sync_now),
-                    onClick = viewModel::requestSync,
+                    onClick = onSync,
                     enabled = !state.isSyncing,
                 )
             },
@@ -141,6 +163,16 @@ fun RouteScreen(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 12.dp),
         ) {
+            if (state.refused.isNotEmpty()) {
+                // DRV.8: what the office refused, said plainly, with the way to deal with it.
+                item {
+                    Column(Modifier.padding(bottom = 12.dp)) {
+                        Callout(pluralStringResource(R.plurals.route_refused, state.refused.size, state.refused.size), Tone.Bad, Glyph.Warning)
+                        Spacer(Modifier.height(8.dp))
+                        SecondaryAction(stringResource(R.string.open_sync), onOpenSync, glyph = Glyph.Sync)
+                    }
+                }
+            }
             item {
                 Eyebrow(pluralStringResource(R.plurals.route_stops, stops.size, stops.size), modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
             }
@@ -150,6 +182,8 @@ fun RouteScreen(
                     isNext = stop.id == next?.id,
                     isFirst = index == 0,
                     isLast = index == stops.lastIndex,
+                    refused = state.refused[stop.id],
+                    eta = state.etas[stop.id],
                     onClick = { onOpenStop(trip.id, stop.id, stop.stopType == "pickup") },
                 )
             }
@@ -204,7 +238,7 @@ fun RouteScreen(
     if (reporting) {
         ReportProblemDialog(
             onSend = { kind, note ->
-                viewModel.reportProblem(kind, note)
+                onReportProblem(kind, note)
                 reporting = false
             },
             onDismiss = { reporting = false },
@@ -282,7 +316,7 @@ private fun ProgressTrack(fraction: Float) {
 
 /** One stop on the timeline: a numbered node on a rail, and its card. */
 @Composable
-private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isLast: Boolean, onClick: () -> Unit) {
+private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isLast: Boolean, refused: String?, eta: Long?, onClick: () -> Unit) {
     val finished = stop.status != "pending"
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         // The rail
@@ -347,6 +381,7 @@ private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isL
                         modifier = Modifier.weight(1f),
                     )
                     when {
+                        refused != null -> Pill(stringResource(R.string.pill_refused), Tone.Bad)
                         stop.pendingSync -> Pill(stringResource(R.string.saving), Tone.Attention)
                         isNext -> Pill(stringResource(R.string.pill_next), Tone.Lime)
                         stop.status == "completed" -> Pill(stringResource(R.string.pill_done), Tone.Good)
@@ -367,6 +402,23 @@ private fun StopRow(stop: TripStopEntity, isNext: Boolean, isFirst: Boolean, isL
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                // When the driver should get here (D8), and what the office said if it refused this stop (DRV.8).
+                if (eta != null && !finished) {
+                    Text(
+                        stringResource(R.string.eta_at, clockOf(eta)),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isNext) Fresh.onCarbonMuted else Fresh.inkMuted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                if (refused != null) {
+                    Text(
+                        stringResource(R.string.office_said, refused.ifBlank { stringResource(R.string.removed_no_reason) }),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isNext) Fresh.warningBright else Fresh.critical,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
                 // What to collect here (requirement: the driver knows "what amount to collect").
                 if (stop.stopType == "delivery" && stop.collectTerms != null && !finished) {
                     Text(

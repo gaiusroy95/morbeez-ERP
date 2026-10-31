@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import type { InboxItem, InboxKind, InboxTab } from '@morbeez/shared-types';
+import type { DriverRequestKind, InboxItem, InboxKind, InboxTab } from '@morbeez/shared-types';
 import { DayTabs } from '@/components/redesign/ListCards';
 import { Field, FormDialog } from '@/components/ui/Form';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { ErrorState, SkeletonLines } from '@/components/ui/Panel';
 import { apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
-import { useApprovalsInbox } from '@/lib/hooks/use-admin';
+import { useApprovalsInbox, useDriverRequest } from '@/lib/hooks/use-admin';
 import { useCurrency } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatMoney } from '@/lib/format';
@@ -23,7 +23,22 @@ const KIND: Record<InboxKind, { title: string; icon: IconName }> = {
   ai: { title: 'AI suggestion', icon: 'sparkles' },
   dispute: { title: 'Customer dispute', icon: 'alert' },
   trip_close: { title: 'Trip to close', icon: 'truck' },
+  driver_request: { title: 'Driver request', icon: 'steering' },
 };
+
+/** A driver's request (D10): what it's called, and who may decide it — whoever may already do the thing it does. */
+const REQUEST: Record<DriverRequestKind, { title: string; permission: string }> = {
+  advance: { title: 'Advance request', permission: 'payroll:prepare' },
+  new_customer: { title: 'New customer request', permission: 'customers:write' },
+  credit_limit: { title: 'Credit limit request', permission: 'customers:credit' },
+};
+
+const titleOf = (item: InboxItem) =>
+  item.kind === 'driver_request' && item.refs.requestKind
+    ? REQUEST[item.refs.requestKind].title
+    : item.kind === 'ai' && item.tab === 'price'
+      ? 'Price change suggestion'
+      : KIND[item.kind].title;
 
 const TABS: { value: InboxTab | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -62,12 +77,27 @@ function reviewHref(item: InboxItem): string {
       return `/orders?open=${item.refs.orderId}`;
     case 'spot_price':
       return '/spot-sales';
+    case 'driver_request':
+      return '/approvals';
   }
 }
 
+interface Decision {
+  note?: string;
+  amount?: number;
+  paidFrom?: 'bank' | 'cash_on_hand';
+  paymentTermsDays?: number;
+}
+
 /** What Approve / Reject sends, for the kinds decided here. */
-async function decide(item: InboxItem, approve: boolean, note: string | undefined): Promise<void> {
+async function decide(item: InboxItem, approve: boolean, d: Decision): Promise<void> {
   const r = item.refs;
+  const note = d.note;
+  if (item.kind === 'driver_request') {
+    // Approving does it: the advance paid, the customer created, the limit set.
+    await apiSend('POST', `driver-requests/${r.driverRequestId}/decision`, approve ? { approve, ...d } : { approve, note });
+    return;
+  }
   if (item.kind === 'expense') {
     await apiSend('POST', `logistics/trips/${r.tripId}/expenses/${r.expenseId}/decision`, { approve, note });
     return;
@@ -86,13 +116,15 @@ async function decide(item: InboxItem, approve: boolean, note: string | undefine
   }
 }
 
-const DECIDED_HERE: InboxKind[] = ['expense', 'purchase_order', 'customer_order', 'spot_price'];
+const DECIDED_HERE: InboxKind[] = ['expense', 'purchase_order', 'customer_order', 'spot_price', 'driver_request'];
 
 /**
  * Approvals & Exceptions (client design, set 1 screen 17): one place for
  * everything waiting for the owner — an expense beyond a driver's
  * authority, an order or purchase order over its approval threshold, a spot
- * sale priced outside its band (each approved or rejected right here), AI
+ * sale priced outside its band, a driver's request from the road — an
+ * advance, a new customer, a higher credit limit (each approved or rejected
+ * right here), AI
  * suggestions, disputes and trips to close (Review opens them).
  */
 export default function ApprovalsPage() {
@@ -103,7 +135,9 @@ export default function ApprovalsPage() {
   const [tab, setTab] = useState<InboxTab | 'all'>('all');
   const [deciding, setDeciding] = useState<{ item: InboxItem; approve: boolean } | null>(null);
   const canDecide = (item: InboxItem) =>
-    DECIDED_HERE.includes(item.kind) && (item.kind !== 'expense' || hasPermission(session, 'logistics:reconcile'));
+    DECIDED_HERE.includes(item.kind) &&
+    (item.kind !== 'expense' || hasPermission(session, 'logistics:reconcile')) &&
+    (item.kind !== 'driver_request' || !item.refs.requestKind || hasPermission(session, REQUEST[item.refs.requestKind].permission));
   const items = (inbox.data?.items ?? []).filter((i) => tab === 'all' || i.tab === tab);
 
   return (
@@ -126,7 +160,7 @@ export default function ApprovalsPage() {
           {items.length === 0 && <div className="list-empty">{t('Nothing is waiting for you.')}</div>}
           {items.map((item) => {
             const kind = KIND[item.kind];
-            const title = item.kind === 'ai' && item.tab === 'price' ? 'Price change suggestion' : kind.title;
+            const title = titleOf(item);
             return (
               <div key={item.key} className="inbox-row" data-kind={item.kind}>
                 <span className="inbox-icon" aria-hidden="true">
@@ -174,19 +208,29 @@ function DecideDialog({ item, approve, onClose }: { item: InboxItem; approve: bo
   const t = useT();
   const currency = useCurrency();
   const [note, setNote] = useState('');
+  const [amount, setAmount] = useState(item.amount ? String(Number(item.amount)) : '');
+  const [paidFrom, setPaidFrom] = useState<'bank' | 'cash_on_hand'>('bank');
+  const [terms, setTerms] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
-  const run = useAction((input: { note?: string }) => decide(item, approve, input.note), EFFECTS, onClose);
-  // A rejected expense is settled with the driver: say why.
-  const needsReason = !approve && item.kind === 'expense';
+  const request = useDriverRequest(item.kind === 'driver_request' ? (item.refs.driverRequestId ?? null) : null);
+  const run = useAction((input: Decision) => decide(item, approve, input), EFFECTS, onClose);
+  const requestKind = item.kind === 'driver_request' ? item.refs.requestKind : undefined;
+  // A rejected expense is settled with the driver, and a refused request read by them: say why.
+  const needsReason = !approve && (item.kind === 'expense' || item.kind === 'driver_request');
+  const r = request.data;
   return (
     <FormDialog
       title={t(approve ? 'Approve this?' : 'Reject this?')}
       description={
         <p>
-          <strong>{t(KIND[item.kind].title)}</strong> — {item.subject}
-          {item.amount ? ` · ${formatMoney(item.amount, currency)}` : ''}
+          <strong>{t(titleOf(item))}</strong> — {item.subject}
+          {item.amount && requestKind !== 'credit_limit' ? ` · ${formatMoney(item.amount, currency)}` : ''}
           {item.kind === 'expense' && !approve && <> {t('It stays on the trip, to settle with the driver when you close it.')}</>}
           {(item.kind === 'purchase_order' || item.kind === 'customer_order') && <> {t(approve ? 'It is confirmed at once.' : 'It is cancelled.')}</>}
+          {requestKind === 'advance' && approve && <> {t('It is recorded as an advance to the driver and recovered from their pay.')}</>}
+          {requestKind === 'new_customer' && approve && <> {t('The customer is added, with the map pin the driver dropped.')}</>}
+          {requestKind === 'credit_limit' && approve && <> {t("The customer's credit limit is changed at once.")}</>}
+          {item.kind === 'driver_request' && !approve && <> {t('The driver sees your reason on their Approvals screen.')}</>}
         </p>
       }
       submitLabel={t(approve ? 'Approve' : 'Reject')}
@@ -196,10 +240,69 @@ function DecideDialog({ item, approve, onClose }: { item: InboxItem; approve: bo
       onClose={onClose}
       onSubmit={() => {
         if (needsReason && note.trim().length < 3) return setProblem(t('Say why it is rejected.'));
+        const decision: Decision = { note: note.trim() || undefined };
+        if (approve && (requestKind === 'advance' || requestKind === 'credit_limit')) {
+          const n = Number(amount);
+          if (!amount.trim() || !Number.isFinite(n) || n < 0 || (requestKind === 'advance' && n <= 0)) return setProblem(t('Enter an amount.'));
+          if (requestKind === 'advance' && item.amount && n > Number(item.amount)) return setProblem(t('Pay what was asked, or less.'));
+          decision.amount = n;
+          if (requestKind === 'advance') decision.paidFrom = paidFrom;
+        }
+        if (approve && requestKind && requestKind !== 'advance' && terms.trim()) decision.paymentTermsDays = Math.max(0, Math.min(180, Math.round(Number(terms))));
         setProblem(null);
-        run.mutate({ note: note.trim() || undefined });
+        run.mutate(decision);
       }}
     >
+      {r && r.kind === 'new_customer' && r.newCustomer && (
+        <dl className="request-facts">
+          <dt>{t('Name')}</dt>
+          <dd>{r.newCustomer.name}</dd>
+          <dt>{t('Phone')}</dt>
+          <dd>{r.newCustomer.phone ?? '—'}</dd>
+          <dt>{t('Place')}</dt>
+          <dd>{[r.newCustomer.place, r.newCustomer.address].filter(Boolean).join(', ') || '—'}</dd>
+          <dt>{t('Map pin')}</dt>
+          <dd>
+            {r.newCustomer.latitude !== null && r.newCustomer.longitude !== null ? (
+              <a href={`https://www.google.com/maps?q=${r.newCustomer.latitude},${r.newCustomer.longitude}`} target="_blank" rel="noreferrer">
+                {t('Open in Maps')}
+              </a>
+            ) : (
+              t('None')
+            )}
+          </dd>
+        </dl>
+      )}
+      {r && r.kind === 'credit_limit' && (
+        <p className="request-facts">
+          {t('{customer}: now {current}, asked {asked}', {
+            customer: r.customerName ?? '',
+            current: formatMoney(r.currentCreditLimit ?? '0', currency),
+            asked: formatMoney(r.amount ?? '0', currency),
+          })}
+        </p>
+      )}
+      {item.kind === 'driver_request' && r && <p className="request-facts">{t('Why: {reason}', { reason: r.reason })}</p>}
+      {approve && (requestKind === 'advance' || requestKind === 'credit_limit') && (
+        <Field label={t(requestKind === 'advance' ? 'Amount to pay' : 'Credit limit')}>
+          {(props) => <input {...props} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+        </Field>
+      )}
+      {approve && requestKind === 'advance' && (
+        <Field label={t('Paid from')}>
+          {(props) => (
+            <select {...props} value={paidFrom} onChange={(e) => setPaidFrom(e.target.value as 'bank' | 'cash_on_hand')}>
+              <option value="bank">{t('Bank (UPI transfer)')}</option>
+              <option value="cash_on_hand">{t('Cash on hand')}</option>
+            </select>
+          )}
+        </Field>
+      )}
+      {approve && (requestKind === 'new_customer' || requestKind === 'credit_limit') && (
+        <Field label={t('Days to pay (optional)')}>
+          {(props) => <input {...props} inputMode="numeric" value={terms} onChange={(e) => setTerms(e.target.value.replace(/\D/g, ''))} />}
+        </Field>
+      )}
       <Field label={t(needsReason ? 'Reason' : 'Note (optional)')} wide>
         {(props) => <textarea {...props} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />}
       </Field>

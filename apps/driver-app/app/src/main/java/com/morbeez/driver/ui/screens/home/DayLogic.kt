@@ -10,6 +10,7 @@ import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -105,6 +106,38 @@ object DayLogic {
         val toLng = stop.partyLongitude ?: return null
         val km = haversineKm(fromLat, fromLng, toLat, toLng) * ROAD_FACTOR
         return Eta(km, max(1, (km / AVERAGE_SPEED_KMH * 60).roundToInt()))
+    }
+
+    /** Time spent at a farm (accept, weigh, load) before driving on, minutes — an estimate for ETAs (D8). */
+    const val FARM_MINUTES = 20
+
+    /** Time spent at a shop (QR, unload, photo, crates, collect), minutes. */
+    const val SHOP_MINUTES = 10
+
+    /**
+     * When the driver gets to each stop still to do (D8, ETA along the
+     * route): from where the phone is, leg by leg in the owner's order —
+     * straight line × [ROAD_FACTOR] at [AVERAGE_SPEED_KMH] — with time at each
+     * stop before driving on. A stop without a map pin breaks the chain: it
+     * and the stops after it have no estimate (epoch millis by stop id).
+     */
+    fun routeEtas(fromLat: Double?, fromLng: Double?, stops: List<TripStopEntity>, nowMillis: Long): Map<String, Long> {
+        if (fromLat == null || fromLng == null) return emptyMap()
+        val out = linkedMapOf<String, Long>()
+        var lat: Double = fromLat
+        var lng: Double = fromLng
+        var at = nowMillis
+        for (stop in stops.filterNot(::isDone).sortedBy { it.sequenceNumber }) {
+            val toLat = stop.partyLatitude ?: break
+            val toLng = stop.partyLongitude ?: break
+            val km = haversineKm(lat, lng, toLat, toLng) * ROAD_FACTOR
+            at += (km / AVERAGE_SPEED_KMH * 60 * 60_000).roundToLong()
+            out[stop.id] = at
+            at += (if (stop.stopType == "pickup") FARM_MINUTES else SHOP_MINUTES) * 60_000L
+            lat = toLat
+            lng = toLng
+        }
+        return out
     }
 
     /** "3.2 km"; under a kilometre, "0.4 km". */

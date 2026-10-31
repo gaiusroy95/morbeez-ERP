@@ -47,6 +47,7 @@ import com.morbeez.driver.ui.components.GlyphIcon
 import com.morbeez.driver.ui.components.HoldToConfirm
 import com.morbeez.driver.ui.components.PrimaryAction
 import com.morbeez.driver.ui.components.Tone
+import com.morbeez.driver.ui.components.rememberLeaveGuard
 import com.morbeez.driver.ui.screens.backhaul.BackhaulLogic
 import com.morbeez.driver.ui.screens.deliver.DeliveryLogic
 import com.morbeez.driver.ui.screens.deliver.leftOnVehicle
@@ -173,13 +174,19 @@ internal fun ReturnContent(state: EndOfTripUiState, onBack: () -> Unit, onBackha
     val problem = DayLogic.openingKmProblem(closing, opening)
     val tripKm = CollectionsLogic.tripKm(trip?.openingKm, closing.trim().takeIf { problem == null })
     val (pendingCount, pendingAmount) = state.collections.pending
+    // A reading typed and not confirmed isn't lost to a stray Back (D8).
+    val leave = rememberLeaveGuard(dirty = trip?.closingKm == null && closing.isNotBlank(), onLeave = onBack)
     FieldScreen(
         title = stringResource(R.string.return_to_base),
         eyebrow = trip?.number,
-        onBack = onBack,
+        onBack = leave,
         bottomBar = {
-            if (state.backhaulHoldsReturn) PrimaryAction(stringResource(R.string.drawer_backhaul), onBackhaul, glyph = Glyph.Truck)
-            else PrimaryAction(stringResource(R.string.confirm_km), { closing.trim().toDoubleOrNull()?.let(onConfirm) }, enabled = trip != null && problem == null, glyph = Glyph.Check)
+            if (state.backhaulHoldsReturn) {
+                PrimaryAction(stringResource(R.string.drawer_backhaul), onBackhaul, glyph = Glyph.Truck)
+            } else {
+                // Held, like Start Day: once sent, the trip's KM is the office's (D8, safe confirmations).
+                HoldToConfirm(stringResource(R.string.hold_to_confirm_km), { closing.trim().toDoubleOrNull()?.let(onConfirm) }, enabled = trip != null && problem == null)
+            }
         },
     ) {
         if (state.stopsLeft > 0) Callout(stringResource(R.string.finish_stops_first, state.stopsLeft), Tone.Attention)

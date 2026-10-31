@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import type { RoleSummary, TeamMember } from '@morbeez/shared-types';
 import { AlertSettingsForm, type AlertSettings } from '@/components/delegation/Delegation';
 import { initialsOf } from '@/components/redesign/Party';
 import { DriverIncentivesPanel } from '@/components/people/DriverIncentives';
+import { Integrations } from '@/components/settings/Integrations';
 import { Field } from '@/components/ui/Form';
 import { Icon, type IconName } from '@/components/ui/Icon';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
@@ -18,7 +20,7 @@ import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { displayLogin } from '@/lib/phone';
 import { useT } from '@/lib/i18n';
 
-type View = 'company' | 'users' | 'rules' | 'notifications';
+type View = 'company' | 'users' | 'rules' | 'notifications' | 'integrations';
 
 interface Row {
   label: string;
@@ -38,6 +40,7 @@ const ROWS: Row[] = [
   { label: 'Vehicle costing', description: 'Document reminders, KM costs', icon: 'steering', href: '/vehicles#settings', permission: 'vehicles:read' },
   { label: 'Leave policy', description: 'Pay rules, weekly off', icon: 'calendar', href: '/workforce#rules', permission: 'payroll:read' },
   { label: 'Notifications', description: 'Alerts and reminders', icon: 'bell', view: 'notifications' },
+  { label: 'Integrations', description: 'WhatsApp orders, AI reading, automated calls', icon: 'phone', view: 'integrations', permission: 'ai:read' },
   { label: 'Data & backup', description: 'Download your data', icon: 'download', href: '/reports' },
   { label: 'App preferences', description: 'Language', icon: 'globe', href: '/account' },
 ];
@@ -47,6 +50,7 @@ const TITLES: Record<View, string> = {
   users: 'Users & permissions',
   rules: 'Rates & rules',
   notifications: 'Notifications',
+  integrations: 'Integrations',
 };
 
 /**
@@ -58,7 +62,9 @@ export default function SettingsPage() {
   const t = useT();
   const { data: session } = useSession();
   const tenant = useTenantProfile().data;
-  const [view, setView] = useState<View | null>(null);
+  // ?tab=integrations — from AI Calling's "Turn them on".
+  const params = useSearchParams();
+  const [view, setView] = useState<View | null>(params.get('tab') === 'integrations' ? 'integrations' : null);
   const [signingOut, setSigningOut] = useState(false);
 
   if (view) {
@@ -74,6 +80,7 @@ export default function SettingsPage() {
         {view === 'users' && <UsersAndPermissions />}
         {view === 'rules' && <RatesAndRules onAlerts={() => setView('notifications')} />}
         {view === 'notifications' && <Notifications />}
+        {view === 'integrations' && <Integrations />}
       </div>
     );
   }

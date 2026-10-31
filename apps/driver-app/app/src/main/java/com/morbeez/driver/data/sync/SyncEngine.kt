@@ -12,6 +12,7 @@ import com.morbeez.driver.data.remote.dto.SkipBackhaulRequest
 import com.morbeez.driver.data.remote.dto.CompletePickupRequest
 import com.morbeez.driver.data.remote.dto.RecordCollectionRequest
 import com.morbeez.driver.data.remote.dto.RecordDepositRequest
+import com.morbeez.driver.data.remote.dto.CreateDriverRequest
 import com.morbeez.driver.data.remote.dto.RecordExpenseRequest
 import com.morbeez.driver.data.remote.dto.ReportProblemRequest
 import com.morbeez.driver.data.remote.dto.SkipStopRequest
@@ -72,10 +73,12 @@ class SyncEngine @Inject constructor(
         val operationsDrained = pushOperations(chat = false)
 
         // Push before pull (DRV.9) is about actions: a pull must never land
-        // on top of one the server hasn't seen. Photos change no state a pull
-        // could overwrite, so the route comes down first and the (slow)
-        // photo uploads follow (PA-12).
-        if (operationsDrained) {
+        // on top of one the server hasn't seen — so it waits until the queue
+        // is empty or all that's left was refused (D8: the driver then sees
+        // the office's state, the refused action still on the phone to fix
+        // or remove). Photos change no state a pull could overwrite, so the
+        // route comes down first and the (slow) photo uploads follow (PA-12).
+        if (operationsDrained || onlyRefusedLeft()) {
             runCatching { tripRepository.refreshMyTrips() }
         }
         if (chatDrained) {
@@ -95,23 +98,39 @@ class SyncEngine @Inject constructor(
         return@withLock result
     }
 
-    /** The chat's queue ([chat]) or everything else's, each in strict order. */
+    /** The office's lane — chat and requests ([chat]) — or the trip's, each in strict order. */
     private suspend fun pushOperations(chat: Boolean): Boolean {
-        for (operation in pendingOperationDao.nextBatch().filter { (it.operationType in CHAT_OPERATIONS) == chat }) {
+        for (operation in pendingOperationDao.nextBatch().filter { (it.operationType in OFFICE_OPERATIONS) == chat }) {
             val outcome = runCatching { applyOperation(operation) }
             if (outcome.isSuccess) {
                 pendingOperationDao.delete(operation.idempotencyKey)
-            } else if (isReadOnlyAccount(outcome.exceptionOrNull())) {
+                continue
+            }
+            when (Refusal.classify(outcome.exceptionOrNull())) {
+                // Refused: it waits for the driver to fix or remove it (DRV.8), and the queue behind it waits too (DRV.7).
+                SendFailure.REFUSED -> pendingOperationDao.markFailed(operation.idempotencyKey, "failed_needs_review", reasonOf(outcome.exceptionOrNull()))
                 // The business's free trial has ended (402): nothing is wrong
                 // with this action. Keep it queued, as it is, and send it once
                 // the business subscribes.
-                return false
-            } else {
-                pendingOperationDao.markFailed(operation.idempotencyKey, "failed_needs_review", reasonOf(outcome.exceptionOrNull()))
-                return false
+                SendFailure.READ_ONLY -> Unit
+                // No signal, a timeout, the server down: still waiting, as it was — not the driver's to fix.
+                SendFailure.TRANSIENT -> Unit
             }
+            return false
         }
         return true
+    }
+
+    /** Nothing waiting on the trip's queue but what the office refused (DRV.9's "every remaining item has failed"). */
+    private suspend fun onlyRefusedLeft(): Boolean =
+        pendingOperationDao.nextBatch().filter { it.operationType !in OFFICE_OPERATIONS }.all { it.status == "failed_needs_review" }
+
+    /** A stop's photos first; one the office refused, or lost from the phone, refuses the action too. */
+    private suspend fun requirePhotos(ownerId: String, what: String) {
+        if (pushPhotos(ownerId)) return
+        val refused = pendingPhotoDao.nextBatch().firstOrNull { it.stopId == ownerId && it.status == "failed_needs_review" }
+        if (refused != null) error("A photo for it was refused — remove it in Sync, then send again")
+        throw WaitingForPhotos("$what photos haven't uploaded yet")
     }
 
     private suspend fun applyOperation(operation: PendingOperationEntity) {
@@ -119,7 +138,7 @@ class SyncEngine @Inject constructor(
             PendingOperationType.COMPLETE_PICKUP_STOP -> {
                 val payload = parse<CompletePickupPayload>(operation.payloadJson)
                 // The farm's photos first: the owner sees the load and the rejections with the stop.
-                if (!pushPhotos(payload.stopId)) error("The farm's photos haven't uploaded yet")
+                requirePhotos(payload.stopId, "The farm's")
                 api.completePickupStop(
                     operation.tripId,
                     payload.stopId,
@@ -151,12 +170,12 @@ class SyncEngine @Inject constructor(
             PendingOperationType.BACKHAUL_STEP -> {
                 val p = parse<BackhaulStepPayload>(operation.payloadJson)
                 // The load and the drop are photographed before their step: those photos go first.
-                if (!pushPhotos(p.backhaulId)) error("The backhaul's photos haven't uploaded yet")
+                requirePhotos(p.backhaulId, "The backhaul's")
                 api.backhaulStep(operation.tripId, p.backhaulId, BackhaulStepRequest(p.step, p.at))
             }
             PendingOperationType.PAY_BACKHAUL -> {
                 val p = parse<PayBackhaulPayload>(operation.payloadJson)
-                if (!pushPhotos(p.backhaulId)) error("The payment proof hasn't uploaded yet")
+                requirePhotos(p.backhaulId, "The payment proof's")
                 api.payBackhaul(operation.tripId, p.backhaulId, BackhaulPaymentRequest(p.method, p.amount, p.reference, p.note, p.at))
             }
             PendingOperationType.ACKNOWLEDGE_PAY -> {
@@ -177,7 +196,7 @@ class SyncEngine @Inject constructor(
                 val payload = parse<CompleteDeliveryPayload>(operation.payloadJson)
                 // The stop's own photos first: the owner may require a photo of
                 // the customer's scale before a customer weight is accepted.
-                if (!pushPhotos(payload.stopId)) error("The delivery's photos haven't uploaded yet")
+                requirePhotos(payload.stopId, "The delivery's")
                 api.completeDeliveryStop(
                     operation.tripId,
                     payload.stopId,
@@ -200,10 +219,14 @@ class SyncEngine @Inject constructor(
                 val p = parse<RecordExpensePayload>(operation.payloadJson)
                 api.recordExpense(
                     operation.tripId,
-                    RecordExpenseRequest(p.category, p.amount, p.notes, p.expenseId, p.odometerKm, p.fuelType, p.fullTank, p.litres, p.ratePerLitre),
+                    RecordExpenseRequest(p.category, p.amount, p.notes, p.expenseId, p.odometerKm, p.fuelType, p.fullTank, p.litres, p.ratePerLitre, p.paidBy),
                     operation.idempotencyKey,
                 )
                 p.expenseId?.let { tripRepository.markExpenseSent(it) }
+            }
+            PendingOperationType.CREATE_REQUEST -> {
+                val p = parse<CreateRequestPayload>(operation.payloadJson)
+                api.createRequest(CreateDriverRequest(p.requestId, p.kind, p.tripId, p.amount, p.customerId, p.customer, p.reason))
             }
             PendingOperationType.RECORD_COLLECTION -> {
                 val payload = parse<RecordCollectionPayload>(operation.payloadJson)
@@ -259,8 +282,13 @@ class SyncEngine @Inject constructor(
             // An expense's bill goes once the expense itself has reached the server (D6); a chat photo once its message has (D9).
             if (photo.target == "expense" && tripRepository.isExpenseUnsent(photo.stopId)) continue
             if (photo.target == "chat" && chatRepository.isUnsent(photo.stopId)) continue
+            val file = File(photo.localPath)
+            // Gone from the phone (the cache cleared): no pass will ever send it — the driver decides (D8).
+            if (!file.exists()) {
+                pendingPhotoDao.markFailed(photo.id, "failed_needs_review", "The photo is no longer on this phone")
+                return false
+            }
             val outcome = runCatching {
-                val file = File(photo.localPath)
                 val mediaType = photo.mimeType.toMediaTypeOrNull()
                 val body = file.asRequestBody(mediaType)
                 val part = MultipartBody.Part.createFormData("file", file.name, body)
@@ -278,12 +306,15 @@ class SyncEngine @Inject constructor(
             }
             if (outcome.isSuccess) {
                 pendingPhotoDao.delete(photo.id)
-            } else if (isReadOnlyAccount(outcome.exceptionOrNull())) {
-                return false // kept queued; see pushOperations
-            } else {
-                pendingPhotoDao.updateStatus(photo.id, "failed_needs_review")
-                return false
+                // The office has it: off the phone (DRV.13) — but a chat photo, which the conversation shows from here.
+                if (photo.target != "chat") file.delete()
+                continue
             }
+            when (Refusal.classify(outcome.exceptionOrNull())) {
+                SendFailure.REFUSED -> pendingPhotoDao.markFailed(photo.id, "failed_needs_review", reasonOf(outcome.exceptionOrNull()))
+                SendFailure.READ_ONLY, SendFailure.TRANSIENT -> Unit // kept queued; see pushOperations
+            }
+            return false
         }
         return true
     }
@@ -297,9 +328,6 @@ class SyncEngine @Inject constructor(
         }
         return error?.message ?: "sync failed"
     }
-
-    private fun isReadOnlyAccount(error: Throwable?): Boolean =
-        error is retrofit2.HttpException && error.code() == 402
 
     private companion object {
         // Process-wide, not per instance: WorkManager builds a new engine for each run.

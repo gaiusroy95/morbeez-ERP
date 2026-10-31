@@ -8,6 +8,7 @@ import app.cash.paparazzi.Paparazzi
 import com.morbeez.driver.data.device.Position
 import com.morbeez.driver.data.local.DriverDayEntity
 import com.morbeez.driver.data.local.PendingOperationEntity
+import com.morbeez.driver.data.local.PendingPhotoEntity
 import com.morbeez.driver.data.local.TripEntity
 import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.data.remote.dto.TripVehicleStockResponse
@@ -129,6 +130,45 @@ class DriverDayScreenshots {
             onSync = {},
             onCorrect = { _, _ -> },
         )
+    }
+
+    // Field hardening (D8): a refused collection and photo, what can be done about them.
+    private val refusedCollection = PendingOperationEntity(
+        idempotencyKey = "k2",
+        tripId = "t1",
+        operationType = PendingOperationType.RECORD_COLLECTION.name,
+        payloadJson = """{"stopId":"s2","amount":4600.0,"method":"cash"}""",
+        createdAt = REFRESHED,
+        sequence = 2,
+        status = "failed_needs_review",
+        lastError = "That's more than Hotel Sagar owes (₹4,000.00)",
+    )
+    private val refusedState = SyncUiState(
+        link = LinkState(online = true, waiting = 4, failed = 2),
+        failed = listOf(refusedCollection),
+        refreshedAt = REFRESHED,
+        failedPhotos = listOf(
+            PendingPhotoEntity(
+                id = "ph1", tripId = "t1", stopId = "s2", photoType = "pod", localPath = "/x.jpg", mimeType = "image/jpeg",
+                createdAt = REFRESHED, status = "failed_needs_review", lastError = "The photo is no longer on this phone",
+            ),
+        ),
+        described = mapOf("k2" to "Collection — ₹4,600 cash, Hotel Sagar"),
+    )
+
+    @Test fun syncRefusedCollection() = draw(TALL) { SyncContent(refusedState, onBack = {}, onSync = {}, onCorrect = { _, _ -> }) }
+
+    @Test fun syncRemoveRefused() = draw { SyncContent(refusedState, onBack = {}, onSync = {}, onCorrect = { _, _ -> }, initialDialog = 0) }
+
+    // Return refused for its reading: read again and sent in its place.
+    @Test fun syncCorrectClosingKm() = draw {
+        val refusedReturn = refusedCollection.copy(
+            idempotencyKey = "k3",
+            operationType = PendingOperationType.RETURN_TRIP.name,
+            payloadJson = """{"closingKm":48600.0}""",
+            lastError = "Closing KM 48600 is below the opening KM, 48650 km",
+        )
+        SyncContent(refusedState.copy(failed = listOf(refusedReturn), described = mapOf("k3" to "Return — 48,600 km")), onBack = {}, onSync = {}, onCorrect = { _, _ -> }, initialDialog = 1)
     }
 
     private companion object {

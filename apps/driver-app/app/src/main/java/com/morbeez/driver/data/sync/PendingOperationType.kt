@@ -28,10 +28,18 @@ enum class PendingOperationType {
     ACKNOWLEDGE_PAY,
     SEND_MESSAGE,
     READ_CHAT,
+    CREATE_REQUEST,
 }
 
-/** The conversation with the office (D9): sent on its own, never behind a trip action the server refused. */
+/** The conversation with the office (D9). */
 val CHAT_OPERATIONS = setOf(PendingOperationType.SEND_MESSAGE.name, PendingOperationType.READ_CHAT.name)
+
+/**
+ * Sent on their own lane, never behind a trip action the server refused: the
+ * conversation with the office (D9) and what the driver asks it for (D10) —
+ * an advance mustn't wait on a stuck delivery.
+ */
+val OFFICE_OPERATIONS = CHAT_OPERATIONS + PendingOperationType.CREATE_REQUEST.name
 
 // What each PendingOperationEntity.payloadJson deserializes into — one
 // shape per operation type, carrying whatever that specific backend call
@@ -69,6 +77,8 @@ data class RecordExpensePayload(
     val fullTank: Boolean? = null,
     val litres: Double? = null,
     val ratePerLitre: Double? = null,
+    /** cash | fastag (a toll or parking only); older queued payloads have none — cash. */
+    val paidBy: String? = null,
 )
 data class RecordCollectionPayload(
     val stopId: String,
@@ -103,3 +113,17 @@ data class AcknowledgePayPayload(val settlementId: String)
 data class SendMessagePayload(val messageId: String, val body: String?, val tripId: String?, val photo: Boolean, val writtenAt: String)
 /** Read up to [upTo], by when the server had each message. */
 data class ReadChatPayload(val upTo: String)
+
+/** What the driver asks the office for (D10): [requestId] is the phone's own, so it's the same request however often it's sent. */
+data class CreateRequestPayload(
+    val requestId: String,
+    /** advance | new_customer | credit_limit */
+    val kind: String,
+    val amount: Double? = null,
+    val customerId: String? = null,
+    /** A credit limit: whose, as the driver picked it. */
+    val customerName: String? = null,
+    val customer: com.morbeez.driver.data.remote.dto.NewCustomerDetails? = null,
+    val reason: String,
+    val tripId: String? = null,
+)

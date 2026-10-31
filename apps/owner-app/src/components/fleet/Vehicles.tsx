@@ -20,6 +20,7 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useFleetVehicle, useHireSuggestion } from '@/lib/hooks/use-fleet';
 import { formatDate, formatMoney, formatQuantity } from '@/lib/format';
 import { firstError, optionalText, parseDecimal, parseMoney, parseOptionalMoney, parseQuantity, parseWholeNumber } from '@/lib/parse';
+import { FastagSection } from './Fastag';
 
 // What a fleet write moves: the fleet views, the vehicle pick-lists (a
 // disposal takes one off the road), and the money views it posted to.
@@ -246,6 +247,8 @@ export function VehiclePanel({
           )}
         </ActionBar>
       )}
+
+      <FastagSection vehicleId={data.vehicleId} currency={currency} today={today} canWrite={live && canWrite} />
 
       <h3 className="detail-subhead">Documents</h3>
       <div className="table-wrap">

@@ -68,4 +68,8 @@ interface BackhaulDao {
 
     @Query("DELETE FROM backhauls")
     suspend fun clear()
+
+    /** One the driver added that the office refused, removed from the phone (D8). */
+    @Query("DELETE FROM backhauls WHERE id = :id AND pendingSync = 1")
+    suspend fun deleteUnsent(id: String)
 }

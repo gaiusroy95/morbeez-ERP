@@ -138,6 +138,45 @@ export interface TripExpenseRecord {
   fuel?: ExpenseFuel | null;
   /** Bill photos kept with it. */
   photos?: number;
+  /** A toll or parking may be taken off the vehicle's FASTag: only cash comes out of the driver's float. */
+  paidBy?: 'cash' | 'fastag';
+}
+
+// ---- Driver requests (driver app D10) ----
+
+export type DriverRequestKind = 'advance' | 'new_customer' | 'credit_limit';
+export type DriverRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface NewCustomerDetails {
+  name: string;
+  phone: string | null;
+  place: string | null;
+  address: string | null;
+  language: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/** GET driver-requests/:id — what a driver asked the office for from the road. */
+export interface DriverRequest {
+  id: string;
+  kind: DriverRequestKind;
+  status: DriverRequestStatus;
+  driverEmployeeId: string;
+  driverName: string;
+  tripId: string | null;
+  tripNumber: string | null;
+  amount: string | null;
+  customerId: string | null;
+  customerName: string | null;
+  currentCreditLimit: string | null;
+  newCustomer: NewCustomerDetails | null;
+  reason: string;
+  requestedAt: IsoDateTime;
+  decidedAt: IsoDateTime | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  resultRef: string | null;
 }
 
 export type ChecklistArea = 'procurement' | 'deliveries' | 'load' | 'collections' | 'handover' | 'expenses' | 'returns' | 'backhaul';

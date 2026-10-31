@@ -3,6 +3,8 @@
 // field. Money is always a decimal string; format it, never do arithmetic
 // on it as a JS number.
 
+import type { DriverRequestKind } from '../logistics';
+
 export interface DashboardPeriod {
   from: string;
   to: string;
@@ -169,7 +171,7 @@ export interface ProfitInsights {
 
 // ---- Approvals & Exceptions (owner app redesign Phase 7, screen 17) ----
 
-export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close';
+export type InboxKind = 'expense' | 'purchase_order' | 'customer_order' | 'spot_price' | 'ai' | 'dispute' | 'trip_close' | 'driver_request';
 export type InboxTab = 'expense' | 'price' | 'other';
 
 /** GET dashboard/approvals — one thing waiting for the owner; each decision goes through its own module. */
@@ -193,6 +195,8 @@ export interface InboxItem {
     recommendationId?: string;
     disputeId?: string;
     customerId?: string;
+    driverRequestId?: string;
+    requestKind?: DriverRequestKind;
   };
 }
 

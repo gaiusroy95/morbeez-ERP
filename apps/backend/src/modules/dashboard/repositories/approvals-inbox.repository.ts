@@ -149,6 +149,37 @@ export class ApprovalsInboxRepository {
       });
     }
 
+    // What drivers asked for from the road (D10): an advance, a new customer, a credit limit.
+    const driverRequests = await client.query<{
+      id: string; kind: string; amount: string | null; reason: string; at: Date; driver: string; customer: string | null; new_name: string | null; trip_id: string | null; current: string | null;
+    }>(
+      `SELECT r.id, r.kind, r.amount::text AS amount, r.reason, r.requested_at AS at, d.name AS driver, c.name AS customer,
+              r.details->>'name' AS new_name, r.trip_id, c.credit_limit::text AS current
+         FROM fulfilment.driver_request r
+         JOIN trading_partners.employee d ON d.id = r.driver_employee_id
+         LEFT JOIN trading_partners.customer c ON c.id = r.customer_id
+        WHERE r.status = 'pending'`,
+    );
+    for (const r of driverRequests.rows) {
+      const inr = (v: string) => `₹${Number(v).toLocaleString('en-IN')}`;
+      items.push({
+        key: `driver_request:${r.id}`,
+        kind: 'driver_request',
+        tab: r.kind === 'advance' ? 'expense' : 'other',
+        subject:
+          r.kind === 'advance'
+            ? `Advance — ${r.driver}`
+            : r.kind === 'new_customer'
+              ? `New customer: ${r.new_name ?? ''} — ${r.driver}`
+              : `Credit limit: ${r.customer ?? ''} ${inr(r.current ?? '0')} → ${inr(r.amount ?? '0')} — ${r.driver}`,
+        detail: r.reason,
+        amount: r.kind === 'new_customer' ? null : r.amount,
+        at: r.at,
+        by: r.driver,
+        refs: { driverRequestId: r.id, requestKind: r.kind, ...(r.trip_id && { tripId: r.trip_id }) },
+      });
+    }
+
     // Trips handed over (or on hold), waiting for the owner to close them.
     const trips = await client.query<{ id: string; number: string; status: string; at: Date; driver: string; declared: string | null }>(
       `SELECT t.id, t.number, t.status, COALESCE(t.completed_at, t.updated_at) AS at, d.name AS driver, t.cash_declared::text AS declared

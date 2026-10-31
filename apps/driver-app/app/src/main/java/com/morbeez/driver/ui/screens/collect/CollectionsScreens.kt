@@ -47,6 +47,7 @@ import com.morbeez.driver.ui.components.SecondaryAction
 import com.morbeez.driver.ui.components.Stat
 import com.morbeez.driver.ui.components.TonalAction
 import com.morbeez.driver.ui.components.Tone
+import com.morbeez.driver.ui.components.rememberLeaveGuard
 import com.morbeez.driver.ui.screens.farm.PhotoSlot
 import com.morbeez.driver.ui.screens.home.DayLogic
 import com.morbeez.driver.ui.theme.Fresh
@@ -224,7 +225,8 @@ internal fun RecordCollectionContent(
         FieldScreen(title = stringResource(R.string.record_collection), onBack = onBack) { Callout(stringResource(R.string.nothing_to_collect_yet), Tone.Active) }
         return
     }
-    var amount by rememberSaveable(row.stopId) { mutableStateOf(row.remaining?.takeIf { it.signum() > 0 }?.stripTrailingZeros()?.toPlainString().orEmpty()) }
+    val owed = row.remaining?.takeIf { it.signum() > 0 }?.stripTrailingZeros()?.toPlainString().orEmpty()
+    var amount by rememberSaveable(row.stopId) { mutableStateOf(owed) }
     var method by rememberSaveable { mutableStateOf("cash") }
     var reference by rememberSaveable { mutableStateOf("") }
     var someoneElse by rememberSaveable { mutableStateOf(false) }
@@ -237,11 +239,14 @@ internal fun RecordCollectionContent(
     val problem = CollectionsLogic.amountProblem(amount, row.remaining)
     val ready = problem == null && (!someoneElse || payerName.isNotBlank())
     val money = { typed: String -> typed.filter { it.isDigit() || it == '.' }.take(10) }
+    // Anything the driver changed or typed isn't lost to a stray Back (D8).
+    val dirty = amount != owed || method != "cash" || reference.isNotBlank() || someoneElse || notes.isNotBlank() || proof || disputing
+    val leave = rememberLeaveGuard(dirty, onBack)
 
     FieldScreen(
         title = row.name,
         eyebrow = stringResource(R.string.record_collection),
-        onBack = onBack,
+        onBack = leave,
         headerExtra = {
             Text(stringResource(R.string.outstanding_balance), style = MaterialTheme.typography.bodyMedium, color = Fresh.onCarbonMuted, modifier = Modifier.padding(top = 8.dp))
             Text(

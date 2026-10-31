@@ -466,6 +466,19 @@ export class AiDataRepository {
   }
 
   /** Customers with money fallen due by today, net of credit on account — as Collections counts it. */
+  /** What one customer owes that's due by today, less what they've paid and not yet applied (the payment reminder's amount). */
+  async dueFor(client: PoolClient, customerId: string): Promise<string> {
+    const r = await client.query<{ due: string }>(
+      `WITH today AS (SELECT (now() AT TIME ZONE t.timezone)::date AS d FROM tenant.tenant t WHERE t.id = current_tenant_id())
+       SELECT GREATEST(
+                COALESCE((SELECT SUM(b.outstanding) FROM money.invoice_balance b WHERE b.customer_id = $1 AND b.due_date <= (SELECT d FROM today)), 0)
+                - COALESCE((SELECT SUM(unapplied) FROM money.customer_payment_balance WHERE customer_id = $1), 0),
+              0)::numeric(14,2)::text AS due`,
+      [customerId],
+    );
+    return r.rows[0].due;
+  }
+
   async dueCustomers(client: PoolClient, limit: number): Promise<{ customer_id: string; due_now: string; due_date: string; overdue_days: number }[]> {
     const r = await client.query(
       `WITH today AS (SELECT (now() AT TIME ZONE t.timezone)::date AS d FROM tenant.tenant t WHERE t.id = current_tenant_id()),

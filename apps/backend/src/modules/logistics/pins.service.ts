@@ -42,25 +42,30 @@ export class PinsService {
   set(tenantId: string, userId: string, kind: PinKind, refId: string | null, latitude: number, longitude: number): Promise<PlacePin[]> {
     if ((kind === 'depot') !== (refId === null)) throw new BadRequestException(kind === 'depot' ? 'The depot takes no refId' : 'Say which customer or farmer');
     return this.db.withTenant(tenantId, async (client) => {
-      if (refId) {
-        const table = kind === 'customer' ? 'trading_partners.customer' : 'trading_partners.farmer';
-        const found = await client.query(`SELECT 1 FROM ${table} WHERE id = $1`, [refId]);
-        if (!found.rowCount) throw new NotFoundException(`${kind === 'customer' ? 'Customer' : 'Farmer'} not found`);
-      }
-      const updated = await client.query(
-        `UPDATE fulfilment.place_pin SET latitude = $3, longitude = $4, updated_by = $5, updated_at = now()
-         WHERE kind = $1 AND ref_id IS NOT DISTINCT FROM $2::uuid`,
-        [kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
-      );
-      if (!updated.rowCount) {
-        await client.query(
-          'INSERT INTO fulfilment.place_pin (tenant_id, kind, ref_id, latitude, longitude, updated_by) VALUES ($1, $2, $3, $4, $5, $6)',
-          [tenantId, kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
-        );
-      }
-      await this.audit.record(client, { tenantId, actorUserId: userId, action: 'update', entityType: 'place_pin', entityId: refId ?? tenantId, after: { kind, latitude, longitude } });
+      await this.setWithClient(client, tenantId, userId, kind, refId, latitude, longitude);
       return this.listWith(client);
     });
+  }
+
+  /** In the caller's transaction: where a customer a driver met on the road is (D10). */
+  async setWithClient(client: import('pg').PoolClient, tenantId: string, userId: string, kind: PinKind, refId: string | null, latitude: number, longitude: number): Promise<void> {
+    if (refId) {
+      const table = kind === 'customer' ? 'trading_partners.customer' : 'trading_partners.farmer';
+      const found = await client.query(`SELECT 1 FROM ${table} WHERE id = $1`, [refId]);
+      if (!found.rowCount) throw new NotFoundException(`${kind === 'customer' ? 'Customer' : 'Farmer'} not found`);
+    }
+    const updated = await client.query(
+      `UPDATE fulfilment.place_pin SET latitude = $3, longitude = $4, updated_by = $5, updated_at = now()
+       WHERE kind = $1 AND ref_id IS NOT DISTINCT FROM $2::uuid`,
+      [kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
+    );
+    if (!updated.rowCount) {
+      await client.query(
+        'INSERT INTO fulfilment.place_pin (tenant_id, kind, ref_id, latitude, longitude, updated_by) VALUES ($1, $2, $3, $4, $5, $6)',
+        [tenantId, kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
+      );
+    }
+    await this.audit.record(client, { tenantId, actorUserId: userId, action: 'update', entityType: 'place_pin', entityId: refId ?? tenantId, after: { kind, latitude, longitude } });
   }
 
   private async listWith(client: import('pg').PoolClient): Promise<PlacePin[]> {

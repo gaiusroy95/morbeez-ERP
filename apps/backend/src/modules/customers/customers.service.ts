@@ -151,29 +151,32 @@ export class CustomersService {
 
   async create(tenantId: string, actorUserId: string, dto: CreateCustomerDto): Promise<CustomerRecord> {
     if (dto.routeId) await this.routes.assertUsable(tenantId, dto.routeId);
-    return this.db.withTenant(tenantId, async (client) => {
-      const created = await this.customers.createWithClient(client, tenantId, actorUserId, {
-        name: dto.name,
-        contact: { ...dto.contact },
-        creditLimit: dto.creditLimit ?? 0,
-        paymentTermsDays: dto.paymentTermsDays ?? 0,
-        preferredLanguage: dto.preferredLanguage,
-        place: dto.place?.trim() || null,
-        address: dto.address?.trim() || null,
-      });
-      // Their usual route: a stop at the end of it (Routes).
-      if (dto.routeId) await this.routes.placeWithClient(client, tenantId, 'customer', created.id, dto.routeId);
-      const customer = dto.routeId ? ((await this.customers.findByIdWithClient(client, created.id)) ?? created) : created;
-      await this.audit.record(client, {
-        tenantId,
-        actorUserId,
-        action: 'create',
-        entityType: ENTITY_TYPE,
-        entityId: customer.id,
-        after: customer as unknown as Record<string, unknown>,
-      });
-      return customer;
+    return this.db.withTenant(tenantId, (client) => this.createWithClient(client, tenantId, actorUserId, dto));
+  }
+
+  /** In the caller's transaction: a customer a driver met on the road, approved (D10). Routes are checked by the caller. */
+  async createWithClient(client: PoolClient, tenantId: string, actorUserId: string, dto: CreateCustomerDto): Promise<CustomerRecord> {
+    const created = await this.customers.createWithClient(client, tenantId, actorUserId, {
+      name: dto.name,
+      contact: { ...dto.contact },
+      creditLimit: dto.creditLimit ?? 0,
+      paymentTermsDays: dto.paymentTermsDays ?? 0,
+      preferredLanguage: dto.preferredLanguage,
+      place: dto.place?.trim() || null,
+      address: dto.address?.trim() || null,
     });
+    // Their usual route: a stop at the end of it (Routes).
+    if (dto.routeId) await this.routes.placeWithClient(client, tenantId, 'customer', created.id, dto.routeId);
+    const customer = dto.routeId ? ((await this.customers.findByIdWithClient(client, created.id)) ?? created) : created;
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'create',
+      entityType: ENTITY_TYPE,
+      entityId: customer.id,
+      after: customer as unknown as Record<string, unknown>,
+    });
+    return customer;
   }
 
   async update(
@@ -219,36 +222,39 @@ export class CustomersService {
     id: string,
     dto: UpdateCreditTermsDto,
   ): Promise<CustomerRecord> {
-    return this.db.withTenant(tenantId, async (client) => {
-      const before = await this.customers.findByIdWithClient(client, id);
-      if (!before) throw new NotFoundException('Customer not found');
+    return this.db.withTenant(tenantId, (client) => this.updateCreditTermsWithClient(client, tenantId, actorUserId, id, dto));
+  }
 
-      // The annual rate is what's charged (÷ 365, client Q&A, finance); a
-      // monthly rate from an older client converts at the same daily cost.
-      const annual =
-        dto.financeChargeRateAnnual ??
-        (dto.financeChargeRateMonthly !== undefined ? Math.round((dto.financeChargeRateMonthly * 365 * 100) / 30) / 100 : undefined);
-      const after = await this.customers.updateCreditTermsWithClient(client, id, dto.version, {
-        creditLimit: dto.creditLimit,
-        paymentTermsDays: dto.paymentTermsDays,
-        financeChargeRateAnnual: annual,
-        financeChargeRateMonthly: annual === undefined ? undefined : Math.round((annual * 30 * 100) / 365) / 100,
-        financeChargeGraceDays: dto.financeChargeGraceDays,
-        creditHold: dto.creditHold,
-        creditHoldReason: dto.creditHoldReason ?? null,
-      });
+  /** In the caller's transaction: a credit limit a driver asked for, approved (D10). */
+  async updateCreditTermsWithClient(client: PoolClient, tenantId: string, actorUserId: string, id: string, dto: UpdateCreditTermsDto): Promise<CustomerRecord> {
+    const before = await this.customers.findByIdWithClient(client, id);
+    if (!before) throw new NotFoundException('Customer not found');
 
-      await this.audit.record(client, {
-        tenantId,
-        actorUserId,
-        action: 'update',
-        entityType: ENTITY_TYPE,
-        entityId: id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
-      });
-      return after;
+    // The annual rate is what's charged (÷ 365, client Q&A, finance); a
+    // monthly rate from an older client converts at the same daily cost.
+    const annual =
+      dto.financeChargeRateAnnual ??
+      (dto.financeChargeRateMonthly !== undefined ? Math.round((dto.financeChargeRateMonthly * 365 * 100) / 30) / 100 : undefined);
+    const after = await this.customers.updateCreditTermsWithClient(client, id, dto.version, {
+      creditLimit: dto.creditLimit,
+      paymentTermsDays: dto.paymentTermsDays,
+      financeChargeRateAnnual: annual,
+      financeChargeRateMonthly: annual === undefined ? undefined : Math.round((annual * 30 * 100) / 365) / 100,
+      financeChargeGraceDays: dto.financeChargeGraceDays,
+      creditHold: dto.creditHold,
+      creditHoldReason: dto.creditHoldReason ?? null,
     });
+
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'update',
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      before: before as unknown as Record<string, unknown>,
+      after: after as unknown as Record<string, unknown>,
+    });
+    return after;
   }
 
   archive(tenantId: string, actorUserId: string, id: string): Promise<CustomerRecord> {

@@ -60,6 +60,8 @@ data class DrawerLinks(
     val settlements: () -> Unit = {},
     val history: () -> Unit = {},
     val approvals: () -> Unit = {},
+    /** Ask the office: an advance, a new customer, a credit limit (D10). */
+    val request: () -> Unit = {},
     val vehicle: () -> Unit = {},
     val help: () -> Unit = {},
     val profile: () -> Unit = {},
@@ -126,6 +128,7 @@ fun DriverDrawer(
                         counts?.approved?.takeIf { it > 0 }?.let { stringResource(R.string.appr_n_approved, it) to Tone.Good },
                     ),
                 ) { onNavigate(links.approvals) }
+                DrawerItem(Glyph.Send, stringResource(R.string.req_title)) { onNavigate(links.request) }
             }
             Section(R.string.drawer_other) {
                 DrawerItem(Glyph.Car, stringResource(R.string.drawer_vehicle)) { onNavigate(links.vehicle) }

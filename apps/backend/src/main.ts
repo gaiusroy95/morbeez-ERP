@@ -14,6 +14,9 @@ import { Env } from './config/env.validation';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
+    // The body exactly as sent, beside the parsed one: Meta signs WhatsApp's
+    // webhook over its raw bytes (modules/ai/channels).
+    rawBody: true,
   });
 
   // Structured logging takes over from Nest's default console logger

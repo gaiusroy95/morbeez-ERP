@@ -12,6 +12,7 @@ import com.morbeez.driver.data.local.TripStopEntity
 import com.morbeez.driver.data.remote.dto.CrewOptionResponse
 import com.morbeez.driver.data.remote.dto.FarmStopOutcomeResponse
 import com.morbeez.driver.data.remote.dto.StopItemResponse
+import com.morbeez.driver.data.repository.QueueRepository
 import com.morbeez.driver.data.repository.TripRepository
 import com.morbeez.driver.data.sync.SyncWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -54,9 +55,13 @@ class FarmStopViewModel @Inject constructor(
     savedState: SavedStateHandle,
     private val trips: TripRepository,
     private val location: LocationReader,
+    queue: QueueRepository,
 ) : ViewModel() {
     private val tripId: String = checkNotNull(savedState["tripId"])
     private val stopId: String = checkNotNull(savedState["stopId"])
+
+    /** What the office said, if it refused something done at this stop (DRV.8, D8). */
+    val refused: StateFlow<String?> = queue.observeRefusedStops().map { it[stopId] }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val draft = MutableStateFlow<FarmDraft?>(null)
     private val position = MutableStateFlow<Position?>(null)
 

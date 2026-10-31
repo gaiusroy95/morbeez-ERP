@@ -25,9 +25,11 @@ enum class HistoryRange { LAST_30_DAYS, THIS_MONTH, LAST_3_MONTHS }
  * vehicle.
  */
 object RecordsLogic {
-    /** pending | approved | rejected, then expense | collection | handover ("all" for every kind). */
+    /** pending | approved | rejected, then expense | collection | handover — "Other", with the driver's requests (D10) — or "all". */
     fun approvals(items: List<DriverApprovalResponse>, status: String, kind: String): List<DriverApprovalResponse> =
-        items.filter { it.status == status && (kind == "all" || it.kind == kind) }
+        items.filter { it.status == status && (kind == "all" || it.kind == kind || (kind == "handover" && it.kind !in OWN_TABS)) }
+
+    private val OWN_TABS = setOf("expense", "collection")
 
     fun countOf(items: List<DriverApprovalResponse>, status: String, kind: String): Int = approvals(items, status, kind).size
 

@@ -50,7 +50,8 @@ export type LedgerAccount =
   | 'loan_interest'
   | 'crate_recoveries'
   | 'crate_purchases'
-  | 'backhaul_income';
+  | 'backhaul_income'
+  | 'fastag_balance';
 
 export type LedgerEntryType =
   | 'invoice_issued'
@@ -89,7 +90,9 @@ export type LedgerEntryType =
   | 'crate_charge_invoiced'
   | 'crate_charge_deducted'
   | 'crates_purchased'
-  | 'backhaul_income_received';
+  | 'backhaul_income_received'
+  | 'fastag_recharged'
+  | 'fastag_charged';
 
 export interface LedgerParty {
   type: 'customer' | 'farmer';

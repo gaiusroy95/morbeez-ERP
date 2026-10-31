@@ -40,7 +40,7 @@ export interface DriverExpenseRow extends TripExpenseRecord {
 
 export interface ApprovalRow {
   id: string;
-  kind: 'expense' | 'collection' | 'handover';
+  kind: 'expense' | 'collection' | 'handover' | 'advance' | 'new_customer' | 'credit_limit';
   raw_status: string;
   amount: string | null;
   category: ExpenseCategory | null;
@@ -148,6 +148,13 @@ export class DriverRecordsRepository {
          WHERE t.driver_employee_id = $1
            AND (t.status IN ('completed', 'on_hold', 'reconciled') OR (t.status = 'in_progress' AND t.review_note IS NOT NULL))
            AND ${TRIP_DAY} >= $3
+         UNION ALL
+         SELECT q.id, q.kind, q.status, q.amount::text, NULL, COALESCE(c.name, q.details->>'name'), q.reason, t.id, t.number, t.status,
+                false, NULL, NULL, q.decision_note, q.requested_at, q.decided_at, 0
+         FROM fulfilment.driver_request q CROSS JOIN tn
+         LEFT JOIN trading_partners.customer c ON c.id = q.customer_id
+         LEFT JOIN fulfilment.trip t ON t.id = q.trip_id
+         WHERE q.driver_employee_id = $1 AND (q.requested_at AT TIME ZONE tn.timezone)::date >= $3
        ) x
        ORDER BY at DESC
        LIMIT 300`,

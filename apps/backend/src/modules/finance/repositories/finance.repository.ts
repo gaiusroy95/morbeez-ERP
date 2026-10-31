@@ -149,7 +149,8 @@ const CASH_MOVEMENTS = `
   SELECT e.recorded_at, 'trip_expense', v.registration_number, e.category, 0, e.amount, e.trip_id
     FROM fulfilment.trip_expense e
     JOIN fulfilment.trip tr ON tr.id = e.trip_id
-    JOIN trading_partners.vehicle v ON v.id = tr.vehicle_id`;
+    JOIN trading_partners.vehicle v ON v.id = tr.vehicle_id
+   WHERE e.paid_by = 'cash'`;
 
 /**
  * A read model over Finance's own tables plus Orders, Procurement, and
@@ -374,7 +375,7 @@ export class FinanceRepository {
               t.completed_at,
               t.advance_amount::text AS advance_amount,
               (SELECT ROUND(COALESCE(SUM(e.amount), 0), 2)::text FROM fulfilment.trip_expense e
-                WHERE e.trip_id = t.id) AS expenses,
+                WHERE e.trip_id = t.id AND e.paid_by = 'cash') AS expenses,
               (SELECT ROUND(COALESCE(SUM(c.amount), 0), 2)::text
                  FROM money.customer_collection c
                  JOIN fulfilment.trip_stop s ON s.id = c.trip_stop_id

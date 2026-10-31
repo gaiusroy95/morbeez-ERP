@@ -32,6 +32,7 @@ import com.morbeez.driver.ui.screens.home.DrawerLinks
 import com.morbeez.driver.ui.screens.earnings.MyEarningsScreen
 import com.morbeez.driver.ui.screens.earnings.SettlementsScreen
 import com.morbeez.driver.ui.screens.records.ApprovalsScreen
+import com.morbeez.driver.ui.screens.requests.RequestScreen
 import com.morbeez.driver.ui.screens.records.HelpScreen
 import com.morbeez.driver.ui.screens.records.ProfileScreen
 import com.morbeez.driver.ui.screens.records.TripDetailsScreen
@@ -68,6 +69,7 @@ private object Routes {
     const val EXPENSES = "expenses"
     const val NEW_EXPENSE = "expenses/new"
     const val APPROVALS = "approvals"
+    const val NEW_REQUEST = "requests/new"
     const val HISTORY = "history"
     const val TRIP_DETAILS = "history/{tripId}"
     const val VEHICLE = "vehicle"
@@ -165,6 +167,7 @@ fun MorbeezNavGraph(
                     settlements = { navController.navigate(Routes.SETTLEMENTS) { launchSingleTop = true } },
                     history = { navController.navigate(Routes.HISTORY) { launchSingleTop = true } },
                     approvals = { navController.navigate(Routes.APPROVALS) { launchSingleTop = true } },
+                    request = { navController.navigate(Routes.NEW_REQUEST) { launchSingleTop = true } },
                     vehicle = { navController.navigate(Routes.VEHICLE) { launchSingleTop = true } },
                     help = { navController.navigate(Routes.HELP) { launchSingleTop = true } },
                     profile = { navController.navigate(Routes.PROFILE) { launchSingleTop = true } },
@@ -187,6 +190,7 @@ fun MorbeezNavGraph(
                 onHandover = { navController.navigate(Routes.HANDOVER) { launchSingleTop = true } },
                 onTripSummary = { navController.navigate(Routes.TRIP_SUMMARY) { launchSingleTop = true } },
                 onBack = { navController.popBackStack() },
+                onOpenSync = { navController.navigate(Routes.SYNC) { launchSingleTop = true } },
             )
         }
 
@@ -204,6 +208,7 @@ fun MorbeezNavGraph(
                 onBack = { navController.popBackStack() },
                 onDone = { navController.backToStops() },
                 onReport = { navController.navigate(Routes.issue(tripId, stopId)) },
+                onOpenSync = { navController.navigate(Routes.SYNC) { launchSingleTop = true } },
             )
         }
 
@@ -222,6 +227,7 @@ fun MorbeezNavGraph(
                 onDone = { navController.backToStops() },
                 onCollect = { navController.navigate(Routes.collection(tripId, stopId)) },
                 onReport = { navController.navigate(Routes.issue(tripId, stopId)) },
+                onOpenSync = { navController.navigate(Routes.SYNC) { launchSingleTop = true } },
             )
         }
 
@@ -304,7 +310,20 @@ fun MorbeezNavGraph(
         }
 
         composable(Routes.APPROVALS) {
-            ApprovalsScreen(onBack = { navController.popBackStack() })
+            ApprovalsScreen(onBack = { navController.popBackStack() }, onNewRequest = { navController.navigate(Routes.NEW_REQUEST) { launchSingleTop = true } })
+        }
+
+        // What the driver asks the office for (D10); sent, it waits on Approvals.
+        composable(Routes.NEW_REQUEST) {
+            RequestScreen(
+                onBack = { navController.popBackStack() },
+                onSent = {
+                    navController.navigate(Routes.APPROVALS) {
+                        popUpTo(Routes.APPROVALS) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+            )
         }
 
         composable(Routes.HISTORY) {

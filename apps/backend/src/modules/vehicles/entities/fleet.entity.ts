@@ -168,6 +168,35 @@ export interface VehicleOverview {
   loanOutstanding: string;
   hireContract: HireContract | null;
   unpaidHire: string;
+  /** What's on the vehicle's FASTag, and whether it's below the owner's threshold; null when no tag is recorded and nothing was ever taken off one. */
+  fastag: { balance: string; low: boolean } | null;
+}
+
+export type FastagEntryKind = 'recharge' | 'toll' | 'charge';
+
+/** One line of the tag's statement: a recharge (+), a trip's toll or parking (−), a charge no trip recorded (−). */
+export interface FastagEntry {
+  id: string;
+  kind: FastagEntryKind;
+  amount: string;
+  occurredOn: string;
+  paidFrom: 'bank' | 'cash_on_hand' | null;
+  reference: string | null;
+  notes: string | null;
+  tripId: string | null;
+  tripNumber: string | null;
+  createdAt: Date;
+}
+
+export interface FastagView {
+  vehicleId: string;
+  registrationNumber: string;
+  tagId: string | null;
+  issuer: string | null;
+  lowBalance: string | null;
+  balance: string;
+  low: boolean;
+  entries: FastagEntry[];
 }
 
 export interface VehicleDetail extends VehicleOverview {

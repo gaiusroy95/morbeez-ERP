@@ -80,20 +80,22 @@ export class LedgerService {
     client: PoolClient,
     tenantId: string,
     actorUserId: string,
-    expense: { id: string; tripId: string; category: TripExpenseCategory; amount: string; notes: string | null; occurredAt: Date },
-  ): Promise<void> {
+    expense: { id: string; tripId: string; category: TripExpenseCategory; amount: string; notes: string | null; occurredAt: Date; paidBy?: 'cash' | 'fastag' },
+  ): Promise<string> {
     const amount = normalizeMoney(expense.amount);
-    await this.ledger.postWithClient(client, {
+    const fastag = expense.paidBy === 'fastag';
+    return this.ledger.postWithClient(client, {
       tenantId,
       entryType: 'trip_expense_recorded',
       sourceType: 'trip_expense',
       sourceId: expense.id,
       occurredAt: expense.occurredAt,
-      memo: `Trip ${EXPENSE_MEMO[expense.category]}${expense.notes ? `: ${expense.notes}` : ''}`,
+      memo: `Trip ${EXPENSE_MEMO[expense.category]}${fastag ? ' (FASTag)' : ''}${expense.notes ? `: ${expense.notes}` : ''}`,
       createdBy: actorUserId,
+      // By FASTag it comes off the tag's balance; in cash, out of the driver's float.
       lines: [
         { account: EXPENSE_ACCOUNT[expense.category], debit: amount },
-        { account: 'cash_with_drivers', credit: amount },
+        { account: fastag ? 'fastag_balance' : 'cash_with_drivers', credit: amount },
       ],
     });
   }

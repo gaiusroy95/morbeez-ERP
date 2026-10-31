@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { ExpenseCategory, FuelType } from '../entities/trip-expense.entity';
+import { ExpenseCategory, ExpensePaidBy, FuelType } from '../entities/trip-expense.entity';
 
 const VALID_CATEGORIES: ExpenseCategory[] = ['fuel', 'toll', 'parking', 'labour', 'repair', 'other'];
 const FUEL_TYPES: FuelType[] = ['diesel', 'petrol', 'cng', 'electric'];
@@ -58,6 +58,11 @@ export class RecordExpenseDto {
   @IsPositive()
   @Max(10_000)
   ratePerLitre?: number;
+
+  @ApiPropertyOptional({ enum: ['cash', 'fastag'], default: 'cash', description: "A toll or parking taken off the vehicle's FASTag rather than paid from the driver's cash" })
+  @IsOptional()
+  @IsIn(['cash', 'fastag'])
+  paidBy?: ExpensePaidBy;
 }
 
 /** The owner's decision on an expense beyond the driver's authority (Approvals inbox). */
