@@ -302,6 +302,7 @@ export function VehicleDetails({
               ['Capacity', formatQuantity(v.capacityKg, 'kg')],
               ['Next service due', due ? [due.date ? formatDate(due.date) : null, due.km ? `${due.km.toLocaleString('en-IN')} km` : null].filter(Boolean).join(' or ') + (due.overdue ? ` — ${t('overdue')}` : '') : '—'],
               ['Insurance valid till', insurance?.validUntil ? formatDate(insurance.validUntil) : '—'],
+              ['FASTag balance', v.fastag ? `${formatMoney(v.fastag.balance, currency)}${v.fastag.low ? ` — ${t('recharge needed')}` : ''}` : t('No tag recorded')],
               ['Fit for trips', v.fitForTrips ? t('Yes') : v.issues.join('; ') || t('No')],
             ]}
           />

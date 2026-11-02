@@ -1595,4 +1595,8 @@ export const ml: Record<string, string> = {
   'What it was': 'എന്തായിരുന്നു',
   // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
   'by {name}': 'വിളിച്ചത് {name}',
+  // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
+  'FASTag balance': 'FASTag ബാലൻസ്',
+  'recharge needed': 'റീചാർജ് ചെയ്യണം',
+  'No tag recorded': 'ടാഗ് രേഖപ്പെടുത്തിയിട്ടില്ല',
 };

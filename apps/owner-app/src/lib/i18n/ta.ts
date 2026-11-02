@@ -1595,4 +1595,8 @@ export const ta: Record<string, string> = {
   'What it was': 'அது என்ன',
   // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
   'by {name}': '{name} செய்தது',
+  // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
+  'FASTag balance': 'FASTag இருப்பு',
+  'recharge needed': 'ரீசார்ஜ் தேவை',
+  'No tag recorded': 'டேக் பதிவு செய்யப்படவில்லை',
 };

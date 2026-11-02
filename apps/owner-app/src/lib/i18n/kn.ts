@@ -1595,4 +1595,8 @@ export const kn: Record<string, string> = {
   'What it was': 'ಅದು ಏನು',
   // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
   'by {name}': '{name} ಮಾಡಿದ್ದು',
+  // Driver requests, FASTag, WhatsApp orders, automated calls, Integrations (drafts for native review).
+  'FASTag balance': 'FASTag ಬಾಕಿ',
+  'recharge needed': 'ರೀಚಾರ್ಜ್ ಅಗತ್ಯ',
+  'No tag recorded': 'ಟ್ಯಾಗ್ ದಾಖಲಿಸಿಲ್ಲ',
 };

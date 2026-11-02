@@ -114,13 +114,17 @@ const key = () => ({ 'idempotency-key': randomUUID() });
   const limitId = randomUUID();
   const wrongCustomer = await driver.raw('POST', '/driver-requests/mine', { kind: 'credit_limit', customerId: randomUUID(), amount: 5000, reason: 'x x x' });
   check('a limit for a customer who isn’t there is refused', wrongCustomer.status === 404, `${wrongCustomer.status}`);
-  await driver.post('/driver-requests/mine', { id: limitId, kind: 'credit_limit', customerId: sagar.id, amount: 80000, reason: 'Big wedding order this week' });
+  // A raise on whatever the limit is by now (earlier suites change it).
+  const limitNow = Number((await owner.get(`/customers/${sagar.id}`)).creditLimit);
+  const limitAsked = limitNow + 100000;
+  const inr = (n) => `₹${n.toLocaleString('en-IN')}`;
+  await driver.post('/driver-requests/mine', { id: limitId, kind: 'credit_limit', customerId: sagar.id, amount: limitAsked, reason: 'Big wedding order this week' });
   inbox = await owner.get('/dashboard/approvals');
   const limitItem = inbox.items.find((i) => i.key === `driver_request:${limitId}`);
-  check('the inbox shows the limit now and the limit asked', /Hotel Sagar ₹60,000 → ₹80,000/.test(limitItem?.subject ?? ''), limitItem?.subject);
+  check('the inbox shows the limit now and the limit asked', (limitItem?.subject ?? '').includes(`Hotel Sagar ${inr(limitNow)} → ${inr(limitAsked)}`), limitItem?.subject);
   await owner.post(`/driver-requests/${limitId}/decision`, { approve: true });
   const sagarNow = await owner.get(`/customers/${sagar.id}`);
-  check('approved, the customer’s credit limit is set', Number(sagarNow.creditLimit) === 80000, sagarNow.creditLimit);
+  check('approved, the customer’s credit limit is set', Number(sagarNow.creditLimit) === limitAsked, sagarNow.creditLimit);
 
   // ---- FASTag ----
   const tagBase = `/fleet/vehicles/${van.id}/fastag`;
@@ -186,7 +190,11 @@ const key = () => ({ 'idempotency-key': randomUUID() });
     check('…approved from the dialog, for less than asked', decided.status === 'approved' && decided.amount === '2500.00' && !!decided.resultRef, decided.status);
 
     await page.goto(`${BASE}/vehicles`);
-    await page.getByText('KA01D10001').first().click();
+    await page.locator('.party-card', { hasText: 'KA01D10001' }).first().click();
+    await page.waitForSelector('.detail >> text=Total trips');
+    const overview = (await page.locator('.detail').textContent()).replace(/\s+/g, ' ');
+    check('Vehicles: the overview shows the FASTag balance, recharge needed', /FASTag balance\s*₹200(\.00)? — recharge needed/.test(overview), overview.slice(overview.indexOf('FASTag'), overview.indexOf('FASTag') + 60));
+    await page.locator('.detail').getByRole('button', { name: 'Edit & record' }).click();
     await page.locator('.detail .fastag-balance').waitFor();
     const tagText = (await page.locator('.detail .fastag-balance').textContent()).replace(/\s+/g, ' ');
     check('Vehicles: the FASTag balance, low, with the tag', /200/.test(tagText) && /Recharge needed/.test(tagText) && /34161FA820328E4E00000B21/.test(tagText), tagText);
