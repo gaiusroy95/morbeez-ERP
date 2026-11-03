@@ -466,17 +466,33 @@ export class AiDataRepository {
   }
 
   /** Customers with money fallen due by today, net of credit on account — as Collections counts it. */
-  /** What one customer owes that's due by today, less what they've paid and not yet applied (the payment reminder's amount). */
-  async dueFor(client: PoolClient, customerId: string): Promise<string> {
-    const r = await client.query<{ due: string }>(
+  /** What one customer owes that's due by today, less what they've paid and not yet applied, and since when (the payment reminder). */
+  async dueFor(client: PoolClient, customerId: string): Promise<{ amount: string; since: string | null }> {
+    const r = await client.query<{ due: string; since: string | null }>(
       `WITH today AS (SELECT (now() AT TIME ZONE t.timezone)::date AS d FROM tenant.tenant t WHERE t.id = current_tenant_id())
        SELECT GREATEST(
                 COALESCE((SELECT SUM(b.outstanding) FROM money.invoice_balance b WHERE b.customer_id = $1 AND b.due_date <= (SELECT d FROM today)), 0)
                 - COALESCE((SELECT SUM(unapplied) FROM money.customer_payment_balance WHERE customer_id = $1), 0),
-              0)::numeric(14,2)::text AS due`,
+              0)::numeric(14,2)::text AS due,
+              (SELECT MIN(b.due_date)::text FROM money.invoice_balance b WHERE b.customer_id = $1 AND b.outstanding > 0 AND b.due_date <= (SELECT d FROM today)) AS since`,
       [customerId],
     );
-    return r.rows[0].due;
+    return { amount: r.rows[0].due, since: r.rows[0].since };
+  }
+
+  /** Orders placed in the last day for today or later, not yet out for delivery: new orders a call may confirm. */
+  async newOrders(client: PoolClient): Promise<{ order_id: string; number: number; customer_id: string; delivery_date: string | null; total: string }[]> {
+    const r = await client.query(
+      `SELECT o.id AS order_id, o.number, o.customer_id, o.delivery_date::text AS delivery_date,
+              COALESCE((SELECT SUM(l.quantity * l.unit_price) FROM commerce.customer_order_line l WHERE l.order_id = o.id), 0)::numeric(14,2)::text AS total
+         FROM commerce.customer_order o
+         JOIN trading_partners.customer c ON c.id = o.customer_id
+        WHERE o.status IN ('placed', 'confirmed') AND o.created_at > now() - interval '1 day' AND NOT c.is_walk_in
+          AND o.delivery_date >= (SELECT (now() AT TIME ZONE t.timezone)::date FROM tenant.tenant t WHERE t.id = current_tenant_id())
+        ORDER BY o.created_at DESC
+        LIMIT 50`,
+    );
+    return r.rows;
   }
 
   async dueCustomers(client: PoolClient, limit: number): Promise<{ customer_id: string; due_now: string; due_date: string; overdue_days: number }[]> {
@@ -503,10 +519,12 @@ export class AiDataRepository {
   }
 
   /** Who to call: each customer's phone and place (resolved at read time, PIPE.5). */
-  async customerContacts(client: PoolClient, ids: string[]): Promise<Map<string, { name: string; phone: string | null; place: string | null }>> {
+  async customerContacts(client: PoolClient, ids: string[]): Promise<Map<string, { name: string; phone: string | null; place: string | null; doNotCall: boolean }>> {
     if (!ids.length) return new Map();
-    const r = await client.query(`SELECT id, name, contact->>'phone' AS phone, place FROM trading_partners.customer WHERE id = ANY($1::uuid[])`, [ids]);
-    return new Map(r.rows.map((x) => [x.id as string, { name: x.name as string, phone: x.phone as string | null, place: x.place as string | null }]));
+    const r = await client.query(`SELECT id, name, contact->>'phone' AS phone, place, do_not_call FROM trading_partners.customer WHERE id = ANY($1::uuid[])`, [ids]);
+    return new Map(
+      r.rows.map((x) => [x.id as string, { name: x.name as string, phone: x.phone as string | null, place: x.place as string | null, doNotCall: x.do_not_call as boolean }]),
+    );
   }
 
   /** Every name the inbox may show, resolved at read time (AI System PIPE.5). */

@@ -3,10 +3,10 @@ import { DatabaseService } from '../../../infra/database/database.service';
 import { AuditService } from '../../../infra/audit/audit.service';
 import { ChannelsConfig } from './channels.config';
 import { ChannelsRepository, IntegrationSettings } from './channels.repository';
-import { ClaudeOrderReader } from './claude-order-reader';
+import { SarvamOrderReader } from './sarvam-order-reader';
 
 export interface IntegrationsStatus {
-  /** Where Meta and Twilio reach this API; null when PUBLIC_API_URL isn't set. */
+  /** Where Meta and Sarvam reach this API; null when PUBLIC_API_URL isn't set. */
   publicApiUrl: string | null;
   whatsapp: {
     /** The webhook can be verified and its deliveries checked (WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET). */
@@ -18,12 +18,12 @@ export interface IntegrationsStatus {
     messagesLast7Days: number;
   };
   reader: {
-    /** Claude reads orders (ANTHROPIC_API_KEY); else simple rules do. */
-    claude: boolean;
+    /** Sarvam AI reads orders (SARVAM_API_KEY); else simple rules do. */
+    sarvam: boolean;
     model: string | null;
   };
   calls: {
-    /** Twilio and PUBLIC_API_URL are set. */
+    /** Sarvam Voice Agents and PUBLIC_API_URL are set. */
     ready: boolean;
     fromNumber: string | null;
     callsLast7Days: number;
@@ -42,7 +42,7 @@ export interface SaveIntegrationSettings {
  * Settings → Integrations: which outside services this server has keys for
  * (the environment's business, never the owner's — see .env.example), and
  * the business's own choices: its WhatsApp number's id, whether customers get
- * a reply, whether automated calls may be placed.
+ * a reply, whether AI calls may be placed.
  */
 @Injectable()
 export class IntegrationsService {
@@ -50,7 +50,7 @@ export class IntegrationsService {
     private readonly db: DatabaseService,
     private readonly config: ChannelsConfig,
     private readonly repo: ChannelsRepository,
-    private readonly reader: ClaudeOrderReader,
+    private readonly reader: SarvamOrderReader,
     private readonly audit: AuditService,
   ) {}
 
@@ -70,8 +70,8 @@ export class IntegrationsService {
           webhookUrl: base ? `${base}/webhooks/whatsapp` : null,
           messagesLast7Days: counts.rows[0].messages,
         },
-        reader: { claude: this.reader.available, model: this.reader.available ? this.reader.model : null },
-        calls: { ready: this.config.callsReady, fromNumber: this.config.twilio.fromNumber, callsLast7Days: counts.rows[0].calls },
+        reader: { sarvam: this.reader.available, model: this.reader.available ? this.reader.model : null },
+        calls: { ready: this.config.callsReady, fromNumber: this.config.sarvamVoice.fromNumber, callsLast7Days: counts.rows[0].calls },
         settings,
       };
     });

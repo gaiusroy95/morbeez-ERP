@@ -48,7 +48,7 @@ export const useOpenSuggestions = (type: AiRecommendationType) =>
     queryFn: () => apiGet<Paginated<AiRecommendation>>('ai/recommendations', { status: 'open', type, page: 1, pageSize: 100 }),
   });
 
-// ---- The AI's channels: WhatsApp orders, automated calls ----
+// ---- The AI's channels: WhatsApp orders, AI calls ----
 
 /** What this server has keys for, and the business's own choices (Settings → Integrations). */
 export const useIntegrations = (enabled = true) => useQuery({ queryKey: ['ai', 'integrations'], queryFn: () => apiGet<IntegrationsStatus>('integrations'), enabled });
@@ -62,9 +62,9 @@ export const useWhatsAppMessages = (enabled = true) =>
     refetchInterval: (q) => ((q.state.data ?? []).some((m) => m.status === 'received') ? 3_000 : 60_000),
   });
 
-const LIVE: VoiceCall['status'][] = ['queued', 'ringing', 'in_progress'];
+const LIVE: VoiceCall['status'][] = ['queued'];
 
-/** Automated calls of the last two weeks; refreshed every few seconds while one is under way. */
+/** AI calls of the last two weeks; refreshed every few seconds while one is under way. */
 export const useVoiceCalls = (enabled = true) =>
   useQuery({
     queryKey: ['ai', 'voice-calls'],

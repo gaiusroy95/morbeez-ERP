@@ -53,17 +53,21 @@ export function textMessage(to: string, body: string): Record<string, unknown> {
   return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } };
 }
 
-/** What the business says back: the order as read, in the customer's language. Drafts for native review. */
-export function orderReceivedReply(lang: Language, business: string, what: string): string {
+/**
+ * What the business says back: the order as read, in the customer's
+ * language — the client's own words in English. The other three are drafts
+ * for native review. Sent from the business's own number, so it isn't named.
+ */
+export function orderReceivedReply(lang: Language, what: string): string {
   switch (lang) {
     case 'ml':
-      return `നന്ദി, ${business} നിങ്ങളുടെ ഓർഡർ സ്വീകരിച്ചു: ${what}. ഉടൻ സ്ഥിരീകരിക്കും.`;
+      return `നന്ദി. നിങ്ങളുടെ ഓർഡർ ഞങ്ങൾ മനസ്സിലാക്കിയത്: ${what}. ഞങ്ങളുടെ ടീം പരിശോധിച്ച് ഉടൻ സ്ഥിരീകരിക്കും.`;
     case 'kn':
-      return `ಧನ್ಯವಾದಗಳು, ${business} ನಿಮ್ಮ ಆರ್ಡರ್ ಸ್ವೀಕರಿಸಿದೆ: ${what}. ಶೀಘ್ರದಲ್ಲೇ ದೃಢೀಕರಿಸುತ್ತೇವೆ.`;
+      return `ಧನ್ಯವಾದಗಳು. ನಿಮ್ಮ ಆರ್ಡರ್ ಅನ್ನು ನಾವು ಹೀಗೆ ಅರ್ಥಮಾಡಿಕೊಂಡಿದ್ದೇವೆ: ${what}. ನಮ್ಮ ತಂಡ ಪರಿಶೀಲಿಸಿ ಶೀಘ್ರದಲ್ಲೇ ದೃಢೀಕರಿಸುತ್ತದೆ.`;
     case 'ta':
-      return `நன்றி, ${business} உங்கள் ஆர்டரைப் பெற்றது: ${what}. விரைவில் உறுதிப்படுத்துவோம்.`;
+      return `நன்றி. உங்கள் ஆர்டரை நாங்கள் இவ்வாறு புரிந்துகொண்டோம்: ${what}. எங்கள் குழு சரிபார்த்து விரைவில் உறுதிப்படுத்தும்.`;
     default:
-      return `Thank you, ${business} has your order: ${what}. We'll confirm it shortly.`;
+      return `Thank you. We understood your order as ${what}. Our team will verify and confirm shortly.`;
   }
 }
 
@@ -89,7 +93,7 @@ export function orderDraftFromMessage(m: {
   receivedAt: string;
   deliveryDate: string;
   expiresAt: Date;
-  reader: 'claude' | 'rules';
+  reader: 'sarvam' | 'rules';
   reading: OrderReading;
   products: Map<string, { name: string; uom: string; basePrice: string | null }>;
   lastPrices: Map<string, string>;
@@ -122,7 +126,7 @@ export function orderDraftFromMessage(m: {
     },
     evidence: [
       { fact: `WhatsApp message, ${m.receivedAt}`, value: quoted, source: { kind: 'whatsapp', label: m.customerName } },
-      { fact: m.reader === 'claude' ? 'Read by Claude as' : 'Read by simple rules as', value: what, source: { kind: 'whatsapp' } },
+      { fact: m.reader === 'sarvam' ? 'Read by Sarvam AI as' : 'Read by simple rules as', value: what, source: { kind: 'whatsapp' } },
       ...(unread ? [{ fact: 'Not recognised', value: unread, source: { kind: 'whatsapp' } }] : []),
       { fact: 'Priced as last charged', value: lines.map((l) => `${m.products.get(l.productId)?.name ?? ''} ${inr(l.unitPrice)}/${l.uom}`).join(', '), source: { kind: 'orders', label: m.customerName } },
     ],
@@ -130,7 +134,7 @@ export function orderDraftFromMessage(m: {
       `${m.customerName} wrote on WhatsApp (${m.receivedAt}): “${quoted}”. Read as ${what}` +
       `${unread ? `; not recognised: ${unread}` : ''}. Check it against the message, then place it.`,
     expectedImpact: sumMoney(lines.map((l) => multiplyToMoney(l.quantity, l.unitPrice))),
-    confidence: m.reader === 'claude' ? 'rough_guide' : 'early_estimate',
+    confidence: m.reader === 'sarvam' ? 'rough_guide' : 'early_estimate',
     sensitive: false,
     producer: `whatsapp:${m.reader}@1`,
     expiresAt: m.expiresAt,

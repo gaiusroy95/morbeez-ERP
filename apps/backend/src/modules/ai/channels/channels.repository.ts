@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
-import { CallOutcome, CallPurpose, CallScript, CallStatus } from './voice-script';
+import { CallBrief, CallOutcome, CallPurpose, CallResult, CallStatus } from './call-brief';
 
 export interface IntegrationSettings {
   whatsappPhoneNumberId: string | null;
@@ -24,7 +24,7 @@ export interface InboundMessage {
   body: string;
   receivedAt: Date;
   status: InboundStatus;
-  reader: 'claude' | 'rules' | null;
+  reader: 'sarvam' | 'rules' | null;
   extraction: Record<string, unknown> | null;
   recommendationId: string | null;
   note: string | null;
@@ -38,12 +38,16 @@ export interface VoiceCall {
   purpose: CallPurpose;
   language: string;
   toPhone: string;
-  script: CallScript;
+  /** What the agent was told. */
+  brief: CallBrief;
   orderId: string | null;
+  topic: string | null;
   status: CallStatus;
-  digits: string | null;
+  /** What the agent reports: the outcome, a summary, everything it collected, the conversation. */
   outcome: CallOutcome | null;
-  answeredAt: Date | null;
+  summary: string | null;
+  details: Record<string, unknown> | null;
+  transcript: { role: 'agent' | 'user'; text: string }[] | null;
   endedAt: Date | null;
   durationSeconds: number | null;
   error: string | null;
@@ -78,12 +82,14 @@ const toCall = (r: Row): VoiceCall => ({
   purpose: r.purpose as CallPurpose,
   language: r.language as string,
   toPhone: r.to_phone as string,
-  script: r.script as CallScript,
+  brief: r.brief as CallBrief,
   orderId: r.order_id as string | null,
+  topic: r.topic as string | null,
   status: r.status as CallStatus,
-  digits: r.digits as string | null,
   outcome: r.outcome as CallOutcome | null,
-  answeredAt: r.answered_at as Date | null,
+  summary: r.summary as string | null,
+  details: r.details as Record<string, unknown> | null,
+  transcript: r.transcript as VoiceCall['transcript'],
   endedAt: r.ended_at as Date | null,
   durationSeconds: r.duration_seconds as number | null,
   error: r.error as string | null,
@@ -128,7 +134,7 @@ export class ChannelsRepository {
     const s = r.rows[0];
     return s
       ? { whatsappPhoneNumberId: s.whatsapp_phone_number_id, whatsappReply: s.whatsapp_reply, callsEnabled: s.calls_enabled, version: s.version }
-      : { whatsappPhoneNumberId: null, whatsappReply: false, callsEnabled: false, version: 0 };
+      : { whatsappPhoneNumberId: null, whatsappReply: true, callsEnabled: false, version: 0 };
   }
 
   /** Saved only over the version read; false when someone saved in between. */
@@ -188,7 +194,7 @@ export class ChannelsRepository {
   async settleMessage(
     client: PoolClient,
     id: string,
-    s: { status: InboundStatus; customerId?: string | null; reader?: 'claude' | 'rules' | null; extraction?: unknown; recommendationId?: string | null; note?: string | null },
+    s: { status: InboundStatus; customerId?: string | null; reader?: 'sarvam' | 'rules' | null; extraction?: unknown; recommendationId?: string | null; note?: string | null },
   ): Promise<void> {
     await client.query(
       `UPDATE ai.inbound_message SET status = $2, customer_id = COALESCE($3, customer_id), reader = $4, extraction = $5,
@@ -219,25 +225,36 @@ export class ChannelsRepository {
 
   // ---- Calls ----
 
-  async customerForCall(client: PoolClient, id: string): Promise<{ name: string; phone: string | null; language: string } | null> {
-    const r = await client.query(`SELECT name, contact->>'phone' AS phone, preferred_language FROM trading_partners.customer WHERE id = $1 AND status = 'active'`, [id]);
+  async customerForCall(client: PoolClient, id: string): Promise<{ name: string; phone: string | null; language: string; doNotCall: boolean } | null> {
+    const r = await client.query(
+      `SELECT name, contact->>'phone' AS phone, preferred_language, do_not_call FROM trading_partners.customer WHERE id = $1 AND status = 'active'`,
+      [id],
+    );
     const c = r.rows[0];
-    return c ? { name: c.name, phone: c.phone, language: c.preferred_language ?? 'en' } : null;
+    return c ? { name: c.name, phone: c.phone, language: c.preferred_language ?? 'en', doNotCall: c.do_not_call } : null;
   }
 
-  /** What an order says, for a call confirming it. */
-  async orderForCall(client: PoolClient, orderId: string): Promise<{ customerId: string; number: number; deliveryDate: string | null; status: string; lines: { name: string; quantity: string; uom: string }[] } | null> {
+  /** What an order says, for a call confirming it: its lines with their prices, and its value. */
+  async orderForCall(
+    client: PoolClient,
+    orderId: string,
+  ): Promise<{ customerId: string; number: number; deliveryDate: string | null; status: string; total: string; lines: { name: string; quantity: string; uom: string; unitPrice: string }[] } | null> {
     const o = await client.query(
       `SELECT customer_id, number, delivery_date::text AS delivery_date, status FROM commerce.customer_order WHERE id = $1`,
       [orderId],
     );
     if (!o.rows[0]) return null;
     const l = await client.query(
-      `SELECT p.name, l.quantity::text AS quantity, p.base_uom AS uom FROM commerce.customer_order_line l JOIN trading_partners.product p ON p.id = l.product_id
+      `SELECT p.name, l.quantity::text AS quantity, p.base_uom AS uom, l.unit_price::text AS "unitPrice"
+         FROM commerce.customer_order_line l JOIN trading_partners.product p ON p.id = l.product_id
         WHERE l.order_id = $1 ORDER BY p.name`,
       [orderId],
     );
-    return { customerId: o.rows[0].customer_id, number: o.rows[0].number, deliveryDate: o.rows[0].delivery_date, status: o.rows[0].status, lines: l.rows };
+    const t = await client.query<{ total: string }>(
+      'SELECT COALESCE(SUM(quantity * unit_price), 0)::numeric(14,2)::text AS total FROM commerce.customer_order_line WHERE order_id = $1',
+      [orderId],
+    );
+    return { customerId: o.rows[0].customer_id, number: o.rows[0].number, deliveryDate: o.rows[0].delivery_date, status: o.rows[0].status, total: t.rows[0].total, lines: l.rows };
   }
 
   async productNames(client: PoolClient, ids: string[]): Promise<Map<string, { name: string; uom: string }>> {
@@ -248,12 +265,24 @@ export class ChannelsRepository {
 
   async insertCall(
     client: PoolClient,
-    c: { id: string; tenantId: string; customerId: string; purpose: CallPurpose; language: string; toPhone: string; script: CallScript; orderId: string | null; userId: string },
+    c: {
+      id: string;
+      tenantId: string;
+      customerId: string;
+      purpose: CallPurpose;
+      language: string;
+      toPhone: string;
+      brief: CallBrief;
+      orderId: string | null;
+      topic: string | null;
+      webhookToken: string;
+      userId: string;
+    },
   ): Promise<void> {
     await client.query(
-      `INSERT INTO ai.voice_call (id, tenant_id, customer_id, purpose, language, to_phone, script, order_id, requested_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [c.id, c.tenantId, c.customerId, c.purpose, c.language, c.toPhone, JSON.stringify(c.script), c.orderId, c.userId],
+      `INSERT INTO ai.voice_call (id, tenant_id, customer_id, purpose, language, to_phone, brief, order_id, topic, webhook_token, requested_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [c.id, c.tenantId, c.customerId, c.purpose, c.language, c.toPhone, JSON.stringify(c.brief), c.orderId, c.topic, c.webhookToken, c.userId],
     );
   }
 
@@ -262,38 +291,54 @@ export class ChannelsRepository {
     return r.rows[0] ? toCall(r.rows[0]) : null;
   }
 
+  /** What only the webhook may see: the token its URL carries, and the attempt Sarvam gave. */
+  async callSecrets(client: PoolClient, id: string): Promise<{ webhookToken: string; attemptId: string | null } | null> {
+    const r = await client.query('SELECT webhook_token, provider_attempt_id FROM ai.voice_call WHERE id = $1', [id]);
+    return r.rows[0] ? { webhookToken: r.rows[0].webhook_token, attemptId: r.rows[0].provider_attempt_id } : null;
+  }
+
   async calls(client: PoolClient, since: Date, limit: number): Promise<VoiceCall[]> {
     const r = await client.query(`${CALL_SELECT} WHERE v.created_at >= $1 ORDER BY v.created_at DESC LIMIT $2`, [since, limit]);
     return r.rows.map(toCall);
   }
 
-  /** A call already ringing or talking to this customer: one at a time. */
+  /** A call to this customer still under way (Sarvam hasn't reported back): one at a time. */
   async liveCall(client: PoolClient, customerId: string): Promise<boolean> {
     const r = await client.query(
-      `SELECT 1 FROM ai.voice_call WHERE customer_id = $1 AND status IN ('queued', 'ringing', 'in_progress') AND created_at > now() - interval '15 minutes'`,
+      `SELECT 1 FROM ai.voice_call WHERE customer_id = $1 AND status = 'queued' AND created_at > now() - interval '15 minutes'`,
       [customerId],
     );
     return (r.rowCount ?? 0) > 0;
   }
 
-  async updateCall(
-    client: PoolClient,
-    id: string,
-    u: { sid?: string; status?: CallStatus; digits?: string; outcome?: CallOutcome; answered?: boolean; ended?: boolean; durationSeconds?: number | null; error?: string | null },
-  ): Promise<void> {
-    await client.query(
-      `UPDATE ai.voice_call SET
-         provider_call_sid = COALESCE($2, provider_call_sid),
-         status = CASE WHEN status IN ('completed', 'busy', 'no_answer', 'failed', 'canceled') THEN status ELSE COALESCE($3, status) END,
-         digits = COALESCE($4, digits),
-         outcome = COALESCE($5, outcome),
-         answered_at = CASE WHEN $6 THEN COALESCE(answered_at, now()) ELSE answered_at END,
-         ended_at = CASE WHEN $7 THEN COALESCE(ended_at, now()) ELSE ended_at END,
-         duration_seconds = COALESCE($8, duration_seconds),
-         error = COALESCE($9, error),
-         updated_at = now()
-       WHERE id = $1`,
-      [id, u.sid ?? null, u.status ?? null, u.digits ?? null, u.outcome ?? null, !!u.answered, !!u.ended, u.durationSeconds ?? null, u.error ?? null],
+  /** Sarvam took the call (its attempt id), or couldn't (failed, and why). */
+  async placedCall(client: PoolClient, id: string, p: { attemptId: string } | { error: string }): Promise<void> {
+    if ('attemptId' in p) {
+      await client.query('UPDATE ai.voice_call SET provider_attempt_id = $2, updated_at = now() WHERE id = $1', [id, p.attemptId]);
+    } else {
+      await client.query(`UPDATE ai.voice_call SET status = 'failed', error = $2, ended_at = now(), updated_at = now() WHERE id = $1`, [id, p.error]);
+    }
+  }
+
+  /** What came of it — once: a call already reported isn't reported again. False when it was. */
+  async finishCall(client: PoolClient, id: string, r: CallResult): Promise<boolean> {
+    const u = await client.query(
+      `UPDATE ai.voice_call SET status = $2, duration_seconds = $3, interaction_id = $4, error = $5, outcome = $6, summary = $7,
+         details = $8, transcript = $9, provider_attempt_id = COALESCE(provider_attempt_id, $10), ended_at = now(), updated_at = now()
+       WHERE id = $1 AND status = 'queued'`,
+      [
+        id,
+        r.status,
+        r.durationSeconds,
+        r.interactionId,
+        r.error,
+        r.outcome,
+        r.summary,
+        r.details ? JSON.stringify(r.details) : null,
+        r.transcript ? JSON.stringify(r.transcript) : null,
+        r.attemptId,
+      ],
     );
+    return (u.rowCount ?? 0) > 0;
   }
 }

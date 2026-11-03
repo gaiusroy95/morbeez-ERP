@@ -1,3 +1,4 @@
+import { formatOrderNumber } from '../../common/persistence/document-number';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
@@ -431,19 +432,29 @@ export class AiService {
       const books = await this.data.books(client);
       const due = actor.permissions.includes('finance:read') ? await this.data.dueCustomers(client, 30) : [];
       const recs = open.recs.filter((r) => r.subjectId);
-      const contacts = await this.data.customerContacts(client, [...new Set([...due.map((d) => d.customer_id), ...recs.map((r) => r.subjectId as string)])]);
+      const fresh = await this.data.newOrders(client);
+      const contacts = await this.data.customerContacts(client, [
+        ...new Set([...due.map((d) => d.customer_id), ...recs.map((r) => r.subjectId as string), ...fresh.map((o) => o.customer_id)]),
+      ]);
       const person = (id: string) => contacts.get(id) ?? null;
       const calls: CallItem[] = [];
+      const none = { recommendationId: null, orderId: null, about: null };
       for (const d of due) {
         const c = person(d.customer_id);
-        if (c) calls.push({ kind: 'payment', customerId: d.customer_id, ...c, amount: d.due_now, dueDate: d.due_date, overdueDays: d.overdue_days, recommendationId: null, about: null });
+        if (c) calls.push({ kind: 'payment', customerId: d.customer_id, ...c, ...none, amount: d.due_now, dueDate: d.due_date, overdueDays: d.overdue_days });
       }
       for (const kind of ['order', 'quantity'] as const) {
         // An order the customer sent on WhatsApp is the owner's to place, not a call to make.
         for (const r of recs.filter((x) => x.proposal.action === (kind === 'order' ? 'delivery_order' : 'confirm_order') && x.proposal.source !== 'whatsapp')) {
           const c = person(r.subjectId as string);
-          if (c) calls.push({ kind, customerId: r.subjectId as string, ...c, amount: r.expectedImpact, dueDate: null, overdueDays: null, recommendationId: r.id, about: r.title });
+          if (c) calls.push({ kind, customerId: r.subjectId as string, ...c, amount: r.expectedImpact, dueDate: null, overdueDays: null, recommendationId: r.id, orderId: null, about: r.title });
         }
+      }
+      // Orders placed in the last day: a call may confirm them with the customer.
+      for (const o of fresh) {
+        const c = person(o.customer_id);
+        const about = `${formatOrderNumber(o.number)}${o.delivery_date ? ` for ${o.delivery_date}` : ''}`;
+        if (c) calls.push({ kind: 'new_order', customerId: o.customer_id, ...c, amount: o.total, dueDate: null, overdueDays: null, recommendationId: null, orderId: o.order_id, about });
       }
       return { voice, date: books.today, calls };
     });

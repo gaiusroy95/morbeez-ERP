@@ -156,22 +156,26 @@ export interface PricingBoard {
 
 /** AI Calling (owner Phase 8; requirements Part 21–23): today's calls, made by a person until AI voice arrives. */
 export interface CallItem {
-  /** payment: money fallen due; order: their usual order not placed; quantity: an order to confirm. */
-  kind: 'payment' | 'order' | 'quantity';
+  /** payment: money fallen due; order: their usual order not placed; quantity: an order far from usual; new_order: an order placed in the last day. */
+  kind: 'payment' | 'order' | 'quantity' | 'new_order';
   customerId: string;
   name: string;
   phone: string | null;
   place: string | null;
+  /** Asked not to be called by the AI agent. */
+  doNotCall: boolean;
   amount: string | null;
   dueDate: string | null;
   overdueDays: number | null;
   recommendationId: string | null;
-  /** The suggestion's title, for an order or a quantity to confirm. */
+  /** A new order: which. */
+  orderId: string | null;
+  /** The suggestion's title, or the new order's number and day. */
   about: string | null;
 }
 
 export interface CallList {
-  /** Automated calls: Twilio set up on the server and turned on by the business; else these are for the owner to make. */
+  /** AI calls: Sarvam Voice Agents set up on the server and turned on by the business; else these are for the owner to make. */
   voice: 'ready' | 'off' | 'not_set_up';
   date: string;
   calls: CallItem[];

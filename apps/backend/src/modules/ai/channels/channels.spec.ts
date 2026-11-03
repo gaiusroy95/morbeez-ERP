@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 import { checkReading, readOrderByRules, ReadableProduct } from './order-reader';
-import { twilioSignature, validTwilioSignature, validWhatsAppSignature } from './signatures';
-import { callTwiml, keypressTwiml, linesInWords, rupeesInWords, spokenText, statusOf } from './voice-script';
+import { validWhatsAppSignature } from './signatures';
+import { briefFor, describeBrief, linesInWords, outcomeOf, resultOf } from './call-brief';
 import { messagesOf, orderDraftFromMessage, orderInWords, orderReceivedReply } from './whatsapp';
 import { dialable } from './voice.service';
 
@@ -79,52 +79,92 @@ describe('signatures', () => {
     expect(validWhatsAppSignature(Buffer.from('{"entry":[1]}'), good, 'app-secret-1')).toBe(false);
     expect(validWhatsAppSignature(body, undefined, 'app-secret-1')).toBe(false);
   });
-
-  it("matches Twilio's documented example", () => {
-    // https://www.twilio.com/docs/usage/webhooks/webhooks-security
-    const params = { CallSid: 'CA1234567890ABCDE', Caller: '+12349013030', Digits: '1234', From: '+12349013030', To: '+18005551212' };
-    const url = 'https://mycompany.com/myapp.php?foo=1&bar=2';
-    expect(twilioSignature('12345', url, params)).toBe('0/KCTR6DLpKmkAf8muzZqo1nDgQ=');
-    expect(validTwilioSignature('12345', url, params, '0/KCTR6DLpKmkAf8muzZqo1nDgQ=')).toBe(true);
-    expect(validTwilioSignature('12345', url, { ...params, Digits: '1' }, '0/KCTR6DLpKmkAf8muzZqo1nDgQ=')).toBe(false);
-  });
 });
 
-describe('what a call says', () => {
-  const script = { business: 'Morbeez Fresh', amount: '12500.00', lines: [{ name: 'Tomato', quantity: '20.000', uom: 'kg' }], orderNumber: 'D-00042', deliveryDate: '2026-11-01' };
+describe('what the voice agent is told, and what it reports', () => {
+  const lines = [
+    { name: 'Tomato', quantity: '20.000', uom: 'kg', unitPrice: '30.00' },
+    { name: 'Onion', quantity: '5.500', uom: 'kg', unitPrice: '40.00' },
+  ];
 
-  it('says amounts and quantities as a voice reads them', () => {
-    expect(rupeesInWords('12500.00')).toBe('12500');
-    expect(rupeesInWords('99.50')).toBe('99.50');
-    expect(linesInWords(script.lines, 'en')).toBe('20 kilos Tomato');
-    expect(linesInWords(script.lines, 'ml')).toBe('20 കിലോ Tomato');
+  it('gives the agent only the facts of this call, every one a string', () => {
+    const pay = briefFor('payment_reminder', 'ml', { business: 'Dev Wholesaler Co.', customer: 'Hotel Sagar', amountDue: '12500.00', dueSince: '2026-10-01', lines });
+    expect(pay).toEqual({
+      business_name: 'Dev Wholesaler Co',
+      customer_name: 'Hotel Sagar',
+      call_purpose: 'payment_reminder',
+      customer_language: 'Malayalam',
+      amount_due: '12,500 rupees',
+      due_since: '2026-10-01',
+      order_number: '',
+      delivery_date: '',
+      order_lines: '',
+      order_total: '',
+      usual_order: '',
+      topic: '',
+    });
+    const confirm = briefFor('order_confirm', 'ta', { business: 'Dev', customer: 'Sagar', orderNumber: 'D-00042', deliveryDate: '2026-11-03', lines, orderTotal: '820.00' });
+    expect(confirm).toMatchObject({ order_number: 'D-00042', order_total: '820 rupees', order_lines: '20 kg Tomato at 30 rupees per kg; 5.5 kg Onion at 40 rupees per kg', amount_due: '', customer_language: 'Tamil' });
+    expect(briefFor('order_reminder', 'en', { business: 'Dev', customer: 'Sagar', deliveryDate: '2026-11-03', lines }).usual_order).toBe('20 kg Tomato; 5.5 kg Onion');
+    expect(briefFor('follow_up', 'kn', { business: 'Dev', customer: 'Sagar', topic: '  Ask how the new onions were  ' }).topic).toBe('Ask how the new onions were');
   });
 
-  it("speaks the customer's language with an Indian voice and asks for one key", () => {
-    const xml = callTwiml('payment_reminder', 'ta', script, 'https://api.example.com/webhooks/twilio/voice/c1/keypress');
-    expect(xml).toContain('<Gather input="dtmf" numDigits="1"');
-    expect(xml).toContain('action="https://api.example.com/webhooks/twilio/voice/c1/keypress"');
-    expect(xml).toContain('language="ta-IN" voice="Google.ta-IN-Standard-A"');
-    expect(xml).toContain('12500 ரூபாய்');
-    expect(spokenText('order_confirm', 'en', script)).toContain('About your order D-00042 for 2026-11-01: 20 kilos Tomato.');
+  it('says in one line what the call is about', () => {
+    expect(describeBrief(briefFor('payment_reminder', 'ml', { business: 'Dev', customer: 'Sagar', amountDue: '12500.00', dueSince: '2026-10-01' }))).toBe(
+      'Payment reminder — 12,500 rupees due since 2026-10-01. The agent speaks Malayalam.',
+    );
+    expect(describeBrief(briefFor('quantity_confirm', 'en', { business: 'Dev', customer: 'Sagar', orderNumber: 'D-00042', deliveryDate: '2026-11-03', lines: lines.slice(0, 1), orderTotal: '600' }))).toBe(
+      'Confirm quantities and prices — order D-00042 for 2026-11-03: 20 kg Tomato at 30 rupees per kg (600 rupees). The agent speaks English.',
+    );
+    // The owner's own full stop isn't doubled.
+    expect(describeBrief(briefFor('follow_up', 'en', { business: 'Dev', customer: 'Sagar', topic: 'Ask about the onions.' }))).toBe('Follow-up — Ask about the onions. The agent speaks English.');
+    expect(describeBrief(briefFor('follow_up', 'en', { business: 'Dev', customer: 'Sagar', topic: 'Ask about the onions' }))).toBe('Follow-up — Ask about the onions. The agent speaks English.');
+    expect(linesInWords([], true)).toBe('');
   });
 
-  it('escapes what goes into the XML', () => {
-    expect(callTwiml('order_reminder', 'en', { ...script, business: 'A & B <Fresh>' }, 'https://x/k')).toContain('A &amp; B &lt;Fresh&gt;');
+  it('reads a connected call: the outcome, the summary, what was collected, the conversation', () => {
+    const r = resultOf({
+      attempt_id: 'att-1',
+      status: 'connected',
+      channel_info: { channel_type: 'v2v', channel_provider: 'exotel', agent_phone_number: '+918040000000' },
+      duration: 74.6,
+      interaction_id: '20261102/abc',
+      failure_reason: null,
+      final_agent_variables: { call_outcome: 'Change Requested', requested_changes: 'Onion 10 kg instead of 5.5', call_summary: 'Wants more onion.', customer_name: 'Sagar' },
+      interaction_transcript: [
+        { role: 'agent', en_text: 'Hello, this is Dev calling about your order.' },
+        { role: 'user', en_text: 'Make the onion 10 kilos.' },
+        { role: 'user', en_text: '' },
+      ],
+    });
+    expect(r).toEqual({
+      attemptId: 'att-1',
+      status: 'completed',
+      durationSeconds: 75,
+      interactionId: '20261102/abc',
+      error: null,
+      outcome: 'change_requested',
+      summary: 'Wants more onion.',
+      details: { call_outcome: 'Change Requested', requested_changes: 'Onion 10 kg instead of 5.5', call_summary: 'Wants more onion.', customer_name: 'Sagar' },
+      transcript: [
+        { role: 'agent', text: 'Hello, this is Dev calling about your order.' },
+        { role: 'user', text: 'Make the onion 10 kilos.' },
+      ],
+    });
   });
 
-  it('turns the key into an outcome', () => {
-    expect(keypressTwiml('payment_reminder', 'en', script, '1').outcome).toBe('confirmed');
-    expect(keypressTwiml('payment_reminder', 'kn', script, '2').outcome).toBe('callback');
-    expect(keypressTwiml('order_reminder', 'en', script, '9').outcome).toBe('no_response');
-    expect(keypressTwiml('order_reminder', 'en', script, '').twiml).toContain('<Hangup/>');
+  it('reads a call that never connected, and anything else as failed', () => {
+    expect(resultOf({ attempt_id: 'a', status: 'no_answer', duration: null, final_agent_variables: null, interaction_transcript: null })).toMatchObject({ status: 'no_answer', outcome: null, transcript: null, error: null });
+    expect(resultOf({ status: 'failed', failure_reason: 'exotel: Phone number is registered under TRAI NDNC' })).toMatchObject({ status: 'failed', error: 'exotel: Phone number is registered under TRAI NDNC' });
+    expect(resultOf('nonsense')).toMatchObject({ status: 'failed', error: 'The call could not be placed' });
   });
 
-  it("maps Twilio's call statuses", () => {
-    expect(statusOf('in-progress')).toBe('in_progress');
-    expect(statusOf('no-answer')).toBe('no_answer');
-    expect(statusOf('initiated')).toBe('queued');
-    expect(statusOf('something-new')).toBeNull();
+  it('keeps only the outcomes the agent is set up with', () => {
+    expect(outcomeOf('will pay')).toBe('will_pay');
+    expect(outcomeOf('ALREADY-PAID')).toBe('already_paid');
+    expect(outcomeOf('something else')).toBe('no_decision');
+    expect(outcomeOf('')).toBeNull();
+    expect(outcomeOf(7)).toBeNull();
   });
 
   it('dials Indian mobiles as +91 and ten digits', () => {
@@ -195,8 +235,9 @@ describe('WhatsApp', () => {
     expect(orderInWords(reading, products)).toBe('20 kg Tomato, 5 kg Onion');
   });
 
-  it("answers in the customer's language", () => {
-    expect(orderReceivedReply('en', 'Morbeez Fresh', '20 kg Tomato')).toBe("Thank you, Morbeez Fresh has your order: 20 kg Tomato. We'll confirm it shortly.");
-    expect(orderReceivedReply('ml', 'Morbeez Fresh', '20 kg Tomato')).toContain('നന്ദി');
+  it("answers in the customer's language, in the client's words", () => {
+    expect(orderReceivedReply('en', '20 kg Tomato')).toBe('Thank you. We understood your order as 20 kg Tomato. Our team will verify and confirm shortly.');
+    expect(orderReceivedReply('ml', '20 kg Tomato')).toContain('20 kg Tomato');
+    expect(orderReceivedReply('ta', '20 kg Tomato')).toContain('நன்றி');
   });
 });

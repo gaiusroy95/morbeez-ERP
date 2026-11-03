@@ -74,14 +74,24 @@ const pct = (amount, percent) => (Math.round(Number(amount) * Number(percent)) /
     // ---- The owner's rules ----
     const before = await owner.get('/workforce/payroll/driver-incentives');
     check('every incentive off until the owner switches it on — each with what it is a percentage of', before.version === 0 && before.rules.length === 10 && before.rules.every((r) => !r.enabled) && /collected/.test(before.rules[0].base), JSON.stringify(before.rules.map((r) => `${r.kind}:${r.enabled}`)));
+    const c0 = before.conditions;
+    check(
+      'the eligibility conditions start where the client confirmed the bases',
+      c0?.minCollected === '0.00' && c0.minCrates === 1 && c0.qualityShortAllowed === 0 && c0.performanceSkipsAllowed === 0 && c0.dataQualityNeeds.km && c0.dataQualityNeeds.deliveryPhotos && c0.dataQualityNeeds.bills && c0.completionOnException === false,
+      JSON.stringify(c0),
+    );
     const rules = before.rules.map((r) => ({ kind: r.kind, enabled: true, percent: Number(r.suggestedPercent) }));
+    // The owner's own conditions: a collection incentive only from ₹1,000 collected.
+    const conditions = { minCollected: 1000, minCrates: 1, qualityShortAllowed: 0, performanceSkipsAllowed: 0, dataQualityNeeds: { km: true, deliveryPhotos: true, bills: true }, completionOnException: false };
+    const noCrates = await owner.raw('PUT', '/workforce/payroll/driver-incentives', { version: 0, rules, targetKmPerLitre: 8.5, nightFrom: '21:00', nightUntil: '05:00', conditions: { ...conditions, minCrates: 0 } });
+    check('a condition out of range is refused', noCrates.status === 400, `${noCrates.status} ${message(noCrates)}`);
     const noTarget = await owner.raw('PUT', '/workforce/payroll/driver-incentives', { version: 0, rules, nightFrom: '21:00', nightUntil: '05:00' });
     check('the mileage incentive needs a km/l target', noTarget.status === 400 && /km\/l target/.test(message(noTarget)), message(noTarget));
     const byDriver = await driver.raw('PUT', '/workforce/payroll/driver-incentives', { version: 0, rules, targetKmPerLitre: 8.5, nightFrom: '21:00', nightUntil: '05:00' });
     check('a driver sets none of it', byDriver.status === 403, String(byDriver.status));
-    const saved = await owner.put('/workforce/payroll/driver-incentives', { version: 0, rules, targetKmPerLitre: 8.5, nightFrom: '21:00', nightUntil: '05:00' });
+    const saved = await owner.put('/workforce/payroll/driver-incentives', { version: 0, rules, targetKmPerLitre: 8.5, nightFrom: '21:00', nightUntil: '05:00', conditions });
     const stale = await owner.raw('PUT', '/workforce/payroll/driver-incentives', { version: 0, rules, targetKmPerLitre: 8.5, nightFrom: '21:00', nightUntil: '05:00' });
-    check('the owner switches all ten on — saved once, a stale save refused', saved.version === 1 && saved.rules.every((r) => r.enabled) && saved.targetKmPerLitre === '8.50' && stale.status === 409, `${saved.version} ${stale.status}`);
+    check('the owner switches all ten on, with a ₹1,000 collection minimum — saved once, a stale save refused', saved.version === 1 && saved.rules.every((r) => r.enabled) && saved.targetKmPerLitre === '8.50' && saved.conditions?.minCollected === '1000.00' && stale.status === 409, `${saved.version} ${JSON.stringify(saved.conditions)} ${stale.status}`);
     const percent = Object.fromEntries(saved.rules.map((r) => [r.kind, r.percent]));
 
     // ---- The driver's daily wage ----
@@ -134,8 +144,8 @@ const pct = (amount, percent) => (Math.round(Number(amount) * Number(percent)) /
     const estimate = await driver.get(`${base}/incentives`);
     const est = Object.fromEntries(estimate.lines.map((l) => [l.kind, l]));
     check(
-      'before the close the trip’s incentives are an estimate — the backhaul’s worked out already',
-      estimate.final === false && est.backhaul?.amount === pct(3000, percent.backhaul) && est.collection?.amount === pct(750, percent.collection) && est.completion?.detail === 'If the owner closes the trip as a pass',
+      'before the close the trip’s incentives are an estimate — the backhaul’s worked out already; ₹750 collected is under the owner’s ₹1,000',
+      estimate.final === false && est.backhaul?.amount === pct(3000, percent.backhaul) && est.collection?.amount === '0.00' && est.collection.detail === '₹750.00 collected — less than ₹1000.00' && est.completion?.detail === 'If the owner closes the trip as a pass',
       JSON.stringify(estimate.lines.map((l) => `${l.kind}:${l.amount}`)),
     );
 
@@ -148,9 +158,9 @@ const pct = (amount, percent) => (Math.round(Number(amount) * Number(percent)) /
     const k = Object.fromEntries(kept.lines.map((l) => [l.kind, l]));
     const passed = closed.outcome === 'pass';
     check(
-      'closed: worked out from the trip and kept — each with its base and why',
+      'closed: worked out from the trip and kept — each with its base and why (the collection minimum not met, nothing for it)',
       kept.final === true &&
-        k.collection.base === '750.00' && k.collection.amount === pct(750, percent.collection) &&
+        k.collection.base === '0.00' && k.collection.amount === '0.00' && k.collection.detail === '₹750.00 collected — less than ₹1000.00' &&
         k.backhaul.base === '3000.00' && k.backhaul.amount === pct(3000, percent.backhaul) &&
         k.new_customer.base === '150.00' && k.new_customer.detail === '1 new customer(s), first delivery ₹150.00' &&
         k.quality.base === '750.00' && k.performance.base === '750.00',
@@ -222,6 +232,8 @@ const pct = (amount, percent) => (Math.round(Number(amount) * Number(percent)) /
       const ruleRows = await page.locator('.incentive-table tbody tr').count();
       const ticked = await page.locator('.incentive-table input[type=checkbox]:checked').count();
       check('Settings → Rates & rules: the ten incentives, each on with its percentage', ruleRows === 10 && ticked === 10, `${ruleRows} ${ticked}`);
+      const minimum = await page.getByLabel('Collection: at least (₹) collected on the trip').inputValue();
+      check('…and the eligibility conditions, as the owner saved them', (await page.getByRole('heading', { name: 'Eligibility conditions' }).count()) === 1 && minimum === '1000', minimum);
       const out = process.env.E2E_SCREENSHOTS;
       if (out) await page.screenshot({ path: path.join(out, 'd7-owner-incentive-rules.png'), fullPage: true });
       await page.goto(`${BASE}/logistics?open=${trip.id}`);

@@ -1,4 +1,4 @@
-import { dayPayOf, fuelSaved, IncentiveRules, incentivesOf, INCENTIVE_KINDS, TripFacts, wasNight } from './trip-incentives';
+import { conditionsOf, dayPayOf, DEFAULT_CONDITIONS, fuelSaved, IncentiveRules, incentivesOf, INCENTIVE_KINDS, TripFacts, wasNight } from './trip-incentives';
 
 const facts = (over: Partial<TripFacts> = {}): TripFacts => ({
   outcome: 'pass',
@@ -118,5 +118,44 @@ describe('the incentive engine (driver app D7)', () => {
     expect(dayPayOf({ payBasis: 'hourly', rate: '150.00' }, '2026-10-30')).toBe('1200.00');
     expect(dayPayOf({ payBasis: 'piece', rate: '2.00' }, '2026-10-30')).toBeNull();
     expect(dayPayOf(null, '2026-10-30')).toBeNull();
+  });
+});
+
+describe('the owner’s eligibility conditions (the client: customisable)', () => {
+  const c = (over: Partial<ReturnType<typeof conditionsOf>> = {}) => ({ ...conditionsOf({}), ...over });
+
+  it('start from the proposal; anything missing or malformed is the default', () => {
+    expect(conditionsOf(undefined)).toEqual(DEFAULT_CONDITIONS);
+    expect(conditionsOf({ minCollected: 'lots', qualityShortAllowed: -1, minCrates: 0, dataQualityNeeds: { bills: false } })).toEqual({
+      ...DEFAULT_CONDITIONS,
+      minCrates: 1,
+      dataQualityNeeds: { km: true, deliveryPhotos: true, bills: false },
+    });
+  });
+
+  it('a minimum collection, a minimum of crates', () => {
+    const r = rules({ conditions: c({ minCollected: '200000.00', minCrates: 25 }) });
+    expect(amounts(facts(), r).collection).toBe('0.00');
+    expect(amounts(facts(), r).crates).toBe('0.00');
+    expect(amounts(facts({ collected: '250000.00', cratesBack: 25 }), r)).toMatchObject({ collection: '500.00', crates: '200.00' });
+  });
+
+  it('short deliveries and undone stops allowed', () => {
+    const strict = amounts(facts({ shortDeliveries: 1, skippedStops: 2 }));
+    expect([strict.quality, strict.performance]).toEqual(['0.00', '0.00']);
+    const lenient = amounts(facts({ shortDeliveries: 1, skippedStops: 2 }), rules({ conditions: c({ qualityShortAllowed: 1, performanceSkipsAllowed: 2 }) }));
+    expect([lenient.quality, lenient.performance]).toEqual(['150.00', '300.00']);
+  });
+
+  it('data quality asks only for what the owner wants recorded', () => {
+    const f = facts({ expensesWithoutBill: 2 });
+    expect(amounts(f).data_quality).toBe('0.00');
+    const line = incentivesOf(f, rules({ conditions: c({ dataQualityNeeds: { km: true, deliveryPhotos: true, bills: false } }) })).find((l) => l.kind === 'data_quality');
+    expect(line).toMatchObject({ amount: '120.00', detail: 'KM, delivery photos all recorded' });
+  });
+
+  it('trip completion may count an approved exception', () => {
+    expect(amounts(facts({ outcome: 'approved_exception' })).completion).toBe('0.00');
+    expect(amounts(facts({ outcome: 'approved_exception' }), rules({ conditions: c({ completionOnException: true }) })).completion).toBe('240.00');
   });
 });

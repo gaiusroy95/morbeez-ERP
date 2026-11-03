@@ -4,7 +4,8 @@
 // driver. Pure: the facts come in, each incentive's base, percentage, amount
 // and why go out; unit-tested with exact figures (trip-incentives.spec.ts).
 //
-// The bases are this build's proposal, to be confirmed with the client:
+// The bases, as the client confirmed them (2 Nov 2026) — each one's eligibility
+// conditions the owner's to change (IncentiveConditions):
 //   collection   — what was collected on the trip, every method
 //   backhaul     — backhaul rent received
 //   mileage      — the fuel saved against the owner's km/l target, at what it
@@ -80,12 +81,62 @@ export interface IncentiveRuleSetting {
   percent: string;
 }
 
+/**
+ * When an incentive is earned — the owner's to change (the client: "modify
+ * eligibility conditions"); each starts as the proposal above.
+ */
+export interface IncentiveConditions {
+  /** Collection: at least this much collected on the trip. */
+  minCollected: string;
+  /** Crates: at least this many brought back. */
+  minCrates: number;
+  /** Quality: deliveries that may be short and still earn it. */
+  qualityShortAllowed: number;
+  /** Performance: stops that may be left undone and still earn it. */
+  performanceSkipsAllowed: number;
+  /** Data quality: what must be recorded. */
+  dataQualityNeeds: { km: boolean; deliveryPhotos: boolean; bills: boolean };
+  /** Trip completion: also when the owner closes it as an approved exception. */
+  completionOnException: boolean;
+}
+
+export const DEFAULT_CONDITIONS: IncentiveConditions = {
+  minCollected: '0.00',
+  minCrates: 1,
+  qualityShortAllowed: 0,
+  performanceSkipsAllowed: 0,
+  dataQualityNeeds: { km: true, deliveryPhotos: true, bills: true },
+  completionOnException: false,
+};
+
+/** The owner's saved conditions over the defaults: anything missing or malformed is the default. */
+export function conditionsOf(saved: unknown): IncentiveConditions {
+  const s = (saved && typeof saved === 'object' ? saved : {}) as Record<string, unknown>;
+  const count = (v: unknown, d: number) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : d);
+  const flag = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
+  const needs = (s.dataQualityNeeds && typeof s.dataQualityNeeds === 'object' ? s.dataQualityNeeds : {}) as Record<string, unknown>;
+  return {
+    minCollected: typeof s.minCollected === 'string' && /^\d+(\.\d{1,2})?$/.test(s.minCollected) ? s.minCollected : DEFAULT_CONDITIONS.minCollected,
+    minCrates: Math.max(1, count(s.minCrates, DEFAULT_CONDITIONS.minCrates)),
+    qualityShortAllowed: count(s.qualityShortAllowed, DEFAULT_CONDITIONS.qualityShortAllowed),
+    performanceSkipsAllowed: count(s.performanceSkipsAllowed, DEFAULT_CONDITIONS.performanceSkipsAllowed),
+    dataQualityNeeds: {
+      km: flag(needs.km, true),
+      deliveryPhotos: flag(needs.deliveryPhotos, true),
+      bills: flag(needs.bills, true),
+    },
+    completionOnException: flag(s.completionOnException, DEFAULT_CONDITIONS.completionOnException),
+  };
+}
+
 export interface IncentiveRules {
   rules: IncentiveRuleSetting[];
   targetKmPerLitre: string | null;
   /** 'HH:MM': on the road at or after [nightFrom], or before [nightUntil], is night duty. */
   nightFrom: string;
   nightUntil: string;
+  /** When each is earned; the defaults when not given. */
+  conditions?: IncentiveConditions;
 }
 
 /** A full tank to the full tank on this trip: what the vehicle ran on it. */
@@ -166,11 +217,15 @@ export function wasNight(f: Pick<TripFacts, 'startedAt' | 'endedAt' | 'overnight
 
 /** The base of each incentive, and why it is what it is (or nothing). */
 function baseOf(kind: IncentiveKind, f: TripFacts, r: IncentiveRules): { base: string; detail: string } {
+  const c = r.conditions ?? DEFAULT_CONDITIONS;
   const dayPay = (when: boolean, yes: string, no: string) =>
     f.dayPay === null ? { base: ZERO, detail: 'No fixed daily pay to work it out from' } : when ? { base: f.dayPay, detail: yes } : { base: ZERO, detail: no };
   switch (kind) {
     case 'collection':
-      return positive(f.collected) ? { base: f.collected, detail: `${rupees(f.collected)} collected` } : { base: ZERO, detail: 'Nothing collected' };
+      if (!positive(f.collected)) return { base: ZERO, detail: 'Nothing collected' };
+      return compareMoney(f.collected, c.minCollected) >= 0
+        ? { base: f.collected, detail: `${rupees(f.collected)} collected` }
+        : { base: ZERO, detail: `${rupees(f.collected)} collected — less than ${rupees(c.minCollected)}` };
     case 'backhaul':
       return positive(f.backhaulReceived) ? { base: f.backhaulReceived, detail: `${rupees(f.backhaulReceived)} backhaul rent received` } : { base: ZERO, detail: 'No backhaul paid' };
     case 'mileage': {
@@ -181,11 +236,14 @@ function baseOf(kind: IncentiveKind, f: TripFacts, r: IncentiveRules): { base: s
       return positive(saved.value) ? { base: saved.value, detail: `${run}: ${saved.litres} L saved, ${rupees(saved.value)}` } : { base: ZERO, detail: `${run}: no fuel saved` };
     }
     case 'crates':
-      return f.cratesBack > 0 ? { base: f.cratesValue, detail: `${f.cratesBack} crate(s) brought back, worth ${rupees(f.cratesValue)}` } : { base: ZERO, detail: 'No crates brought back' };
+      if (f.cratesBack === 0) return { base: ZERO, detail: 'No crates brought back' };
+      return f.cratesBack >= c.minCrates
+        ? { base: f.cratesValue, detail: `${f.cratesBack} crate(s) brought back, worth ${rupees(f.cratesValue)}` }
+        : { base: ZERO, detail: `${f.cratesBack} crate(s) brought back — fewer than ${c.minCrates}` };
     case 'quality':
       if (f.deliveries === 0) return { base: ZERO, detail: 'No deliveries' };
-      return f.shortDeliveries === 0
-        ? { base: f.deliveredValue, detail: `${rupees(f.deliveredValue)} delivered, none short` }
+      return f.shortDeliveries <= c.qualityShortAllowed
+        ? { base: f.deliveredValue, detail: f.shortDeliveries === 0 ? `${rupees(f.deliveredValue)} delivered, none short` : `${rupees(f.deliveredValue)} delivered, ${f.shortDeliveries} short (${c.qualityShortAllowed} allowed)` }
         : { base: ZERO, detail: `${f.shortDeliveries} delivery(ies) short` };
     case 'new_customer':
       return f.newCustomers > 0
@@ -193,23 +251,25 @@ function baseOf(kind: IncentiveKind, f: TripFacts, r: IncentiveRules): { base: s
         : { base: ZERO, detail: 'No new customer' };
     case 'performance':
       if (f.stops === 0) return { base: ZERO, detail: 'No stops' };
-      return f.skippedStops === 0
-        ? { base: f.deliveredValue, detail: `Every stop done, ${rupees(f.deliveredValue)} delivered` }
+      return f.skippedStops <= c.performanceSkipsAllowed
+        ? { base: f.deliveredValue, detail: f.skippedStops === 0 ? `Every stop done, ${rupees(f.deliveredValue)} delivered` : `${f.skippedStops} stop(s) not done (${c.performanceSkipsAllowed} allowed), ${rupees(f.deliveredValue)} delivered` }
         : { base: ZERO, detail: `${f.skippedStops} stop(s) not done` };
     case 'night_duty':
       return dayPay(wasNight(f, r.nightFrom, r.nightUntil), `On the road at night (${f.startedAt ?? '—'} to ${f.endedAt ?? '—'})`, 'No night duty');
     case 'data_quality': {
+      const needs = c.dataQualityNeeds;
       const gaps = [
-        !f.hasOpeningKm || !f.hasClosingKm ? 'KM not recorded' : null,
-        f.deliveriesWithoutPhoto > 0 ? `${f.deliveriesWithoutPhoto} delivery(ies) without a photo` : null,
-        f.expensesWithoutBill > 0 ? `${f.expensesWithoutBill} expense(s) without a bill` : null,
+        needs.km && (!f.hasOpeningKm || !f.hasClosingKm) ? 'KM not recorded' : null,
+        needs.deliveryPhotos && f.deliveriesWithoutPhoto > 0 ? `${f.deliveriesWithoutPhoto} delivery(ies) without a photo` : null,
+        needs.bills && f.expensesWithoutBill > 0 ? `${f.expensesWithoutBill} expense(s) without a bill` : null,
       ].filter((g): g is string => g !== null);
-      return dayPay(gaps.length === 0, 'KM, delivery photos and bills all recorded', gaps.join('; '));
+      const asked = [needs.km ? 'KM' : null, needs.deliveryPhotos ? 'delivery photos' : null, needs.bills ? 'bills' : null].filter(Boolean).join(', ');
+      return dayPay(gaps.length === 0, asked ? `${asked} all recorded` : 'Nothing required', gaps.join('; '));
     }
     case 'completion':
       return f.outcome === null
         ? dayPay(true, 'If the owner closes the trip as a pass', '')
-        : dayPay(f.outcome === 'pass', 'Closed as a pass', 'Closed with an exception');
+        : dayPay(f.outcome === 'pass' || c.completionOnException, f.outcome === 'pass' ? 'Closed as a pass' : 'Closed with an approved exception', 'Closed with an exception');
   }
 }
 

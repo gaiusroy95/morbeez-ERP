@@ -32,6 +32,8 @@ export interface CustomerRecord {
   creditHoldReason: string | null;
   /** The spot sales' walk-in buyer, who pays on the spot and never owes. */
   isWalkIn: boolean;
+  /** Asked not to be called by the AI voice agent: AI Calling places no call to them. */
+  doNotCall: boolean;
   /** Printed as a QR (MORBEEZ:C:<token>) for the shop; the driver scans it at the door (driver app D3). */
   qrToken: string;
   status: CustomerStatus;

@@ -141,20 +141,24 @@ export interface PricingBoard {
 }
 
 export interface CallItem {
-  kind: 'payment' | 'order' | 'quantity';
+  /** payment: money fallen due; order: their usual order not placed; quantity: an order far from usual; new_order: an order placed in the last day. */
+  kind: 'payment' | 'order' | 'quantity' | 'new_order';
   customerId: string;
   name: string;
   phone: string | null;
   place: string | null;
+  /** Asked not to be called by the AI agent. */
+  doNotCall: boolean;
   amount: string | null;
   dueDate: IsoDate | null;
   overdueDays: number | null;
   recommendationId: string | null;
+  orderId: string | null;
   about: string | null;
 }
 
 export interface CallList {
-  /** Automated calls: Twilio set up on the server and turned on by the business; else these are for the owner to make. */
+  /** AI calls: Sarvam Voice Agents set up on the server and turned on by the business; else these are for the owner to make. */
   voice: 'ready' | 'off' | 'not_set_up';
   date: IsoDate;
   calls: CallItem[];
@@ -181,7 +185,7 @@ export interface IntegrationSettings {
 export interface IntegrationsStatus {
   publicApiUrl: string | null;
   whatsapp: { receives: boolean; replies: boolean; webhookUrl: string | null; messagesLast7Days: number };
-  reader: { claude: boolean; model: string | null };
+  reader: { sarvam: boolean; model: string | null };
   calls: { ready: boolean; fromNumber: string | null; callsLast7Days: number };
   settings: IntegrationSettings;
 }
@@ -200,18 +204,34 @@ export interface InboundMessage {
   body: string;
   receivedAt: IsoDateTime;
   status: InboundStatus;
-  reader: 'claude' | 'rules' | null;
+  reader: 'sarvam' | 'rules' | null;
   extraction: { delivery?: string; lines?: { productId: string; quantity: number; said: string }[]; notUnderstood?: string[] } | null;
   recommendationId: string | null;
   note: string | null;
   repliedAt: IsoDateTime | null;
 }
 
-export type CallPurpose = 'payment_reminder' | 'order_reminder' | 'order_confirm';
-export type VoiceCallStatus = 'queued' | 'ringing' | 'in_progress' | 'completed' | 'busy' | 'no_answer' | 'failed' | 'canceled';
-export type CallOutcome = 'confirmed' | 'callback' | 'no_response';
+export type CallPurpose = 'payment_reminder' | 'order_reminder' | 'order_confirm' | 'quantity_confirm' | 'follow_up';
+export type VoiceCallStatus = 'queued' | 'completed' | 'no_answer' | 'busy' | 'failed';
+export type CallOutcome = 'confirmed' | 'change_requested' | 'will_pay' | 'already_paid' | 'call_later' | 'not_interested' | 'wrong_person' | 'no_decision';
 
-/** GET ai/calls/voice — an automated call placed, and what the customer pressed. */
+/** What Sarvam's voice agent was told (its input variables). */
+export interface CallBrief {
+  business_name: string;
+  customer_name: string;
+  call_purpose: CallPurpose;
+  customer_language: string;
+  amount_due: string;
+  due_since: string;
+  order_number: string;
+  delivery_date: string;
+  order_lines: string;
+  order_total: string;
+  usual_order: string;
+  topic: string;
+}
+
+/** GET ai/calls/voice — a call the AI agent made, and what came of it. */
 export interface VoiceCall {
   id: string;
   customerId: string;
@@ -219,12 +239,15 @@ export interface VoiceCall {
   purpose: CallPurpose;
   language: string;
   toPhone: string;
-  script: { business: string; amount?: string; lines?: { name: string; quantity: string; uom: string }[]; orderNumber?: string; deliveryDate?: string };
+  brief: CallBrief;
   orderId: string | null;
+  topic: string | null;
   status: VoiceCallStatus;
-  digits: string | null;
   outcome: CallOutcome | null;
-  answeredAt: IsoDateTime | null;
+  summary: string | null;
+  /** Everything the agent collected (its output variables): requested_changes, promised_payment_date, callback_time, … */
+  details: Record<string, unknown> | null;
+  transcript: { role: 'agent' | 'user'; text: string }[] | null;
   endedAt: IsoDateTime | null;
   durationSeconds: number | null;
   error: string | null;

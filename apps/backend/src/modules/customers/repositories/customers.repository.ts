@@ -22,6 +22,7 @@ interface CustomerRow {
   credit_hold: boolean;
   credit_hold_reason: string | null;
   is_walk_in: boolean;
+  do_not_call: boolean;
   qr_token: string;
   status: 'active' | 'archived';
   version: number;
@@ -52,6 +53,7 @@ function toRecord(row: CustomerRow): CustomerRecord {
     creditHold: row.credit_hold,
     creditHoldReason: row.credit_hold_reason,
     isWalkIn: row.is_walk_in,
+    doNotCall: row.do_not_call ?? false,
     qrToken: row.qr_token,
     status: row.status,
     version: row.version,
@@ -154,6 +156,7 @@ export class CustomersRepository {
       // A key that is present (even as null) is written; one left out is kept.
       place: string | null;
       address: string | null;
+      doNotCall: boolean;
     }>,
   ): Promise<CustomerRecord> {
     const result = await client.query<{ id: string }>(
@@ -163,6 +166,7 @@ export class CustomersRepository {
          preferred_language = COALESCE($5, preferred_language),
          place = CASE WHEN $6::boolean THEN $7 ELSE place END,
          address = CASE WHEN $8::boolean THEN $9 ELSE address END,
+         do_not_call = COALESCE($10, do_not_call),
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -177,6 +181,7 @@ export class CustomersRepository {
         fields.place ?? null,
         'address' in fields,
         fields.address ?? null,
+        fields.doNotCall ?? null,
       ],
     );
     if (result.rowCount === 0) {

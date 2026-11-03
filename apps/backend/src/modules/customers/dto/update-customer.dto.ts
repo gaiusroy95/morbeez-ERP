@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
 import { LANGUAGES } from '../../../common/languages';
 
@@ -49,4 +49,9 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsUUID()
   routeId?: string | null;
+
+  @ApiPropertyOptional({ description: 'Never called by the AI voice agent' })
+  @IsOptional()
+  @IsBoolean()
+  doNotCall?: boolean;
 }

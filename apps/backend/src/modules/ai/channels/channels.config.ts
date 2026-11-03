@@ -18,7 +18,7 @@ export class ChannelsConfig {
     return trimmed(this.config.get(key, { infer: true }) as string | undefined);
   }
 
-  /** Where Meta and Twilio reach this API: https://api.example.com, no trailing slash. */
+  /** Where Meta and Sarvam reach this API: https://api.example.com, no trailing slash. */
   get publicApiUrl(): string | null {
     return this.get('PUBLIC_API_URL')?.replace(/\/+$/, '') ?? null;
   }
@@ -44,26 +44,32 @@ export class ChannelsConfig {
     return this.whatsappReceives && !!this.whatsapp.accessToken;
   }
 
-  get anthropic() {
+  /** Sarvam's language model: reads the order out of a WhatsApp message. */
+  get sarvam() {
     return {
-      apiKey: this.get('ANTHROPIC_API_KEY'),
-      model: this.get('ANTHROPIC_MODEL') ?? 'claude-opus-5-5',
-      baseUrl: this.get('ANTHROPIC_BASE_URL'),
+      apiKey: this.get('SARVAM_API_KEY'),
+      model: this.get('SARVAM_MODEL') ?? 'sarvam-105b',
+      apiBase: this.get('SARVAM_API_BASE') ?? 'https://api.sarvam.ai',
     };
   }
 
-  get twilio() {
+  /** Sarvam Voice Agents: the agent that holds the conversation on a call. */
+  get sarvamVoice() {
     return {
-      accountSid: this.get('TWILIO_ACCOUNT_SID'),
-      authToken: this.get('TWILIO_AUTH_TOKEN'),
-      fromNumber: this.get('TWILIO_FROM_NUMBER'),
-      apiBase: this.get('TWILIO_API_BASE') ?? 'https://api.twilio.com',
+      apiKey: this.get('SARVAM_VOICE_API_KEY'),
+      orgId: this.get('SARVAM_ORG_ID'),
+      workspaceId: this.get('SARVAM_WORKSPACE_ID'),
+      appId: this.get('SARVAM_VOICE_APP_ID'),
+      appVersion: Number(this.get('SARVAM_VOICE_APP_VERSION') ?? '1'),
+      connectionId: this.get('SARVAM_VOICE_CONNECTION_ID'),
+      fromNumber: this.get('SARVAM_VOICE_FROM_NUMBER'),
+      apiBase: this.get('SARVAM_VOICE_API_BASE') ?? 'https://apps.sarvam.ai',
     };
   }
 
-  /** Calls can be placed and Twilio can reach back for what to say. */
+  /** Calls can be placed, and Sarvam can report back what came of them. */
   get callsReady(): boolean {
-    const t = this.twilio;
-    return !!(t.accountSid && t.authToken && t.fromNumber && this.publicApiUrl);
+    const v = this.sarvamVoice;
+    return !!(v.apiKey && v.orgId && v.workspaceId && v.appId && v.connectionId && v.fromNumber && this.publicApiUrl);
   }
 }

@@ -259,6 +259,7 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
     place: customer.place ?? '',
     address: customer.address ?? '',
     routeId: customer.routeId ?? '',
+    doNotCall: customer.doNotCall ?? false,
   });
   const [problem, setProblem] = useState<string | null>(null);
   const [addingRoute, setAddingRoute] = useState<string | null>(null);
@@ -287,6 +288,7 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
       place: optionalText(form.place) ?? null,
       address: optionalText(form.address) ?? null,
       routeId: form.routeId || null,
+      doNotCall: form.doNotCall,
     });
   };
 
@@ -306,6 +308,10 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
       <ContactFields phone={form.phone} email={form.email} notes={form.notes} onChange={set} />
       <PlaceFields place={form.place} address={form.address} routeId={form.routeId} onChange={set} onAddRoute={setAddingRoute} />
       <LanguageField value={form.language} onChange={(language) => set({ language })} />
+      <label className="check-row" style={{ gridColumn: '1 / -1' }}>
+        <input type="checkbox" checked={form.doNotCall} onChange={(e) => set({ doNotCall: e.target.checked })} />
+        <span>{t('Do not call — the AI agent never calls this customer')}</span>
+      </label>
       </FormDialog>
       {addingRoute !== null && (
         <QuickAddRoute
@@ -528,7 +534,8 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
               ['Phone', c.contact.phone ?? '—'],
               ['Email', c.contact.email ?? '—'],
               ['Language', languageName(c.preferredLanguage)],
-              ...(money ? ([['On-time payments', money.onTimePct === null ? '—' : `${money.onTimePct}%`]] as [string, string][]) : []),
+              ...(c.doNotCall ? ([['AI calls', t('Do not call')]] as [string, string][]) : []),
+              ...(money ?([['On-time payments', money.onTimePct === null ? '—' : `${money.onTimePct}%`]] as [string, string][]) : []),
             ]}
           />
           {c.contact.notes && <p className="muted">{c.contact.notes}</p>}

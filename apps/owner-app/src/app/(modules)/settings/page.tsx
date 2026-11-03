@@ -40,7 +40,7 @@ const ROWS: Row[] = [
   { label: 'Vehicle costing', description: 'Document reminders, KM costs', icon: 'steering', href: '/vehicles#settings', permission: 'vehicles:read' },
   { label: 'Leave policy', description: 'Pay rules, weekly off', icon: 'calendar', href: '/workforce#rules', permission: 'payroll:read' },
   { label: 'Notifications', description: 'Alerts and reminders', icon: 'bell', view: 'notifications' },
-  { label: 'Integrations', description: 'WhatsApp orders, AI reading, automated calls', icon: 'phone', view: 'integrations', permission: 'ai:read' },
+  { label: 'Integrations', description: 'WhatsApp orders, AI reading, AI calls', icon: 'phone', view: 'integrations', permission: 'ai:read' },
   { label: 'Data & backup', description: 'Download your data', icon: 'download', href: '/reports' },
   { label: 'App preferences', description: 'Language', icon: 'globe', href: '/account' },
 ];

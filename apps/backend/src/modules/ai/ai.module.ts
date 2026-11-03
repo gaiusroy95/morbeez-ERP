@@ -5,7 +5,7 @@ import { AiRepository } from './repositories/ai.repository';
 import { AiDataRepository } from './repositories/ai-data.repository';
 import { ChannelsConfig } from './channels/channels.config';
 import { ChannelsRepository } from './channels/channels.repository';
-import { ClaudeOrderReader } from './channels/claude-order-reader';
+import { SarvamOrderReader } from './channels/sarvam-order-reader';
 import { WhatsAppService } from './channels/whatsapp.service';
 import { VoiceService } from './channels/voice.service';
 import { IntegrationsService } from './channels/integrations.service';
@@ -22,6 +22,6 @@ import { WebhooksController } from './channels/webhooks.controller';
 // placing the order or taking the payment stays the owner's.
 @Module({
   controllers: [AiController, ChannelsController, WebhooksController],
-  providers: [AiService, AiRepository, AiDataRepository, ChannelsConfig, ChannelsRepository, ClaudeOrderReader, WhatsAppService, VoiceService, IntegrationsService],
+  providers: [AiService, AiRepository, AiDataRepository, ChannelsConfig, ChannelsRepository, SarvamOrderReader, WhatsAppService, VoiceService, IntegrationsService],
 })
 export class AiModule {}

@@ -125,7 +125,7 @@ what each may do.
 Then close public sign-up: Render → `morbeez-api` → Environment →
 `SIGNUP_ENABLED` = `false`.
 
-## 8a. WhatsApp orders, Claude, automated calls (optional)
+## 8a. WhatsApp orders, Sarvam AI, AI calls (optional)
 
 Each is optional; Settings → Integrations in the owner app shows what's on.
 Where each key comes from is in `apps/backend/.env.example`, section 4.
@@ -134,17 +134,25 @@ Where each key comes from is in `apps/backend/.env.example`, section 4.
    address from 4.4 (no trailing slash), then any of:
    - WhatsApp: `WHATSAPP_VERIFY_TOKEN` (make one up), `WHATSAPP_APP_SECRET`,
      `WHATSAPP_ACCESS_TOKEN` (for replies);
-   - Claude: `ANTHROPIC_API_KEY`;
-   - calls: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`.
+   - reading orders: `SARVAM_API_KEY`;
+   - AI calls: `SARVAM_VOICE_API_KEY`, `SARVAM_ORG_ID`, `SARVAM_WORKSPACE_ID`,
+     `SARVAM_VOICE_APP_ID`, `SARVAM_VOICE_APP_VERSION`,
+     `SARVAM_VOICE_CONNECTION_ID`, `SARVAM_VOICE_FROM_NUMBER` — the agent
+     built first in Sarvam's dashboard to `docs/integrations/sarvam-voice-agent.md`.
    **Save** (it redeploys).
 2. Meta's app → WhatsApp → Configuration → Webhook: Callback URL =
    `<API address>/webhooks/whatsapp`, Verify token = `WHATSAPP_VERIFY_TOKEN`,
    **Verify and save**; subscribe to **messages**.
 3. Owner app → Settings → Integrations: the number's **Phone number ID**
-   (Meta → WhatsApp → API Setup), replies on or off, automated calls on or off.
+   (Meta → WhatsApp → API Setup), replies on or off, AI calls on or off.
 4. Check: send "Tomato 2 kg" to the business's WhatsApp number from a phone
    that's on a customer — it appears on AI Orders within seconds. A free
    Render instance asleep takes about a minute to wake; Meta retries.
+5. Check the calls: put your own phone on a test customer, then AI Calling →
+   Follow-up call… → that customer, a topic → Call with AI. When you hang up,
+   the call shows its outcome, summary and the conversation (Sarvam reports
+   it to `<API address>/webhooks/sarvam/calls/…` — the free instance must be
+   awake).
 
 ## 8. The .apk
 

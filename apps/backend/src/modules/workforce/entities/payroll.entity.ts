@@ -2,6 +2,8 @@
 // (Constitution III.2); quantities (hours, units, days) too. Mirrored in
 // packages/shared-types/src/workforce.
 
+import type { IncentiveConditions } from '../trip-incentives';
+
 export type EmploymentType = 'permanent' | 'casual' | 'contract';
 export type SkillCategory = 'unskilled' | 'semi_skilled' | 'skilled' | 'highly_skilled';
 export type PayBasis = 'monthly' | 'daily' | 'hourly' | 'piece';
@@ -195,4 +197,6 @@ export interface DriverIncentiveSettings {
   nightFrom: string;
   nightUntil: string;
   rules: { kind: string; label: string; base: string; enabled: boolean; percent: string; suggestedPercent: string }[];
+  /** When each is earned. */
+  conditions: IncentiveConditions;
 }

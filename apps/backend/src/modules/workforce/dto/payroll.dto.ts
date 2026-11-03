@@ -178,6 +178,22 @@ export class DriverIncentiveRuleDto {
   @ApiProperty({ description: 'Percent of its base, up to 3 decimals' }) @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(100) percent!: number;
 }
 
+export class DataQualityNeedsDto {
+  @ApiProperty() @IsBoolean() km!: boolean;
+  @ApiProperty() @IsBoolean() deliveryPhotos!: boolean;
+  @ApiProperty() @IsBoolean() bills!: boolean;
+}
+
+/** When each incentive is earned — the owner's to change. */
+export class IncentiveConditionsDto {
+  @ApiProperty({ description: 'Collection: at least this much collected on the trip' }) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000_000) minCollected!: number;
+  @ApiProperty({ description: 'Crates: at least this many brought back' }) @IsInt() @Min(1) @Max(10_000) minCrates!: number;
+  @ApiProperty({ description: 'Quality: deliveries that may be short' }) @IsInt() @Min(0) @Max(100) qualityShortAllowed!: number;
+  @ApiProperty({ description: 'Performance: stops that may be left undone' }) @IsInt() @Min(0) @Max(100) performanceSkipsAllowed!: number;
+  @ApiProperty({ type: DataQualityNeedsDto }) @ValidateNested() @Type(() => DataQualityNeedsDto) dataQualityNeeds!: DataQualityNeedsDto;
+  @ApiProperty({ description: 'Trip completion: also when closed as an approved exception' }) @IsBoolean() completionOnException!: boolean;
+}
+
 /** The owner's incentive rules for drivers (driver app D7): all ten at once. */
 export class DriverIncentivesDto {
   @ApiProperty({ description: '0 when saving for the first time' }) @IsInt() @Min(0) version!: number;
@@ -195,4 +211,9 @@ export class DriverIncentivesDto {
   targetKmPerLitre?: number | null;
   @ApiProperty({ example: '21:00' }) @Matches(CLOCK, { message: 'nightFrom must be HH:MM' }) nightFrom!: string;
   @ApiProperty({ example: '05:00' }) @Matches(CLOCK, { message: 'nightUntil must be HH:MM' }) nightUntil!: string;
+  @ApiPropertyOptional({ type: IncentiveConditionsDto, description: 'Left out: kept as they are' })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => IncentiveConditionsDto)
+  conditions?: IncentiveConditionsDto;
 }

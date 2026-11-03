@@ -17,10 +17,10 @@ function Ready({ on, onLabel, offLabel }: { on: boolean; onLabel: string; offLab
 
 /**
  * Settings → Integrations: the outside services this server has keys for —
- * WhatsApp for customers' orders, Claude to read them, Twilio for automated
- * calls (set by whoever runs the server: apps/backend/.env.example) — and
- * the business's own choices: which WhatsApp number is its own, whether
- * customers get a reply, whether automated calls may be placed.
+ * WhatsApp for customers' orders, Sarvam AI to read them, Sarvam's voice
+ * agent for AI calls (set by whoever runs the server: apps/backend/.env.example)
+ * — and the business's own choices: which WhatsApp number is its own, whether
+ * customers get a reply, whether AI calls may be placed.
  */
 export function Integrations() {
   const t = useT();
@@ -54,20 +54,20 @@ export function Integrations() {
           </li>
           <li>
             <strong>{t('Reading orders')}</strong>
-            <Ready on={s.reader.claude} onLabel="Claude" offLabel="Simple rules" />
+            <Ready on={s.reader.sarvam} onLabel="Sarvam AI" offLabel="Simple rules" />
             <p className="muted">
-              {s.reader.claude
-                ? t('Claude ({model}) reads orders in Malayalam, Kannada, Tamil or English, any script. You check each one before it is placed.', { model: s.reader.model ?? '' })
-                : t('Without ANTHROPIC_API_KEY, simple rules read messages like “Tomato 20 kg, onion 15 kg” — nothing in another script.')}
+              {s.reader.sarvam
+                ? t('Sarvam AI ({model}) reads orders in Malayalam, Kannada, Tamil or English, any script, with local product names. You check each one before it is placed.', { model: s.reader.model ?? '' })
+                : t('Without SARVAM_API_KEY, simple rules read messages like “Tomato 20 kg, onion 15 kg” — nothing in another script.')}
             </p>
           </li>
           <li>
-            <strong>{t('Automated calls')}</strong>
+            <strong>{t('AI calls')}</strong>
             <Ready on={s.calls.ready} onLabel="Can call" offLabel="Not set up" />
             <p className="muted">
               {s.calls.ready
                 ? t('Calls come from {number}. {n} placed in the last 7 days.', { number: s.calls.fromNumber ?? '', n: s.calls.callsLast7Days })
-                : t('Needs a Twilio account (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER) and PUBLIC_API_URL on the server (.env.example, sections 4a and 4d).')}
+                : t('Needs a Sarvam Voice Agents workspace with the agent set up (SARVAM_VOICE_… settings) and PUBLIC_API_URL on the server (.env.example, sections 4a and 4d).')}
             </p>
           </li>
         </ul>
@@ -117,7 +117,7 @@ function ChoicesForm({ s }: { s: IntegrationsStatus }) {
         </label>
         <label className="check-row" style={{ gridColumn: '1 / -1' }}>
           <input type="checkbox" checked={calls} onChange={(e) => setCalls(e.target.checked)} />
-          <span>{t('Allow automated calls to customers from AI Calling')}</span>
+          <span>{t('Allow AI calls to customers from AI Calling')}</span>
         </label>
         {(problem || save.error) && (
           <p className="form-error" role="alert" style={{ gridColumn: '1 / -1' }}>

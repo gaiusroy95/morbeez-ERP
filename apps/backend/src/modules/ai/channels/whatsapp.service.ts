@@ -7,7 +7,7 @@ import { AiDataRepository } from '../repositories/ai-data.repository';
 import { DECIDE_PERMISSION } from '../entities/ai.entity';
 import { ChannelsConfig } from './channels.config';
 import { ChannelsRepository, InboundMessage } from './channels.repository';
-import { ClaudeOrderReader, ReaderFailed } from './claude-order-reader';
+import { SarvamOrderReader, ReaderFailed } from './sarvam-order-reader';
 import { OrderReading, readOrderByRules } from './order-reader';
 import { messagesOf, orderDraftFromMessage, orderInWords, orderReceivedReply, textMessage } from './whatsapp';
 import { validWhatsAppSignature } from './signatures';
@@ -24,7 +24,7 @@ const languageOf = (v: string): Language => ((LANGUAGES as readonly string[]).in
  * Orders customers send on WhatsApp (AI Order Intelligence; requirements
  * Part 14). Meta delivers each message to the webhook; it's stored at once
  * (once, however often Meta delivers it), then read: whose number it is,
- * what they ordered — by Claude when a key is set, else by simple rules —
+ * what they ordered — by Sarvam AI when a key is set, else by simple rules —
  * checked against the products the business sells, and made into a
  * suggestion on AI Orders. The owner checks it against the message and
  * places it; nothing is ordered by the AI (DR.1, DR.3). If the business
@@ -40,7 +40,7 @@ export class WhatsAppService {
     private readonly repo: ChannelsRepository,
     private readonly ai: AiRepository,
     private readonly data: AiDataRepository,
-    private readonly reader: ClaudeOrderReader,
+    private readonly reader: SarvamOrderReader,
   ) {}
 
   /** Meta's subscription check: echo the challenge if the token is ours. */
@@ -124,15 +124,15 @@ export class WhatsAppService {
     }));
     const readable = products.map((p) => ({ id: p.id, name: p.name, uom: p.uom }));
     let reading: OrderReading;
-    let reader: 'claude' | 'rules' = 'rules';
+    let reader: 'sarvam' | 'rules' = 'rules';
     let note: string | null = null;
     if (this.reader.available) {
       try {
         reading = await this.reader.read(m.body, business.name, readable);
-        reader = 'claude';
+        reader = 'sarvam';
       } catch (err) {
         reading = readOrderByRules(m.body, readable);
-        note = `Claude couldn't read it (${err instanceof ReaderFailed ? err.message : 'an error'}); read by simple rules instead.`;
+        note = `Sarvam AI couldn't read it (${err instanceof ReaderFailed ? err.message : 'an error'}); read by simple rules instead.`;
       }
     } else {
       reading = readOrderByRules(m.body, readable);
@@ -178,7 +178,7 @@ export class WhatsAppService {
 
     const settings = await this.db.withTenant(tenantId, (client) => this.repo.settings(client));
     if (settings.whatsappReply && settings.whatsappPhoneNumberId && this.config.whatsappReplies) {
-      const text = orderReceivedReply(languageOf(customer.language), business.name, orderInWords(reading, names));
+      const text = orderReceivedReply(languageOf(customer.language), orderInWords(reading, names));
       if (await this.send(settings.whatsappPhoneNumberId, m.fromPhone, text)) {
         await this.db.withTenant(tenantId, (client) => this.repo.markReplied(client, id));
       }

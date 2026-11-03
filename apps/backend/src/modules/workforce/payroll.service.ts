@@ -9,7 +9,7 @@ import { assertRealDate } from '../../common/period';
 import { fromCents, moneyFromNumber, sumMoney, toCents } from '../../common/money';
 import { PayrollRepository } from './repositories/payroll.repository';
 import { computeEarnings, inForceOn, WorkDay } from './payroll-math';
-import { dayPayOf, IncentiveKind, IncentiveLine, IncentiveRules, INCENTIVE_BASE, INCENTIVE_KINDS, INCENTIVE_LABEL, SUGGESTED_PERCENT } from './trip-incentives';
+import { conditionsOf, dayPayOf, IncentiveKind, IncentiveLine, IncentiveRules, INCENTIVE_BASE, INCENTIVE_KINDS, INCENTIVE_LABEL, SUGGESTED_PERCENT } from './trip-incentives';
 import {
   AdvanceRecord,
   AssignmentRecord,
@@ -760,6 +760,7 @@ export class PayrollService {
             suggestedPercent: SUGGESTED_PERCENT[kind],
           };
         }),
+        conditions: conditionsOf(saved.conditions),
       };
     });
   }
@@ -777,6 +778,8 @@ export class PayrollService {
           targetKmPerLitre: dto.targetKmPerLitre === undefined || dto.targetKmPerLitre === null ? null : dto.targetKmPerLitre.toFixed(2),
           nightFrom: dto.nightFrom,
           nightUntil: dto.nightUntil,
+          // Left out, the conditions stay as they were.
+          conditions: dto.conditions ? { ...dto.conditions, minCollected: dto.conditions.minCollected.toFixed(2) } : before.conditions,
           rules: dto.rules.map((r) => ({ kind: r.kind, enabled: r.enabled, percent: r.percent.toFixed(3) })),
         });
         if (!ok) throw new ConflictException('The incentive rules were changed by someone else — reload and try again');
@@ -801,6 +804,7 @@ export class PayrollService {
       targetKmPerLitre: saved.targetKmPerLitre,
       nightFrom: saved.nightFrom,
       nightUntil: saved.nightUntil,
+      conditions: conditionsOf(saved.conditions),
     };
   }
 

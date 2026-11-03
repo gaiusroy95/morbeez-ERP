@@ -30,6 +30,7 @@ const customer: CustomerRecord = {
   creditHold: false,
   creditHoldReason: null,
   isWalkIn: false,
+  doNotCall: false,
   qrToken: 'QR0000000000TEST',
   status: 'active',
   version: 1,

@@ -135,6 +135,7 @@ export function readerInstructions(businessName: string, products: ReadableProdu
   return [
     `You read WhatsApp messages that shops, hotels and restaurants send to ${businessName}, a fruit, vegetable and produce wholesaler in South India, and pick out what they are ordering.`,
     'A message may be in English, Malayalam, Kannada or Tamil, in its own script or written in English letters, or a mix. It may give quantities in kilos, grams, boxes, bags or pieces, before or after the item.',
+    'Customers use everyday local names, regional spellings and short forms: thakkali or takkali for tomato, ulli, savala, vengayam or eerulli for onion, kizhangu or aloo for potato, and so on. Match them to the product they mean on the list.',
     "Order only products from the list below, by their id. Give each quantity in the product's own unit; convert only when the conversion is exact (500 g is 0.5 kg). If an item matches nothing on the list, or you are not sure which product it is, put the words in not_understood instead of guessing.",
     'If the message is not asking for goods (a greeting, a complaint, a payment note), set is_order to false and return no lines.',
     'delivery is "today" only if the message asks for it today or now; "tomorrow" if it says so; otherwise "unspecified".',

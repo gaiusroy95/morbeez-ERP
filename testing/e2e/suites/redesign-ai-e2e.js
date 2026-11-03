@@ -150,7 +150,7 @@ const cents = (v) => Math.round(Number(v) * 100);
     const askFor = calls.calls.find((c) => c.kind === 'order' && c.customerId === green.id);
     const confirm = calls.calls.find((c) => c.kind === 'quantity' && c.customerId === royal.id);
     check(
-      'orders to ask for and quantities to confirm, each with the customer’s phone — automated calls not set up on this server',
+      'orders to ask for and quantities to confirm, each with the customer’s phone — AI calls not set up on this server',
       calls.voice === 'not_set_up' && askFor?.phone && askFor.recommendationId === expected.id && confirm?.recommendationId === toCheck.id,
       JSON.stringify({ askFor, confirm: confirm?.about }),
     );
@@ -243,10 +243,10 @@ const cents = (v) => Math.round(Number(v) * 100);
       if (out) await page.screenshot({ path: path.join(out, 'p8-ai-pricing.png'), fullPage: true });
 
       await page.goto(`${BASE}/ai/calling`);
-      await page.getByRole('heading', { name: 'Automated calls aren’t set up' }).waitFor();
+      await page.getByRole('heading', { name: 'AI calls aren’t set up' }).waitFor();
       await page.waitForFunction(() => /Quantities to confirm \(\d+\)/.test(document.querySelector('main')?.textContent ?? ''));
       const callText = (await page.locator('main').textContent()).replace(/\s+/g, ' ');
-      check('AI Calling: automated calls not set up; today’s calls to make meanwhile', /Payments to chase \(\d+\)/.test(callText) && /Orders to ask for \(0\)/.test(callText), callText.slice(0, 300));
+      check('AI Calling: AI calls not set up; today’s calls to make meanwhile', /Payments to chase \(\d+\)/.test(callText) && /Orders to ask for \(0\)/.test(callText) && /New orders to confirm \(\d+\)/.test(callText) && !/Call with AI/.test(callText), callText.slice(0, 300));
       if (out) await page.screenshot({ path: path.join(out, 'p8-ai-calling.png'), fullPage: true });
 
       const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();

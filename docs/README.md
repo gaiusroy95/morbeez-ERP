@@ -15,3 +15,5 @@ Artifacts, linked below — this repo does not duplicate them.
   (Constitution, Article IX.2)
 - `runbooks/` — operational runbooks (incident response, backup/restore,
   deploy rollback — Constitution VII.8)
+- `integrations/` — how an outside service is set up for the code that calls
+  it (the Sarvam voice agent)

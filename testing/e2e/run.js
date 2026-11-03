@@ -75,8 +75,8 @@ const CHAINS = {
     'field-hardening-e2e.js',
     'driver-requests-fastag-e2e.js',
   ],
-  // WhatsApp orders, Claude reading them, automated calls — against local
-  // stand-ins for Meta, Anthropic and Twilio (CHAIN_ENV); makes its own data.
+  // WhatsApp orders, Sarvam AI reading them, AI calls by Sarvam's voice agent —
+  // against local stand-ins for Meta and Sarvam (CHAIN_ENV); makes its own data.
   integrations: ['integrations-e2e.js'],
 };
 
@@ -91,12 +91,16 @@ const CHAIN_ENV = {
     WHATSAPP_APP_SECRET: 'e2e-app-secret-0123',
     WHATSAPP_ACCESS_TOKEN: 'e2e-access-token',
     WHATSAPP_API_BASE: `${STANDIN}/graph`,
-    ANTHROPIC_API_KEY: 'e2e-anthropic-key',
-    ANTHROPIC_BASE_URL: `${STANDIN}/anthropic`,
-    TWILIO_ACCOUNT_SID: `AC${'0'.repeat(32)}`,
-    TWILIO_AUTH_TOKEN: 'e2e-twilio-token',
-    TWILIO_FROM_NUMBER: '+10000000000',
-    TWILIO_API_BASE: `${STANDIN}/twilio`,
+    SARVAM_API_KEY: 'e2e-sarvam-key',
+    SARVAM_API_BASE: `${STANDIN}/sarvam`,
+    SARVAM_VOICE_API_KEY: 'e2e-sarvam-voice-key',
+    SARVAM_ORG_ID: 'e2e-org',
+    SARVAM_WORKSPACE_ID: 'e2e-workspace',
+    SARVAM_VOICE_APP_ID: 'e2e-agent',
+    SARVAM_VOICE_APP_VERSION: '3',
+    SARVAM_VOICE_CONNECTION_ID: 'e2e-connection',
+    SARVAM_VOICE_FROM_NUMBER: '+919800000090',
+    SARVAM_VOICE_API_BASE: `${STANDIN}/sarvam-voice`,
     E2E_STANDIN_URL: STANDIN,
   },
 };

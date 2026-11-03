@@ -600,9 +600,16 @@ export class PayrollRepository {
   // ---- Driver incentives (driver app D7) ----
 
   /** The owner's incentive rules; version 0 while never saved (every incentive off). */
-  async driverIncentiveRules(client: PoolClient): Promise<{ version: number; targetKmPerLitre: string | null; nightFrom: string; nightUntil: string; rules: { kind: string; enabled: boolean; percent: string }[] }> {
-    const s = await client.query<{ version: number; target: string | null; night_from: string; night_until: string }>(
-      `SELECT version, target_km_per_litre::text AS target, to_char(night_from, 'HH24:MI') AS night_from, to_char(night_until, 'HH24:MI') AS night_until
+  async driverIncentiveRules(client: PoolClient): Promise<{
+    version: number;
+    targetKmPerLitre: string | null;
+    nightFrom: string;
+    nightUntil: string;
+    conditions: unknown;
+    rules: { kind: string; enabled: boolean; percent: string }[];
+  }> {
+    const s = await client.query<{ version: number; target: string | null; night_from: string; night_until: string; conditions: unknown }>(
+      `SELECT version, target_km_per_litre::text AS target, to_char(night_from, 'HH24:MI') AS night_from, to_char(night_until, 'HH24:MI') AS night_until, conditions
        FROM workforce.driver_incentive_settings WHERE tenant_id = current_tenant_id()`,
     );
     const rules = await client.query<{ kind: string; enabled: boolean; percent: string }>(
@@ -614,6 +621,7 @@ export class PayrollRepository {
       targetKmPerLitre: row?.target ?? null,
       nightFrom: row?.night_from ?? '21:00',
       nightUntil: row?.night_until ?? '05:00',
+      conditions: row?.conditions ?? {},
       rules: rules.rows,
     };
   }
@@ -624,20 +632,20 @@ export class PayrollRepository {
     tenantId: string,
     userId: string,
     version: number,
-    v: { targetKmPerLitre: string | null; nightFrom: string; nightUntil: string; rules: { kind: string; enabled: boolean; percent: string }[] },
+    v: { targetKmPerLitre: string | null; nightFrom: string; nightUntil: string; conditions: unknown; rules: { kind: string; enabled: boolean; percent: string }[] },
   ): Promise<boolean> {
     const saved =
       version === 0
         ? await client.query(
-            `INSERT INTO workforce.driver_incentive_settings (tenant_id, target_km_per_litre, night_from, night_until, updated_by)
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id) DO NOTHING`,
-            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, userId],
+            `INSERT INTO workforce.driver_incentive_settings (tenant_id, target_km_per_litre, night_from, night_until, conditions, updated_by)
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (tenant_id) DO NOTHING`,
+            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, JSON.stringify(v.conditions), userId],
           )
         : await client.query(
             `UPDATE workforce.driver_incentive_settings
-             SET target_km_per_litre = $2, night_from = $3, night_until = $4, updated_by = $5, updated_at = now(), version = version + 1
-             WHERE tenant_id = $1 AND version = $6`,
-            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, userId, version],
+             SET target_km_per_litre = $2, night_from = $3, night_until = $4, conditions = $5, updated_by = $6, updated_at = now(), version = version + 1
+             WHERE tenant_id = $1 AND version = $7`,
+            [tenantId, v.targetKmPerLitre, v.nightFrom, v.nightUntil, JSON.stringify(v.conditions), userId, version],
           );
     if ((saved.rowCount ?? 0) !== 1) return false;
     for (const r of v.rules) {

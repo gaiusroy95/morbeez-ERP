@@ -2710,3 +2710,46 @@ dl.request-facts dd {
 .fastag-balance[data-low='true'] strong {
   color: var(--bad);
 }
+
+/* An AI call's result on AI Calling. */
+.call-summary {
+  margin: 6px 0 0;
+  color: var(--ink);
+}
+.call-details {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+.call-details div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.call-details dt {
+  color: var(--ink-muted);
+}
+.call-details dd {
+  margin: 0;
+}
+.call-transcript {
+  margin-top: 6px;
+  font-size: 14px;
+}
+.call-transcript summary {
+  cursor: pointer;
+  color: var(--primary);
+}
+.call-transcript ol {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.call-transcript li[data-role='user'] {
+  color: var(--ink);
+}
+.call-transcript li[data-role='agent'] {
+  color: var(--ink-muted);
+}

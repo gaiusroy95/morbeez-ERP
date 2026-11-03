@@ -31,6 +31,8 @@ export interface CustomerRecord {
   creditHoldReason: string | null;
   /** The spot sales' walk-in buyer, who pays on the spot and never owes. */
   isWalkIn: boolean;
+  /** Asked not to be called by the AI voice agent. */
+  doNotCall?: boolean;
   /** Printed as a QR (MORBEEZ:C:<token>) for the shop; the driver scans it at the door. */
   qrToken: string;
   /** Language for their statements and messages. Tax invoices stay in English. */
@@ -117,6 +119,8 @@ export interface UpdateCustomerBody {
   place?: string | null;
   address?: string | null;
   routeId?: string | null;
+  /** Never called by the AI voice agent. */
+  doNotCall?: boolean;
 }
 
 export interface UpdateCreditTermsBody {

@@ -102,7 +102,7 @@ export const envSchema = z
     // channel is off and Settings → Integrations says so). Where each comes
     // from: apps/backend/.env.example. ----
 
-    // This API's own public address, for the webhooks Meta and Twilio call
+    // This API's own public address, for the webhooks Meta and Sarvam call
     // (https://api.example.com). Calls need it; WhatsApp's is pasted into Meta.
     PUBLIC_API_URL: z.string().url().optional(),
 
@@ -113,16 +113,21 @@ export const envSchema = z
     WHATSAPP_API_VERSION: z.string().regex(/^v\d+\.\d+$/).optional(),
     WHATSAPP_API_BASE: z.string().url().optional(), // tests only
 
-    // Claude reads the order out of a message; unset, simple rules do.
-    ANTHROPIC_API_KEY: z.string().optional(),
-    ANTHROPIC_MODEL: z.string().optional(),
-    ANTHROPIC_BASE_URL: z.string().url().optional(), // tests only
+    // Sarvam AI reads the order out of a message; unset, simple rules do.
+    SARVAM_API_KEY: z.string().optional(),
+    SARVAM_MODEL: z.string().optional(),
+    SARVAM_API_BASE: z.string().url().optional(), // tests only
 
-    // Twilio: automated calls to customers — payment reminders, order asks.
-    TWILIO_ACCOUNT_SID: z.string().regex(/^AC[0-9a-zA-Z]{32}$/).optional(),
-    TWILIO_AUTH_TOKEN: z.string().optional(),
-    TWILIO_FROM_NUMBER: z.string().regex(/^\+\d{8,15}$/, 'must be in +E.164 form, e.g. +918000000000').optional(),
-    TWILIO_API_BASE: z.string().url().optional(), // tests only
+    // Sarvam Voice Agents: the AI agent that talks to customers on a call —
+    // payment reminders, orders to ask for or confirm, follow-ups.
+    SARVAM_VOICE_API_KEY: z.string().optional(),
+    SARVAM_ORG_ID: z.string().optional(),
+    SARVAM_WORKSPACE_ID: z.string().optional(),
+    SARVAM_VOICE_APP_ID: z.string().optional(),
+    SARVAM_VOICE_APP_VERSION: z.string().regex(/^\d+$/, 'the agent version number').optional(),
+    SARVAM_VOICE_CONNECTION_ID: z.string().optional(),
+    SARVAM_VOICE_FROM_NUMBER: z.string().regex(/^\+\d{8,15}$/, 'must be in +E.164 form, e.g. +918000000000').optional(),
+    SARVAM_VOICE_API_BASE: z.string().url().optional(), // tests only
   })
   // Order matters: check the raw (pre-default) value first, so production's
   // requirement can't be satisfied by the default that's about to be

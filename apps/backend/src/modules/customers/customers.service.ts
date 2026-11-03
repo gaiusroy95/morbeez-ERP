@@ -197,6 +197,7 @@ export class CustomersService {
         preferredLanguage: dto.preferredLanguage,
         ...(dto.place !== undefined && { place: dto.place?.trim() || null }),
         ...(dto.address !== undefined && { address: dto.address?.trim() || null }),
+        ...(dto.doNotCall !== undefined && { doNotCall: dto.doNotCall }),
       });
       if (dto.routeId !== undefined && dto.routeId !== before.routeId) {
         await this.routes.placeWithClient(client, tenantId, 'customer', id, dto.routeId);

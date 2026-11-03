@@ -169,7 +169,7 @@ function MessageRow({ m, timeZone, canRead }: { m: InboundMessage; timeZone: str
         <StatusBadge status={m.status} label={status.label} tone={status.tone} />
       </div>
       {m.body ? <p className="wa-body">{m.body}</p> : <p className="wa-body muted">{t('({type} message)', { type: m.messageType })}</p>}
-      {m.reader && <p className="wa-note muted">{t(m.reader === 'claude' ? 'Read by Claude' : 'Read by simple rules')}</p>}
+      {(m.reader === 'sarvam' || m.reader === 'rules') && <p className="wa-note muted">{t(m.reader === 'sarvam' ? 'Read by Sarvam AI' : 'Read by simple rules')}</p>}
       {m.note && <p className="wa-note">{m.note}</p>}
       {m.repliedAt && <p className="wa-note muted">{t('Replied on WhatsApp with what was understood.')}</p>}
       {canRead && (m.status === 'no_customer' || m.status === 'failed' || m.status === 'no_order') && (

@@ -209,6 +209,23 @@ export interface DriverIncentiveSettings {
   nightFrom: string;
   nightUntil: string;
   rules: { kind: string; label: string; base: string; enabled: boolean; percent: string; suggestedPercent: string }[];
+  /** When each incentive is earned — the owner's to change. */
+  conditions: IncentiveConditions;
+}
+
+export interface IncentiveConditions {
+  /** Collection: at least this much collected on the trip. */
+  minCollected: string;
+  /** Crates: at least this many brought back. */
+  minCrates: number;
+  /** Quality: deliveries that may be short. */
+  qualityShortAllowed: number;
+  /** Performance: stops that may be left undone. */
+  performanceSkipsAllowed: number;
+  /** Data quality: what must be recorded. */
+  dataQualityNeeds: { km: boolean; deliveryPhotos: boolean; bills: boolean };
+  /** Trip completion: also when closed as an approved exception. */
+  completionOnException: boolean;
 }
 
 /** A trip's incentives for its driver: kept at the owner's close ([final]), else what it would pay now. */

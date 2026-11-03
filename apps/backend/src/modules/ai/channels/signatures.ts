@@ -15,20 +15,3 @@ export function validWhatsAppSignature(rawBody: Buffer, header: string | undefin
   const expected = createHmac('sha256', appSecret).update(rawBody).digest('hex');
   return sameText(header.slice('sha256='.length), expected);
 }
-
-/**
- * Twilio signs each request with the account's auth token: the HMAC-SHA1 of
- * the full URL it called, then each POST parameter's name and value in name
- * order, in base64 (X-Twilio-Signature).
- */
-export function twilioSignature(authToken: string, url: string, params: Record<string, string>): string {
-  const data = Object.keys(params)
-    .sort()
-    .reduce((acc, key) => acc + key + params[key], url);
-  return createHmac('sha1', authToken).update(Buffer.from(data, 'utf-8')).digest('base64');
-}
-
-export function validTwilioSignature(authToken: string, url: string, params: Record<string, string>, header: string | undefined): boolean {
-  if (!header) return false;
-  return sameText(header, twilioSignature(authToken, url, params));
-}
