@@ -1,9 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { CustomersRepository } from './repositories/customers.repository';
-import { CustomerRecord } from './entities/customer.entity';
+import { CustomerRecord, CustomerTermsVersion } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -165,6 +165,7 @@ export class CustomersService {
       place: dto.place?.trim() || null,
       address: dto.address?.trim() || null,
     });
+    await this.customers.recordTermsVersionWithClient(client, created.id, 'created', actorUserId);
     // Their usual route: a stop at the end of it (Routes).
     if (dto.routeId) await this.routes.placeWithClient(client, tenantId, 'customer', created.id, dto.routeId);
     const customer = dto.routeId ? ((await this.customers.findByIdWithClient(client, created.id)) ?? created) : created;
@@ -236,6 +237,14 @@ export class CustomersService {
     const annual =
       dto.financeChargeRateAnnual ??
       (dto.financeChargeRateMonthly !== undefined ? Math.round((dto.financeChargeRateMonthly * 365 * 100) / 30) / 100 : undefined);
+    // The terms as they will stand, checked whole (MS §30).
+    const billToBill = dto.billToBill ?? before.billToBill;
+    if (billToBill && (dto.paymentTermsDays ?? before.paymentTermsDays) < 1) {
+      throw new BadRequestException('Bill-to-Bill needs the longest a bill may wait, in days (at least 1)');
+    }
+    if ((dto.financeChargeEnabled ?? before.financeChargeEnabled) && Number(annual ?? before.financeChargeRateAnnual) <= 0) {
+      throw new BadRequestException('Set an annual rate to switch the finance charge on');
+    }
     const after = await this.customers.updateCreditTermsWithClient(client, id, dto.version, {
       creditLimit: dto.creditLimit,
       paymentTermsDays: dto.paymentTermsDays,
@@ -244,7 +253,10 @@ export class CustomersService {
       financeChargeGraceDays: dto.financeChargeGraceDays,
       creditHold: dto.creditHold,
       creditHoldReason: dto.creditHoldReason ?? null,
+      financeChargeEnabled: dto.financeChargeEnabled,
+      billToBill: dto.billToBill,
     });
+    await this.customers.recordTermsVersionWithClient(client, id, 'terms', actorUserId);
 
     await this.audit.record(client, {
       tenantId,
@@ -256,6 +268,36 @@ export class CustomersService {
       after: after as unknown as Record<string, unknown>,
     });
     return after;
+  }
+
+  /**
+   * BD.4 (called by Finance when a bad debt is written off, in its
+   * transaction): the customer goes on credit hold until someone reviews
+   * their terms, and the hold is a dated version of their terms.
+   */
+  async holdForReviewWithClient(client: PoolClient, tenantId: string, actorUserId: string, id: string, reason: string): Promise<CustomerRecord> {
+    const before = await this.customers.findByIdWithClient(client, id);
+    if (!before) throw new NotFoundException('Customer not found');
+    const after = await this.customers.holdForReviewWithClient(client, id, reason);
+    await this.customers.recordTermsVersionWithClient(client, id, 'write_off', actorUserId);
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'update',
+      entityType: ENTITY_TYPE,
+      entityId: id,
+      before: { creditHold: before.creditHold, creditHoldReason: before.creditHoldReason },
+      after: { creditHold: true, creditHoldReason: reason },
+    });
+    return after;
+  }
+
+  /** Every version of the customer's credit terms, newest first (F6). */
+  termsHistory(tenantId: string, id: string): Promise<CustomerTermsVersion[]> {
+    return this.db.withTenant(tenantId, async (client) => {
+      if (!(await this.customers.findByIdWithClient(client, id))) throw new NotFoundException('Customer not found');
+      return this.customers.termsHistoryWithClient(client, id);
+    });
   }
 
   archive(tenantId: string, actorUserId: string, id: string): Promise<CustomerRecord> {

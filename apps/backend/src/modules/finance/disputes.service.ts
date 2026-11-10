@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
-import { compareMoney, moneyFromNumber, subtractMoney } from '../../common/money';
+import { compareMoney, isPositiveMoney, moneyFromNumber, subtractMoney } from '../../common/money';
+import { AdjustmentsService } from './adjustments.service';
 
 export type DisputeStatus = 'open' | 'resolved' | 'withdrawn';
 
@@ -29,6 +30,12 @@ export interface InvoiceDispute {
   idleDays: number;
   resolvedAt: Date | null;
   resolution: string | null;
+  /** Once closed: what was accepted (credited) and what wasn't (charged from the original due date, MS §32). */
+  acceptedAmount: string | null;
+  rejectedAmount: string | null;
+  /** The credit note for the accepted part. */
+  creditNoteId: string | null;
+  creditNoteNumber: string | null;
   version: number;
 }
 
@@ -39,10 +46,12 @@ const DISPUTE_ENTITY = 'invoice_dispute';
 
 const SELECT = `
   SELECT d.*, i.invoice_number, c.name AS customer_name,
-         floor(extract(epoch FROM now() - d.last_activity_at) / 86400)::int AS idle_days
+         floor(extract(epoch FROM now() - d.last_activity_at) / 86400)::int AS idle_days,
+         n.id AS credit_note_id, n.credit_note_number
     FROM money.invoice_dispute d
     JOIN money.invoice i ON i.id = d.invoice_id
-    JOIN trading_partners.customer c ON c.id = d.customer_id`;
+    JOIN trading_partners.customer c ON c.id = d.customer_id
+    LEFT JOIN money.credit_note n ON n.dispute_id = d.id`;
 
 interface DisputeRow {
   id: string;
@@ -60,6 +69,9 @@ interface DisputeRow {
   idle_days: number;
   resolved_at: Date | null;
   resolution: string | null;
+  accepted_amount: string | null;
+  credit_note_id: string | null;
+  credit_note_number: string | null;
   version: number;
 }
 
@@ -79,22 +91,29 @@ const toDispute = (r: DisputeRow): InvoiceDispute => ({
   idleDays: r.idle_days,
   resolvedAt: r.resolved_at,
   resolution: r.resolution,
+  acceptedAmount: r.accepted_amount,
+  rejectedAmount: r.accepted_amount === null ? null : subtractMoney(r.amount, r.accepted_amount),
+  creditNoteId: r.credit_note_id,
+  creditNoteNumber: r.credit_note_number,
   version: r.version,
 });
 
 /**
- * Invoice disputes (client Q&A, finance). A customer disputes part or all of
- * an invoice; while it's open, finance charges pause on the disputed amount
- * only (ReceivablesService.runFinanceCharges). Left untouched for 30 days it
- * becomes a critical exception for the owner. Closing a dispute records the
- * outcome and nothing else — no automatic write-off or reversal: if money
- * should move, the owner does that deliberately.
+ * Invoice disputes (client Q&A, finance; Master Spec §32). A customer
+ * disputes part or all of an invoice; while it's open, finance charges pause
+ * on the disputed amount only (ReceivablesService.runFinanceCharges). Left
+ * untouched for 30 days it becomes a critical exception for the owner, and
+ * the pause ends. Closing it settles it: the part accepted gets a credit
+ * note and stops for good; the part not accepted is charged from the
+ * original due date by the next finance-charge run. Nothing is written off
+ * automatically.
  */
 @Injectable()
 export class DisputesService {
   constructor(
     private readonly db: DatabaseService,
     private readonly audit: AuditService,
+    private readonly adjustments: AdjustmentsService,
   ) {}
 
   list(tenantId: string, filter: { status?: DisputeStatus; customerId?: string; invoiceId?: string }): Promise<InvoiceDispute[]> {
@@ -167,20 +186,44 @@ export class DisputesService {
   }
 
   /**
-   * Closes it: 'resolved' (settled either way — what was agreed goes in the
-   * resolution) or 'withdrawn' (the customer dropped it). Finance charges
-   * resume on the amount from the next run; nothing is written off here.
+   * Closes it (MS §32): 'resolved' — settled, with the amount accepted (none:
+   * rejected; all of it: fully accepted; between: partly) — or 'withdrawn'
+   * (the customer dropped it, so nothing is accepted). The accepted part is
+   * credited at once (a credit note, approved by someone other than the
+   * invoice's issuer — CN.4) and stops accruing for good; the rest is owed,
+   * and the next finance-charge run charges it for the days it was paused.
    */
-  close(tenantId: string, actorUserId: string, id: string, dto: { version: number; outcome: 'resolved' | 'withdrawn'; resolution: string }): Promise<InvoiceDispute> {
+  close(
+    tenantId: string,
+    actorUserId: string,
+    id: string,
+    dto: { version: number; outcome: 'resolved' | 'withdrawn'; resolution: string; acceptedAmount?: number },
+  ): Promise<InvoiceDispute> {
     return this.change(tenantId, actorUserId, id, async (client, before) => {
       if (before.status !== 'open') throw new ConflictException('This dispute is already closed');
+      const accepted = moneyFromNumber(dto.acceptedAmount ?? 0);
+      if (dto.outcome === 'withdrawn' && compareMoney(accepted, '0') > 0) {
+        throw new BadRequestException('A withdrawn dispute accepts nothing — close it as resolved to credit part of it');
+      }
+      if (compareMoney(accepted, before.amount) > 0) {
+        throw new BadRequestException(`At most the ₹${before.amount} disputed can be accepted`);
+      }
       const result = await client.query(
         `UPDATE money.invoice_dispute
-            SET status = $3, resolution = $4, resolved_at = now(), resolved_by = $5, last_activity_at = now(), version = version + 1
+            SET status = $3, resolution = $4, resolved_at = now(), resolved_by = $5, last_activity_at = now(), version = version + 1,
+                accepted_amount = $6
           WHERE id = $1 AND version = $2`,
-        [id, dto.version, dto.outcome, dto.resolution.trim(), actorUserId],
+        [id, dto.version, dto.outcome, dto.resolution.trim(), actorUserId, accepted],
       );
       if (!result.rowCount) throw new ConflictException('This dispute was changed by someone else — reload and try again');
+      if (isPositiveMoney(accepted)) {
+        await this.adjustments.issueCreditNoteWithClient(client, tenantId, actorUserId, {
+          invoiceId: before.invoiceId,
+          amount: accepted,
+          reason: `Dispute accepted — ${before.reason}. ${dto.resolution.trim()}`,
+          disputeId: id,
+        });
+      }
     });
   }
 

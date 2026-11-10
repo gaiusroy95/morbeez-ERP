@@ -14,6 +14,7 @@ import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { LotsPaidListener, PayablesService } from '../finance/payables.service';
+import { AgentsFinanceService } from '../finance/agents-finance.service';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { PurchaseOrderRecord } from './entities/purchase-order.entity';
@@ -75,6 +76,7 @@ describe('ProcurementService', () => {
   let lots: jest.Mocked<LotsRepository>;
   let stock: jest.Mocked<LotStockRepository>;
   let payables: jest.Mocked<PayablesService>;
+  let agentsFinance: jest.Mocked<AgentsFinanceService>;
   let lotsPaid: LotsPaidListener;
   let farmers: jest.Mocked<FarmersService>;
   let products: jest.Mocked<ProductsService>;
@@ -126,6 +128,7 @@ describe('ProcurementService', () => {
             countUngradedWithClient: jest.fn(),
           },
         },
+        { provide: AgentsFinanceService, useValue: { accrueLotCommissionWithClient: jest.fn().mockResolvedValue(null) } },
         {
           provide: PayablesService,
           useValue: {
@@ -168,6 +171,7 @@ describe('ProcurementService', () => {
     lots = module.get(LotsRepository);
     stock = module.get(LotStockRepository);
     payables = module.get(PayablesService);
+    agentsFinance = module.get(AgentsFinanceService);
     module.get(ProcurementService).onModuleInit();
     farmers = module.get(FarmersService);
     products = module.get(ProductsService);
@@ -376,6 +380,40 @@ describe('ProcurementService', () => {
       unitCost: '9.50',
       gradedAt,
     });
+  });
+
+  it('gradeLot earns the agent their commission on the kg accepted, at the purchase rate (MS §11; AGT.1)', async () => {
+    const gradedAt = new Date('2026-09-20T10:00:00Z');
+    lots.findByIdWithClient.mockResolvedValue(baseLot);
+    lots.gradeWithClient.mockResolvedValue({ ...baseLot, acceptedQuantity: '95.000', rejectedQuantity: '5.000', unitCost: '9.50', status: 'available', gradedAt, version: 2 });
+    lots.countUngradedWithClient.mockResolvedValue(1);
+    purchaseOrders.findByIdWithClient.mockResolvedValue({ ...basePo, status: 'confirmed', agentId: 'agent-1', commissionPerKg: '1.50' });
+    const query = jest.fn().mockResolvedValue({ rows: [{ agent_name: 'Ravi', uom: 'kg' }] });
+    Object.assign(fakeClient, { query });
+    try {
+      await service.gradeLot('tenant-1', 'user-1', 'lot-1', { version: 1, acceptedQuantity: 95, rejectedQuantity: 5, unitCost: 9.5 });
+    } finally {
+      delete (fakeClient as { query?: unknown }).query;
+    }
+    expect(agentsFinance.accrueLotCommissionWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', {
+      lotId: 'lot-1',
+      purchaseOrderId: basePo.id,
+      agentId: 'agent-1',
+      agentName: 'Ravi',
+      ratePerKg: '1.50',
+      acceptedQuantity: '95.000',
+      uom: 'kg',
+      gradedAt,
+    });
+  });
+
+  it('gradeLot earns no commission without an agent', async () => {
+    lots.findByIdWithClient.mockResolvedValue(baseLot);
+    lots.gradeWithClient.mockResolvedValue({ ...baseLot, acceptedQuantity: '95.000', rejectedQuantity: '5.000', unitCost: '9.50', status: 'available', gradedAt: new Date(), version: 2 });
+    lots.countUngradedWithClient.mockResolvedValue(1);
+    purchaseOrders.findByIdWithClient.mockResolvedValue({ ...basePo, status: 'confirmed', agentId: null, commissionPerKg: null });
+    await service.gradeLot('tenant-1', 'user-1', 'lot-1', { version: 1, acceptedQuantity: 95, rejectedQuantity: 5, unitCost: 9.5 });
+    expect(agentsFinance.accrueLotCommissionWithClient).not.toHaveBeenCalled();
   });
 
   it('gradeLot puts the accepted kilos in the store', async () => {

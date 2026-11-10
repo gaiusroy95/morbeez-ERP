@@ -55,5 +55,9 @@ export interface FarmerProfile {
     oldestUnpaidAt: Date | null;
     lastPaidAt: Date | null;
     payments: { id: string; paidAt: Date; amount: string; method: string; reference: string | null }[];
+    /** Owed past its due date, by the terms each lot accrued under (MS §12). */
+    overdue: string;
+    /** Average days from a lot's grading to its last payment, over lots fully paid; null before any. */
+    avgPaymentDays: string | null;
   } | null;
 }

@@ -79,6 +79,10 @@ const CHAINS = {
     // Last: one business can't see or touch the rows the suites above made.
     'tenant-isolation-e2e.js',
   ],
+  // Master Spec v3 P6: credit notes, dispute settlement and catch-up, bad debts,
+  // agent commission with TDS, terms versions, farmer terms, Bill-to-Bill — and
+  // the books even. A GST-registered business of its own; makes its own data.
+  p6: ['finance-p6-e2e.js'],
   // WhatsApp orders, Sarvam AI reading them, AI calls by Sarvam's voice agent —
   // against local stand-ins for Meta and Sarvam (CHAIN_ENV); makes its own data.
   integrations: ['integrations-e2e.js'],

@@ -44,6 +44,16 @@ export class UpdateCreditTermsDto {
   @Max(90)
   financeChargeGraceDays?: number;
 
+  @ApiPropertyOptional({ description: 'Finance charge on overdue invoices, on or off (MS §30) — off by default; needs an annual rate' })
+  @IsOptional()
+  @IsBoolean()
+  financeChargeEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Bill-to-Bill (MS §30): each bill falls due when the next is issued, or after paymentTermsDays if that comes first' })
+  @IsOptional()
+  @IsBoolean()
+  billToBill?: boolean;
+
   @ApiPropertyOptional({ description: 'While on hold, no new order for this customer can be confirmed' })
   @IsOptional()
   @IsBoolean()

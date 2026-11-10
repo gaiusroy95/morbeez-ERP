@@ -2793,3 +2793,26 @@ dl.request-facts dd {
     gap: 4px;
   }
 }
+
+/* ---- Master Spec v3 P6: credit terms as dated versions, in the narrow profile panel ---- */
+.terms-history li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.terms-history-when {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.terms-history-what {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.dispute-settlement {
+  grid-column: 1 / -1;
+  margin: 0;
+}

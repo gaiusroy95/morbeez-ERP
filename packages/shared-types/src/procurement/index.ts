@@ -130,6 +130,8 @@ export interface AgentRecord {
   phone: string | null;
   defaultCommissionPerKg: string;
   status: 'active' | 'archived';
+  /** For TDS on commission (194H) — Master Spec v3 P6. */
+  pan: string | null;
 }
 
 export interface ReceiveGoodsBody {

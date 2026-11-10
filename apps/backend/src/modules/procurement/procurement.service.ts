@@ -9,12 +9,13 @@ import { ProductsService } from '../products/products.service';
 import { VehiclesService } from '../vehicles/vehicles.service';
 import { WorkforceService } from '../workforce/workforce.service';
 import { PayablesService } from '../finance/payables.service';
+import { AgentsFinanceService } from '../finance/agents-finance.service';
 import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 import { PurchaseOrdersRepository } from './repositories/purchase-orders.repository';
 import { PickupsRepository } from './repositories/pickups.repository';
 import { ProcurementBoardRepository } from './repositories/procurement-board.repository';
 import { AgentRecord, ProcurementBoard, ProcurementBoardDay } from './entities/procurement-board.entity';
-import { CreateAgentDto } from './dto/procurement-board.dto';
+import { CreateAgentDto, UpdateAgentDto } from './dto/procurement-board.dto';
 import { LotsRepository } from './repositories/lots.repository';
 import { PurchaseOrderRecord, PurchaseOrderStatus } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
@@ -59,6 +60,7 @@ export class ProcurementService implements OnModuleInit {
     private readonly audit: AuditService,
     private readonly alerts: AlertsRepository,
     private readonly stock: LotStockRepository,
+    private readonly agentsFinance: AgentsFinanceService,
   ) {}
 
   /** A purchase order closes once every lot on it has been paid for, however the payment was made. */
@@ -77,21 +79,21 @@ export class ProcurementService implements OnModuleInit {
   listAgents(tenantId: string): Promise<AgentRecord[]> {
     return this.db.withTenant(tenantId, async (client) => {
       const r = await client.query(
-        `SELECT id, name, phone, default_commission_per_kg::text AS commission, status FROM trading_partners.agent ORDER BY status, name`,
+        `SELECT id, name, phone, default_commission_per_kg::text AS commission, status, pan FROM trading_partners.agent ORDER BY status, name`,
       );
-      return r.rows.map((a) => ({ id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status }));
+      return r.rows.map((a) => ({ id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status, pan: a.pan }));
     });
   }
 
   createAgent(tenantId: string, actorUserId: string, dto: CreateAgentDto): Promise<AgentRecord> {
     return this.db.withTenant(tenantId, async (client) => {
       const r = await client.query(
-        `INSERT INTO trading_partners.agent (tenant_id, name, phone, default_commission_per_kg)
-         VALUES ($1, $2, $3, $4) RETURNING id, name, phone, default_commission_per_kg::text AS commission, status`,
-        [tenantId, dto.name.trim(), dto.phone?.trim() || null, dto.defaultCommissionPerKg ?? 0],
+        `INSERT INTO trading_partners.agent (tenant_id, name, phone, default_commission_per_kg, pan)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id, name, phone, default_commission_per_kg::text AS commission, status, pan`,
+        [tenantId, dto.name.trim(), dto.phone?.trim() || null, dto.defaultCommissionPerKg ?? 0, dto.pan?.trim().toUpperCase() || null],
       );
       const a = r.rows[0];
-      const agent: AgentRecord = { id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status };
+      const agent: AgentRecord = { id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status, pan: a.pan };
       await this.audit.record(client, {
         tenantId,
         actorUserId,
@@ -102,6 +104,42 @@ export class ProcurementService implements OnModuleInit {
       });
       return agent;
     });
+  }
+
+  updateAgent(tenantId: string, actorUserId: string, id: string, dto: UpdateAgentDto): Promise<AgentRecord> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const before = (await this.listAgentsWithClient(client)).find((a) => a.id === id);
+      if (!before) throw new NotFoundException('Agent not found');
+      const r = await client.query(
+        `UPDATE trading_partners.agent
+            SET phone = CASE WHEN $2::boolean THEN $3 ELSE phone END,
+                default_commission_per_kg = COALESCE($4, default_commission_per_kg),
+                pan = CASE WHEN $5::boolean THEN $6 ELSE pan END,
+                status = COALESCE($7, status)
+          WHERE id = $1
+        RETURNING id, name, phone, default_commission_per_kg::text AS commission, status, pan`,
+        [
+          id,
+          dto.phone !== undefined,
+          dto.phone?.trim() || null,
+          dto.defaultCommissionPerKg ?? null,
+          dto.pan !== undefined,
+          dto.pan?.trim().toUpperCase() || null,
+          dto.status ?? null,
+        ],
+      );
+      const a = r.rows[0];
+      const agent: AgentRecord = { id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status, pan: a.pan };
+      await this.audit.record(client, { tenantId, actorUserId, action: 'update', entityType: 'agent', entityId: id, before: before as unknown as Record<string, unknown>, after: agent as unknown as Record<string, unknown> });
+      return agent;
+    });
+  }
+
+  private async listAgentsWithClient(client: PoolClient): Promise<AgentRecord[]> {
+    const r = await client.query(
+      `SELECT id, name, phone, default_commission_per_kg::text AS commission, status, pan FROM trading_partners.agent ORDER BY status, name`,
+    );
+    return r.rows.map((a) => ({ id: a.id, name: a.name, phone: a.phone, defaultCommissionPerKg: a.commission, status: a.status, pan: a.pan }));
   }
 
   // ---- Purchase orders ----
@@ -585,6 +623,7 @@ export class ProcurementService implements OnModuleInit {
             unitCost: lot.unitCost,
             gradedAt: lot.gradedAt,
           });
+          await this.accrueAgentCommissionWithClient(client, tenantId, actorUserId, lot);
         }
         await this.breakageAlertWithClient(client, tenantId, lot.id);
         lots.push(lot);
@@ -660,6 +699,7 @@ export class ProcurementService implements OnModuleInit {
           unitCost: after.unitCost,
           gradedAt: after.gradedAt,
         });
+        await this.accrueAgentCommissionWithClient(client, tenantId, actorUserId, after);
       }
 
       await this.breakageAlertWithClient(client, tenantId, after.id);
@@ -668,6 +708,32 @@ export class ProcurementService implements OnModuleInit {
       await this.closeIfPaidWithClient(client, tenantId, actorUserId, after.purchaseOrderId);
 
       return after;
+    });
+  }
+
+  /**
+   * The agent who brought the lot earns their commission now, on the kg
+   * accepted (Master Spec §11; AGT.1) — at the purchase's own rate, in the
+   * grading transaction. No agent or no rate: ₹0, no entry.
+   */
+  private async accrueAgentCommissionWithClient(client: PoolClient, tenantId: string, actorUserId: string, lot: LotRecord): Promise<void> {
+    if (!lot.acceptedQuantity || !lot.gradedAt) return;
+    const po = await this.purchaseOrders.findByIdWithClient(client, lot.purchaseOrderId);
+    if (!po?.agentId || !po.commissionPerKg || Number(po.commissionPerKg) <= 0) return;
+    const facts = await client.query<{ agent_name: string; uom: string }>(
+      'SELECT a.name AS agent_name, p.base_uom AS uom FROM trading_partners.agent a, trading_partners.product p WHERE a.id = $1 AND p.id = $2',
+      [po.agentId, lot.productId],
+    );
+    if (!facts.rows[0]) return;
+    await this.agentsFinance.accrueLotCommissionWithClient(client, tenantId, actorUserId, {
+      lotId: lot.id,
+      purchaseOrderId: po.id,
+      agentId: po.agentId,
+      agentName: facts.rows[0].agent_name,
+      ratePerKg: po.commissionPerKg,
+      acceptedQuantity: lot.acceptedQuantity,
+      uom: facts.rows[0].uom,
+      gradedAt: lot.gradedAt,
     });
   }
 

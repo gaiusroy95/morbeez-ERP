@@ -284,6 +284,7 @@ export class FinanceService {
         { name: 'Accounts receivable', ledger: byAccount.get('accounts_receivable') ?? '0.00', subledger: sub.receivable },
         { name: 'Accounts payable — farmers', ledger: negate(byAccount.get('accounts_payable_farmer') ?? '0.00'), subledger: sub.payable },
         { name: 'Farmer advances', ledger: byAccount.get('farmer_advance') ?? '0.00', subledger: sub.advances },
+        { name: 'Accounts payable — agents', ledger: negate(byAccount.get('accounts_payable_agent') ?? '0.00'), subledger: sub.agents },
       ];
       return {
         currency: range.currency,

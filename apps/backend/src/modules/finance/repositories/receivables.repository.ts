@@ -23,8 +23,12 @@ interface InvoiceRow {
   due_date: string;
   amount: string;
   paid: string;
+  credited: string;
+  written_off: string;
   outstanding: string;
   state: InvoiceState;
+  bill_to_bill: boolean;
+  created_by: string;
 }
 
 interface PaymentRow {
@@ -60,6 +64,7 @@ interface FinanceChargeRow {
   days: number;
   amount: string;
   created_at: Date;
+  dispute_id: string | null;
 }
 
 export interface OpenInvoice {
@@ -87,13 +92,28 @@ export interface ChargeCandidate {
   lastPeriodEnd: string | null;
 }
 
+export interface CatchUpCandidate {
+  disputeId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  /** Open but untouched for 30 days, rather than closed. */
+  stale: boolean;
+  /** What's no longer protected: the amount not accepted, or all of a stale one. */
+  principal: string;
+  rateAnnual: string;
+  pauseIds: string[];
+  periods: { periodStart: string; periodEnd: string; days: number }[];
+}
+
 export type InvoiceFilter = 'all' | 'open' | 'overdue' | 'paid';
 
 // Tenant-local "today" drives open/overdue — an invoice due today isn't late.
 const INVOICE_SELECT = `
   SELECT b.invoice_id, b.invoice_number, b.kind, b.customer_id, c.name AS customer_name, b.order_id,
          b.source_invoice_id, b.issued_at, b.due_date::text AS due_date, b.amount::text AS amount,
-         b.paid::text AS paid, b.outstanding::text AS outstanding,
+         b.paid::text AS paid, b.credited::text AS credited, b.written_off::text AS written_off,
+         b.outstanding::text AS outstanding, b.bill_to_bill, b.created_by,
          CASE WHEN b.outstanding <= 0 THEN 'paid'
               WHEN b.due_date < (now() AT TIME ZONE t.timezone)::date THEN 'overdue'
               ELSE 'open' END AS state
@@ -115,7 +135,7 @@ const CHARGE_SELECT = `
          i.customer_id, c.name AS customer_name, fc.period_start::text AS period_start, fc.period_end::text AS period_end,
          fc.principal::text AS principal, fc.rate_monthly_percent::text AS rate_monthly_percent,
          fc.rate_annual_percent::text AS rate_annual_percent, fc.days,
-         fc.amount::text AS amount, fc.created_at
+         fc.amount::text AS amount, fc.created_at, fc.dispute_id
   FROM money.finance_charge fc
   JOIN money.invoice i ON i.id = fc.invoice_id
   JOIN money.invoice si ON si.id = fc.source_invoice_id
@@ -134,8 +154,12 @@ function toInvoice(row: InvoiceRow): InvoiceRecord {
     dueDate: row.due_date,
     amount: row.amount,
     paid: row.paid,
+    credited: row.credited,
+    writtenOff: row.written_off,
     outstanding: row.outstanding,
     state: row.state,
+    billToBill: row.bill_to_bill,
+    createdBy: row.created_by,
   };
 }
 
@@ -175,6 +199,7 @@ function toCharge(row: FinanceChargeRow): FinanceChargeRecord {
     days: row.days,
     amount: row.amount,
     createdAt: row.created_at,
+    disputeId: row.dispute_id,
   };
 }
 
@@ -247,13 +272,15 @@ export class ReceivablesRepository {
       dueDate: string;
       amount: string;
       createdBy: string;
+      /** A sale on Bill-to-Bill terms (MS §30); false for every other kind. */
+      billToBill?: boolean;
       lines: Omit<InvoiceLineRecord, 'id'>[];
     },
   ): Promise<{ invoiceId: string; lineIds: string[] }> {
     const invoice = await client.query<{ id: string }>(
       `INSERT INTO money.invoice
-         (tenant_id, invoice_number, kind, customer_id, order_id, source_invoice_id, issued_at, due_date, amount, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (tenant_id, invoice_number, kind, customer_id, order_id, source_invoice_id, issued_at, due_date, amount, created_by, bill_to_bill)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
         fields.tenantId,
@@ -266,6 +293,7 @@ export class ReceivablesRepository {
         fields.dueDate,
         fields.amount,
         fields.createdBy,
+        fields.billToBill ?? false,
       ],
     );
     const invoiceId = invoice.rows[0].id;
@@ -557,10 +585,10 @@ export class ReceivablesRepository {
       `SELECT b.invoice_id, b.invoice_number, b.customer_id, b.due_date::text AS due_date,
               b.outstanding::text AS outstanding, c.finance_charge_rate_annual::text AS rate,
               c.finance_charge_grace_days AS grace,
-              (SELECT MAX(fc.period_end)::text FROM money.finance_charge fc WHERE fc.source_invoice_id = b.invoice_id) AS last_period_end
+              (SELECT MAX(fc.period_end)::text FROM money.finance_charge fc WHERE fc.source_invoice_id = b.invoice_id AND fc.dispute_id IS NULL) AS last_period_end
        FROM money.invoice_balance b
        JOIN trading_partners.customer c ON c.id = b.customer_id
-       WHERE b.kind = 'sale' AND b.outstanding > 0 AND c.finance_charge_rate_annual > 0
+       WHERE b.kind = 'sale' AND b.outstanding > 0 AND c.finance_charge_enabled AND c.finance_charge_rate_annual > 0
          AND b.due_date + c.finance_charge_grace_days < $1::date
        ORDER BY b.customer_id, b.due_date`,
       [asOf],
@@ -590,12 +618,14 @@ export class ReceivablesRepository {
       days: number;
       amount: string;
       createdBy: string;
+      /** A catch-up: the dispute whose paused days it charges. */
+      disputeId?: string | null;
     },
   ): Promise<string> {
     const result = await client.query<{ id: string }>(
       `INSERT INTO money.finance_charge
-         (tenant_id, invoice_id, source_invoice_id, period_start, period_end, principal, rate_annual_percent, days, amount, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (tenant_id, invoice_id, source_invoice_id, period_start, period_end, principal, rate_annual_percent, days, amount, created_by, dispute_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id`,
       [
         fields.tenantId,
@@ -608,6 +638,7 @@ export class ReceivablesRepository {
         fields.days,
         fields.amount,
         fields.createdBy,
+        fields.disputeId ?? null,
       ],
     );
     return result.rows[0].id;
@@ -640,15 +671,99 @@ export class ReceivablesRepository {
     return { items: rows.rows.map(toCharge), total: Number(count.rows[0].count), page: Math.max(page, 1), pageSize: size };
   }
 
-  /** What's under open dispute on each of these invoices — no finance charge accrues on it. */
-  async openDisputedByInvoiceWithClient(client: PoolClient, invoiceIds: string[]): Promise<Map<string, string>> {
+  /**
+   * The disputes pausing a finance charge on each of these invoices (MS §32):
+   * open, and touched within the last `staleDays` — one left that long
+   * without action pauses nothing (its catch-up comes from catchUpCandidatesWithClient).
+   */
+  async pausingDisputesByInvoiceWithClient(
+    client: PoolClient,
+    invoiceIds: string[],
+    staleDays: number,
+  ): Promise<Map<string, { disputeId: string; amount: string }[]>> {
     if (invoiceIds.length === 0) return new Map();
-    const result = await client.query<{ invoice_id: string; disputed: string }>(
-      `SELECT invoice_id, SUM(amount)::numeric(12,2)::text AS disputed
-         FROM money.invoice_dispute WHERE status = 'open' AND invoice_id = ANY($1::uuid[])
-        GROUP BY invoice_id`,
-      [invoiceIds],
+    const result = await client.query<{ id: string; invoice_id: string; amount: string }>(
+      `SELECT id, invoice_id, amount::text AS amount
+         FROM money.invoice_dispute
+        WHERE status = 'open' AND invoice_id = ANY($1::uuid[]) AND last_activity_at > now() - make_interval(days => $2)
+        ORDER BY raised_at, id`,
+      [invoiceIds, staleDays],
     );
-    return new Map(result.rows.map((r) => [r.invoice_id, r.disputed]));
+    const byInvoice = new Map<string, { disputeId: string; amount: string }[]>();
+    for (const r of result.rows) byInvoice.set(r.invoice_id, [...(byInvoice.get(r.invoice_id) ?? []), { disputeId: r.id, amount: r.amount }]);
+    return byInvoice;
+  }
+
+  /** The disputed amounts a charge left out, one row per dispute. */
+  async insertPausesWithClient(client: PoolClient, tenantId: string, chargeId: string, pauses: { disputeId: string; amount: string }[]): Promise<void> {
+    for (const p of pauses) {
+      await client.query('INSERT INTO money.finance_charge_pause (tenant_id, charge_id, dispute_id, amount) VALUES ($1, $2, $3, $4)', [
+        tenantId,
+        chargeId,
+        p.disputeId,
+        p.amount,
+      ]);
+    }
+  }
+
+  /**
+   * Paused periods whose pause is over and not yet charged (MS §32), per
+   * dispute: closed with an amount not accepted (rejected, part-accepted,
+   * withdrawn — the unprotected principal is what wasn't accepted), or open
+   * and untouched for `staleDays` (all of it). Only customers whose finance
+   * charge is on, and only periods ended by `asOf`.
+   */
+  async catchUpCandidatesWithClient(client: PoolClient, asOf: string, staleDays: number, customerId: string | null): Promise<CatchUpCandidate[]> {
+    const result = await client.query<{
+      dispute_id: string;
+      invoice_id: string;
+      invoice_number: string;
+      customer_id: string;
+      stale: boolean;
+      principal: string;
+      rate: string;
+      pause_ids: string[];
+      periods: { periodStart: string; periodEnd: string; days: number }[];
+    }>(
+      `SELECT d.id AS dispute_id, d.invoice_id, i.invoice_number, d.customer_id, d.status = 'open' AS stale,
+              (CASE WHEN d.status = 'open' THEN d.amount ELSE d.amount - d.accepted_amount END)::numeric(12,2)::text AS principal,
+              c.finance_charge_rate_annual::text AS rate,
+              array_agg(p.id ORDER BY fc.period_start) AS pause_ids,
+              json_agg(json_build_object('periodStart', fc.period_start::text, 'periodEnd', fc.period_end::text, 'days', fc.days)
+                       ORDER BY fc.period_start) AS periods
+         FROM money.finance_charge_pause p
+         JOIN money.finance_charge fc ON fc.id = p.charge_id
+         JOIN money.invoice_dispute d ON d.id = p.dispute_id
+         JOIN money.invoice i ON i.id = d.invoice_id
+         JOIN trading_partners.customer c ON c.id = d.customer_id
+        WHERE NOT EXISTS (SELECT 1 FROM money.finance_charge_catch_up cu WHERE cu.pause_id = p.id)
+          AND fc.period_end <= $1::date
+          AND c.finance_charge_enabled AND c.finance_charge_rate_annual > 0
+          AND ((d.status <> 'open' AND d.amount > d.accepted_amount)
+               OR (d.status = 'open' AND d.last_activity_at <= now() - make_interval(days => $2)))
+          AND ($3::uuid IS NULL OR d.customer_id = $3)
+        GROUP BY d.id, i.invoice_number, c.finance_charge_rate_annual
+        ORDER BY d.customer_id, d.raised_at, d.id`,
+      [asOf, staleDays, customerId],
+    );
+    return result.rows.map((r) => ({
+      disputeId: r.dispute_id,
+      invoiceId: r.invoice_id,
+      invoiceNumber: r.invoice_number,
+      customerId: r.customer_id,
+      stale: r.stale,
+      principal: r.principal,
+      rateAnnual: r.rate,
+      pauseIds: r.pause_ids,
+      periods: r.periods,
+    }));
+  }
+
+  async insertCatchUpsWithClient(client: PoolClient, tenantId: string, catchUpChargeId: string, pauseIds: string[]): Promise<void> {
+    await client.query(
+      `INSERT INTO money.finance_charge_catch_up (pause_id, tenant_id, catch_up_charge_id)
+       SELECT p, $1, $2 FROM unnest($3::uuid[]) AS p`,
+      [tenantId, catchUpChargeId, pauseIds],
+    );
   }
 }

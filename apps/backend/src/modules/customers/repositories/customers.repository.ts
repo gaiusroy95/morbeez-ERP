@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
-import { CustomerRecord } from '../entities/customer.entity';
+import { CustomerRecord, CustomerTermsVersion } from '../entities/customer.entity';
 
 interface CustomerRow {
   id: string;
@@ -21,6 +21,8 @@ interface CustomerRow {
   finance_charge_grace_days: number;
   credit_hold: boolean;
   credit_hold_reason: string | null;
+  finance_charge_enabled: boolean;
+  bill_to_bill: boolean;
   is_walk_in: boolean;
   do_not_call: boolean;
   qr_token: string;
@@ -52,6 +54,8 @@ function toRecord(row: CustomerRow): CustomerRecord {
     financeChargeGraceDays: row.finance_charge_grace_days,
     creditHold: row.credit_hold,
     creditHoldReason: row.credit_hold_reason,
+    financeChargeEnabled: row.finance_charge_enabled,
+    billToBill: row.bill_to_bill,
     isWalkIn: row.is_walk_in,
     doNotCall: row.do_not_call ?? false,
     qrToken: row.qr_token,
@@ -207,6 +211,8 @@ export class CustomersRepository {
       financeChargeGraceDays?: number;
       creditHold?: boolean;
       creditHoldReason?: string | null;
+      financeChargeEnabled?: boolean;
+      billToBill?: boolean;
     },
   ): Promise<CustomerRecord> {
     const result = await client.query<CustomerRow>(
@@ -218,6 +224,8 @@ export class CustomersRepository {
          credit_hold = COALESCE($7, credit_hold),
          credit_hold_reason = CASE WHEN COALESCE($7, credit_hold) THEN COALESCE($8, credit_hold_reason) ELSE NULL END,
          finance_charge_rate_annual = COALESCE($9, finance_charge_rate_annual),
+         finance_charge_enabled = COALESCE($10, finance_charge_enabled),
+         bill_to_bill = COALESCE($11, bill_to_bill),
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -232,12 +240,83 @@ export class CustomersRepository {
         fields.creditHold ?? null,
         fields.creditHoldReason ?? null,
         fields.financeChargeRateAnnual ?? null,
+        fields.financeChargeEnabled ?? null,
+        fields.billToBill ?? null,
       ],
     );
     if (result.rowCount === 0) {
       throw new OptimisticLockException('Customer', id);
     }
     return (await this.findByIdWithClient(client, id))!;
+  }
+
+  /**
+   * BD.4: a bad debt written off puts the customer on hold for a review of
+   * their terms. Not optimistic — a control the system applies, whatever
+   * version the caller last read.
+   */
+  async holdForReviewWithClient(client: PoolClient, id: string, reason: string): Promise<CustomerRecord> {
+    const result = await client.query(
+      `UPDATE trading_partners.customer SET credit_hold = true, credit_hold_reason = $2, version = version + 1, updated_at = now()
+        WHERE id = $1`,
+      [id, reason],
+    );
+    if (result.rowCount === 0) throw new OptimisticLockException('Customer', id);
+    return (await this.findByIdWithClient(client, id))!;
+  }
+
+  /** The terms now in force, kept as a dated version (Master Spec v3 P6, F6) — never overwritten. */
+  async recordTermsVersionWithClient(client: PoolClient, id: string, source: 'created' | 'terms' | 'write_off', changedBy: string): Promise<void> {
+    await client.query(
+      `INSERT INTO trading_partners.customer_terms_version
+         (tenant_id, customer_id, version, credit_limit, payment_terms_days, bill_to_bill, finance_charge_enabled,
+          finance_charge_rate_annual, finance_charge_grace_days, credit_hold, credit_hold_reason, source, changed_by)
+       SELECT tenant_id, id, version, credit_limit, payment_terms_days, bill_to_bill, finance_charge_enabled,
+              finance_charge_rate_annual, finance_charge_grace_days, credit_hold, credit_hold_reason, $2, $3
+         FROM trading_partners.customer WHERE id = $1`,
+      [id, source, changedBy],
+    );
+  }
+
+  async termsHistoryWithClient(client: PoolClient, id: string): Promise<CustomerTermsVersion[]> {
+    const result = await client.query<{
+      version: number;
+      credit_limit: string;
+      payment_terms_days: number;
+      bill_to_bill: boolean;
+      finance_charge_enabled: boolean;
+      finance_charge_rate_annual: string;
+      finance_charge_grace_days: number;
+      credit_hold: boolean;
+      credit_hold_reason: string | null;
+      source: CustomerTermsVersion['source'];
+      effective_from: Date;
+      changed_by_login: string | null;
+    }>(
+      `SELECT v.version, v.credit_limit::text AS credit_limit, v.payment_terms_days, v.bill_to_bill, v.finance_charge_enabled,
+              v.finance_charge_rate_annual::text AS finance_charge_rate_annual, v.finance_charge_grace_days, v.credit_hold,
+              v.credit_hold_reason, v.source, v.effective_from, COALESCE(u.email::text, u.phone) AS changed_by_login
+         FROM trading_partners.customer_terms_version v
+         LEFT JOIN identity.app_user u ON u.id = v.changed_by
+        WHERE v.customer_id = $1
+        ORDER BY v.version DESC
+        LIMIT 100`,
+      [id],
+    );
+    return result.rows.map((r) => ({
+      version: r.version,
+      creditLimit: r.credit_limit,
+      paymentTermsDays: r.payment_terms_days,
+      billToBill: r.bill_to_bill,
+      financeChargeEnabled: r.finance_charge_enabled,
+      financeChargeRateAnnual: r.finance_charge_rate_annual,
+      financeChargeGraceDays: r.finance_charge_grace_days,
+      creditHold: r.credit_hold,
+      creditHoldReason: r.credit_hold_reason,
+      source: r.source,
+      effectiveFrom: r.effective_from,
+      changedBy: r.changed_by_login,
+    }));
   }
 
   /** A new QR for the shop: the old printout stops matching. */

@@ -16,6 +16,11 @@ import { LedgerRepository } from './repositories/ledger.repository';
 import { ReceivablesRepository } from './repositories/receivables.repository';
 import { PayablesRepository } from './repositories/payables.repository';
 import { FinanceCostsRepository } from './repositories/finance-costs.repository';
+import { AdjustmentsController } from './adjustments.controller';
+import { AdjustmentsService } from './adjustments.service';
+import { AgentsFinanceService } from './agents-finance.service';
+import { AdjustmentsRepository } from './repositories/adjustments.repository';
+import { AgentsFinanceRepository } from './repositories/agents-finance.repository';
 
 // Bounded context: Finance — the append-only double-entry ledger, invoices,
 // collections, payables and payments to farmers, finance charges, and
@@ -31,8 +36,12 @@ import { FinanceCostsRepository } from './repositories/finance-costs.repository'
 // reverse, so there is no cycle.
 @Module({
   imports: [CustomersModule, FarmersModule, TaxRulesModule],
-  controllers: [FinanceController, DisputesController],
+  controllers: [FinanceController, DisputesController, AdjustmentsController],
   providers: [
+    AdjustmentsService,
+    AgentsFinanceService,
+    AdjustmentsRepository,
+    AgentsFinanceRepository,
     DisputesService,
     FinanceService,
     ReceivablesService,
@@ -46,6 +55,6 @@ import { FinanceCostsRepository } from './repositories/finance-costs.repository'
     FinanceCostsRepository,
     CollectionsRepository,
   ],
-  exports: [ReceivablesService, PayablesService, LedgerService, DisputesService],
+  exports: [ReceivablesService, PayablesService, LedgerService, DisputesService, AgentsFinanceService],
 })
 export class FinanceModule {}

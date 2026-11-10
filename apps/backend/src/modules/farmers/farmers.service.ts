@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
 import { FarmersRepository } from './repositories/farmers.repository';
-import { FarmerRecord } from './entities/farmer.entity';
+import { FARMER_NET_DAYS, FarmerRecord } from './entities/farmer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CreateFarmerDto } from './dto/create-farmer.dto';
 import { UpdateFarmerDto } from './dto/update-farmer.dto';
@@ -102,6 +102,7 @@ export class FarmersService {
               oldestUnpaidAt: row.oldest_unpaid_at,
               lastPaidAt: row.last_paid_at,
               payments: await this.insights.paymentsWithClient(client, id),
+              ...(await this.insights.paymentTimingWithClient(client, id)),
             }
           : null;
       return { farmer, routeName: row?.route_name ?? null, pin, purchases, money };
@@ -119,12 +120,15 @@ export class FarmersService {
   }
 
   create(tenantId: string, actorUserId: string, dto: CreateFarmerDto): Promise<FarmerRecord> {
+    const terms = paymentTermsOf({ version: 1, paymentTerms: dto.paymentTerms, paymentTermsDays: dto.paymentTermsDays } as UpdateFarmerDto);
     return this.db.withTenant(tenantId, async (client) => {
       const farmer = await this.farmers.createWithClient(client, tenantId, actorUserId, {
         name: dto.name,
         contact: { ...dto.contact },
         bankDetails: dto.bankDetails,
         place: dto.place?.trim() || null,
+        paymentTerms: terms?.paymentTerms,
+        paymentTermsDays: terms?.paymentTermsDays,
       });
       // bank_details never appears in the audit entry itself, even
       // encrypted — the audit log's own retention/access story is
@@ -151,6 +155,7 @@ export class FarmersService {
     return this.db.withTenant(tenantId, async (client) => {
       const before = await this.farmers.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Farmer not found');
+      const terms = paymentTermsOf(dto);
 
       const after = await this.farmers.updateWithClient(client, id, dto.version, {
         name: dto.name,
@@ -158,6 +163,8 @@ export class FarmersService {
         bankDetails: dto.bankDetails,
         reliabilityRating: dto.reliabilityRating,
         place: dto.place === undefined ? undefined : dto.place?.trim() || null,
+        paymentTerms: terms?.paymentTerms,
+        paymentTermsDays: terms?.paymentTermsDays,
       });
 
       await this.audit.record(client, {
@@ -212,4 +219,27 @@ export class FarmersService {
 function redactBankDetails(farmer: FarmerRecord): Record<string, unknown> {
   const { bankDetails: _bankDetails, ...rest } = farmer;
   return { ...rest, bankDetails: farmer.bankDetails ? '[redacted]' : null };
+}
+
+/**
+ * Farmer payment terms (Master Spec §12), checked whole: Immediate takes no
+ * days; Net one of 3/7/10/15/20/30/45/60; Custom and Bill-to-Bill (its
+ * backstop) 1–180. Changes apply to lots graded from now — a payable keeps
+ * the due date it accrued with.
+ */
+export function paymentTermsOf(dto: UpdateFarmerDto): { paymentTerms: FarmerRecord['paymentTerms']; paymentTermsDays: number | null } | null {
+  if (dto.paymentTerms === undefined) {
+    if (dto.paymentTermsDays !== undefined) throw new BadRequestException('paymentTermsDays goes with paymentTerms');
+    return null;
+  }
+  if (dto.paymentTerms === 'immediate') {
+    if (dto.paymentTermsDays !== undefined) throw new BadRequestException('Immediate terms take no days');
+    return { paymentTerms: 'immediate', paymentTermsDays: null };
+  }
+  const days = dto.paymentTermsDays;
+  if (days === undefined) throw new BadRequestException(dto.paymentTerms === 'bill_to_bill' ? 'Bill-to-Bill needs the longest a payable may wait, in days' : 'Give the number of days');
+  if (dto.paymentTerms === 'net' && !(FARMER_NET_DAYS as readonly number[]).includes(days)) {
+    throw new BadRequestException(`Net terms are ${FARMER_NET_DAYS.join(', ')} days — use Custom for ${days}`);
+  }
+  return { paymentTerms: dto.paymentTerms, paymentTermsDays: days };
 }

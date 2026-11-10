@@ -9,6 +9,7 @@ import type {
   CustomerProfile,
   CustomerRecord,
   CustomersFilter,
+  CustomerTermsVersion,
   UpdateCreditTermsBody,
   UpdateCustomerBody,
 } from '@morbeez/shared-types';
@@ -38,7 +39,7 @@ import { useOpenOnNew } from '@/lib/hooks/use-open-on-new';
 import { SearchSelect } from '@/components/forms/SearchSelect';
 import { QuickAddRoute } from '@/components/forms/QuickAdd';
 import { formatOrderNumber, useRoutes } from '@/lib/hooks/use-delivery-orders';
-import { useCustomerProfile, useCustomersBoard, useCustomerStatement } from '@/lib/hooks/use-parties';
+import { useCustomerProfile, useCustomersBoard, useCustomerStatement, useCustomerTermsHistory } from '@/lib/hooks/use-parties';
 import { CreateBar, DayTabs, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 import { ContactActions, PartyCard, ProfileHead, StatTiles } from '@/components/redesign/Party';
 import { DeliveryQrDialog } from '@/components/customers/DeliveryQr';
@@ -46,7 +47,8 @@ import { DeliveryQrDialog } from '@/components/customers/DeliveryQr';
 // A customer's details and terms show in orders, finance and the dashboard too.
 const CUSTOMER_EFFECTS = [KEYS.customers, KEYS.lookupCustomers, KEYS.finance, KEYS.dashboard];
 
-function termsLabel(days: number, t: Translate) {
+function termsLabel(days: number, t: Translate, billToBill = false) {
+  if (billToBill) return t('Bill-to-Bill (at most {n} days)', { n: days });
   return days === 0 ? t('On delivery') : t('{n} days', { n: days });
 }
 
@@ -335,6 +337,8 @@ function CreditTermsDialog({ customer, onClose }: { customer: CustomerRecord; on
     terms: String(customer.paymentTermsDays),
     rate: customer.financeChargeRateAnnual,
     grace: String(customer.financeChargeGraceDays),
+    charge: customer.financeChargeEnabled,
+    billToBill: customer.billToBill,
     hold: customer.creditHold,
     reason: customer.creditHoldReason ?? '',
   });
@@ -348,7 +352,7 @@ function CreditTermsDialog({ customer, onClose }: { customer: CustomerRecord; on
 
   const submit = () => {
     const limit = parseMoney(form.limit, 'the credit limit');
-    const terms = parseWholeNumber(form.terms, 'payment terms', 0, 180);
+    const terms = parseWholeNumber(form.terms, form.billToBill ? 'the longest a bill may wait' : 'payment terms', form.billToBill ? 1 : 0, 180);
     const rate = parseDecimal(form.rate, 'the finance charge rate', { decimals: 2, max: 60 });
     const grace = parseWholeNumber(form.grace, 'the grace period', 0, 90);
     const reason: Parsed<string | undefined> =
@@ -357,6 +361,7 @@ function CreditTermsDialog({ customer, onClose }: { customer: CustomerRecord; on
         : { ok: true, value: form.hold ? form.reason.trim() : undefined };
     const error = firstError([limit, terms, rate, grace, reason]);
     if (error) return setProblem(error);
+    if (form.charge && !((rate as { value: number }).value > 0)) return setProblem(t('Set an annual rate to switch the finance charge on.'));
     setProblem(null);
     save.mutate({
       version: customer.version,
@@ -366,6 +371,8 @@ function CreditTermsDialog({ customer, onClose }: { customer: CustomerRecord; on
       financeChargeGraceDays: (grace as { value: number }).value,
       creditHold: form.hold,
       creditHoldReason: (reason as { value: string | undefined }).value,
+      financeChargeEnabled: form.charge,
+      billToBill: form.billToBill,
     });
   };
 
@@ -384,9 +391,20 @@ function CreditTermsDialog({ customer, onClose }: { customer: CustomerRecord; on
       <Field label={`Credit limit (${currency})`}>
         {(props) => <input {...props} inputMode="decimal" value={form.limit} onChange={(e) => set({ limit: e.target.value })} />}
       </Field>
-      <Field label={t('Payment terms (days)')} hint={t('0 = pays on delivery')}>
+      <div className="field field-check form-wide">
+        <input id="bill-to-bill" type="checkbox" checked={form.billToBill} onChange={(e) => set({ billToBill: e.target.checked })} />
+        <label htmlFor="bill-to-bill">{t('Bill-to-Bill — each bill falls due when the next one is issued')}</label>
+      </div>
+      <Field
+        label={form.billToBill ? t('Longest a bill may wait (days)') : t('Payment terms (days)')}
+        hint={form.billToBill ? t('Due at the next bill, or after this many days if that comes first') : t('0 = pays on delivery')}
+      >
         {(props) => <input {...props} inputMode="numeric" value={form.terms} onChange={(e) => set({ terms: e.target.value })} />}
       </Field>
+      <div className="field field-check form-wide">
+        <input id="finance-charge-on" type="checkbox" checked={form.charge} onChange={(e) => set({ charge: e.target.checked })} />
+        <label htmlFor="finance-charge-on">{t('Finance charge on — charge interest on overdue invoices')}</label>
+      </div>
       <Field label={t('Finance charge (% a year)')} hint={t("On what's overdue, per day: amount × rate × days ÷ 365. 0 for none, up to 60")}>
         {(props) => <input {...props} inputMode="decimal" value={form.rate} onChange={(e) => set({ rate: e.target.value })} />}
       </Field>
@@ -517,7 +535,7 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
                   ]
                 : []),
               { label: 'Credit Limit', value: formatMoney(c.creditLimit, currency) },
-              { label: 'Payment Terms', value: termsLabel(c.paymentTermsDays, t) },
+              { label: 'Payment Terms', value: termsLabel(c.paymentTermsDays, t, c.billToBill) },
               ...(money
                 ? [
                     { label: 'Customer Score', value: money.score === null ? '—' : `★ ${money.score.toFixed(1)} / 5` },
@@ -766,10 +784,10 @@ function CreditTab({
       <KeyValues
         items={[
           ['Credit limit', formatMoney(customer.creditLimit, currency)],
-          ['Payment terms', termsLabel(customer.paymentTermsDays, t)],
+          ['Payment terms', termsLabel(customer.paymentTermsDays, t, customer.billToBill)],
           [
             'Finance charge',
-            Number(customer.financeChargeRateAnnual) > 0
+            customer.financeChargeEnabled && Number(customer.financeChargeRateAnnual) > 0
               ? t("{rate}% a year (÷ 365 per day) after {days} days' grace", { rate: customer.financeChargeRateAnnual, days: customer.financeChargeGraceDays })
               : t('None'),
           ],
@@ -795,6 +813,7 @@ function CreditTab({
           <AgingBar receivable={receivable} currency={currency} />
         </>
       )}
+      <TermsHistory customerId={customer.id} />
       {canSetCredit && (
         <ActionBar>
           <button type="button" className="button button-primary" onClick={onChange}>
@@ -802,6 +821,47 @@ function CreditTab({
           </button>
         </ActionBar>
       )}
+    </>
+  );
+}
+
+/** Every version of the credit terms, newest first (Master Spec v3 P6, F6) — a change never overwrites the last. */
+function TermsHistory({ customerId }: { customerId: string }) {
+  const t = useT();
+  const currency = useCurrency();
+  const timeZone = useTenantProfile().data?.timezone ?? 'Asia/Kolkata';
+  const history = useCustomerTermsHistory(customerId);
+  if (history.isPending) return <SkeletonLines lines={2} />;
+  if (history.error) return <ErrorState error={history.error} onRetry={() => history.refetch()} />;
+  const SOURCE: Record<CustomerTermsVersion['source'], string> = {
+    initial: t('Terms in force when history began'),
+    created: t('Customer added'),
+    terms: t('Terms changed'),
+    write_off: t('Bad debt written off — held for review'),
+  };
+  return (
+    <>
+      <h3 className="detail-subhead">{t('Terms history')}</h3>
+      <ul className="plain-list terms-history" aria-label={t('Terms history')}>
+        {(history.data ?? []).map((v) => (
+          <li key={v.version}>
+            <span className="terms-history-when">
+              {formatDateTime(v.effectiveFrom, timeZone)} · {SOURCE[v.source]}
+              {v.changedBy ? <span className="muted"> · {v.changedBy}</span> : null}
+            </span>
+            <span className="terms-history-what">
+              {[
+                t('Limit') + ' ' + formatMoney(v.creditLimit, currency),
+                termsLabel(v.paymentTermsDays, t, v.billToBill),
+                t('Finance charge') + ' ' + (v.financeChargeEnabled ? t('{rate}% a year', { rate: v.financeChargeRateAnnual }) : t('Off')),
+                v.creditHold ? t('Hold') + ': ' + (v.creditHoldReason ?? t('Yes')) : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </span>
+          </li>
+        ))}
+      </ul>
     </>
   );
 }

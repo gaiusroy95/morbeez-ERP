@@ -98,9 +98,16 @@ export class PayablesRepository {
     client: PoolClient,
     fields: { tenantId: string; lotId: string; farmerId: string; amount: string; accruedAt: Date; createdBy: string },
   ): Promise<string> {
+    // Due by the farmer's terms in force now (MS §12): accrual day + the terms' days
+    // (Immediate: that day). Bill-to-Bill: those days are the backstop — it falls
+    // due sooner if the farmer's next lot comes first (farmer_payable_balance).
     const result = await client.query<{ id: string }>(
-      `INSERT INTO money.farmer_payable (tenant_id, lot_id, farmer_id, amount, accrued_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      `INSERT INTO money.farmer_payable (tenant_id, lot_id, farmer_id, amount, accrued_at, created_by, due_date, bill_to_bill)
+       SELECT $1, $2, $3, $4, $5, $6,
+              ($5::timestamptz AT TIME ZONE t.timezone)::date + COALESCE(f.payment_terms_days, 0), f.payment_terms = 'bill_to_bill'
+         FROM trading_partners.farmer f JOIN tenant.tenant t ON t.id = f.tenant_id
+        WHERE f.id = $3
+       RETURNING id`,
       [fields.tenantId, fields.lotId, fields.farmerId, fields.amount, fields.accruedAt, fields.createdBy],
     );
     return result.rows[0].id;

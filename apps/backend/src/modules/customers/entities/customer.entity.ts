@@ -30,6 +30,10 @@ export interface CustomerRecord {
   financeChargeGraceDays: number;
   creditHold: boolean;
   creditHoldReason: string | null;
+  /** Finance charge on or off (MS §30) — off by default; the rate applies only when on. */
+  financeChargeEnabled: boolean;
+  /** Bill-to-Bill (MS §30): each bill falls due when the next is issued, or after paymentTermsDays if sooner. */
+  billToBill: boolean;
   /** The spot sales' walk-in buyer, who pays on the spot and never owes. */
   isWalkIn: boolean;
   /** Asked not to be called by the AI voice agent: AI Calling places no call to them. */
@@ -41,4 +45,22 @@ export interface CustomerRecord {
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
+}
+
+/** Credit terms as they stood from a date (Master Spec v3 P6, F6): every change is a new version, never an overwrite. */
+export interface CustomerTermsVersion {
+  version: number;
+  creditLimit: string;
+  paymentTermsDays: number;
+  billToBill: boolean;
+  financeChargeEnabled: boolean;
+  financeChargeRateAnnual: string;
+  financeChargeGraceDays: number;
+  creditHold: boolean;
+  creditHoldReason: string | null;
+  /** What brought it: the customer was created, their terms changed, a bad debt was written off, or the terms in force when versions began. */
+  source: 'initial' | 'created' | 'terms' | 'write_off';
+  effectiveFrom: Date;
+  /** Who changed it (their login); null for the initial version. */
+  changedBy: string | null;
 }

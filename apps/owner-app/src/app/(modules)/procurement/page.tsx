@@ -319,15 +319,16 @@ function NewPurchaseOrderDialog({
   );
 }
 
-/** A new agent from inside the form: name, phone, usual commission. */
+/** A new agent from inside the form: name, phone, usual commission, PAN (for TDS on commission). */
 function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string; onClose: () => void; onAdded: (a: AgentRecord) => void }) {
   const t = useT();
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState('');
   const [commission, setCommission] = useState('');
+  const [pan, setPan] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const add = useAction(
-    (body: { name: string; phone?: string; defaultCommissionPerKg?: number }) => apiSend<AgentRecord>('POST', 'procurement/agents', body),
+    (body: { name: string; phone?: string; defaultCommissionPerKg?: number; pan?: string }) => apiSend<AgentRecord>('POST', 'procurement/agents', body),
     [['procurement', 'agents']],
     onAdded,
   );
@@ -346,8 +347,10 @@ function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string;
           if (!parsed.ok) return setProblem(parsed.error);
           c = parsed.value;
         }
+        const p = pan.trim().toUpperCase();
+        if (p && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(p)) return setProblem(t('A PAN is 5 letters, 4 digits, 1 letter.'));
         setProblem(null);
-        add.mutate({ name: name.trim(), phone: optionalText(phone), defaultCommissionPerKg: c });
+        add.mutate({ name: name.trim(), phone: optionalText(phone), defaultCommissionPerKg: c, pan: p || undefined });
       }}
     >
       <Field label={t('Name')} wide>
@@ -358,6 +361,9 @@ function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string;
       </Field>
       <Field label={t('Usual commission (₹/kg)')}>
         {(p) => <input {...p} inputMode="decimal" value={commission} onChange={(e) => setCommission(e.target.value)} />}
+      </Field>
+      <Field label={t('PAN (optional)')} hint={t('For TDS on commission (194H)')}>
+        {(p) => <input {...p} autoComplete="off" maxLength={10} value={pan} onChange={(e) => setPan(e.target.value)} />}
       </Field>
     </FormDialog>
   );

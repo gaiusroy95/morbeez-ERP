@@ -26,7 +26,7 @@ import {
   tdsDepositDueDate,
   UQC,
 } from '../../common/india';
-import { Books, GstLineRow, InvoiceRegisterRow, TaxRepository } from './repositories/tax.repository';
+import { Books, CreditNoteLineRow, GstLineRow, InvoiceRegisterRow, TaxRepository } from './repositories/tax.repository';
 import { buildEinvoiceJson, EinvoiceSource, missingData, notApplicableReason } from './einvoice';
 import {
   CustomerTaxRow,
@@ -675,7 +675,8 @@ export class TaxService {
       const profile = await this.rules.profileWithClient(client);
       const lines = await this.repo.gstLines(client, books.timezone, from, to);
       const financeCharges = await this.repo.financeChargeInvoiceCount(client, books.timezone, from, to);
-      return buildGstr1(books.currency, from, to, profile, lines, financeCharges);
+      const notes = await this.repo.creditNoteLines(client, books.timezone, from, to);
+      return buildGstr1(books.currency, from, to, profile, lines, financeCharges, notes);
     });
   }
 
@@ -685,7 +686,8 @@ export class TaxService {
       const books = await this.repo.books(client);
       const profile = await this.rules.profileWithClient(client);
       const lines = await this.repo.gstLines(client, books.timezone, from, to);
-      return buildGstr3b(books.currency, from, to, profile, lines);
+      const notes = await this.repo.creditNoteLines(client, books.timezone, from, to);
+      return buildGstr3b(books.currency, from, to, profile, lines, notes);
     });
   }
 
@@ -931,6 +933,14 @@ function addTo(b: RateBucket, line: GstLineRow): void {
   b.cess = sumMoney([b.cess, line.cess]);
 }
 
+function subtractFrom(b: RateBucket, line: GstLineRow): void {
+  b.taxableValue = subtractMoney(b.taxableValue, line.taxable_value);
+  b.igst = subtractMoney(b.igst, line.igst);
+  b.cgst = subtractMoney(b.cgst, line.cgst);
+  b.sgst = subtractMoney(b.sgst, line.sgst);
+  b.cess = subtractMoney(b.cess, line.cess);
+}
+
 /**
  * GSTR-1 tables from the period's invoice lines. Taxable lines go to B2B
  * (registered buyer), B2CL (unregistered, inter-state, invoice above the
@@ -938,7 +948,7 @@ function addTo(b: RateBucket, line: GstLineRow): void {
  * Nil-rated, exempt, and non-GST lines go to the nil table; every
  * classified line goes to the HSN summary, split B2B / B2C.
  */
-export function buildGstr1(currency: string, from: string, to: string, profile: TaxProfile, lines: GstLineRow[], financeCharges: number): Gstr1 {
+export function buildGstr1(currency: string, from: string, to: string, profile: TaxProfile, lines: GstLineRow[], financeCharges: number, notes: CreditNoteLineRow[] = []): Gstr1 {
   const issues: string[] = [];
   if (profile.registrationType !== 'regular') {
     issues.push(
@@ -1047,6 +1057,77 @@ export function buildGstr1(currency: string, from: string, to: string, profile: 
     }
   }
 
+  // Credit notes issued in the period (GST Act s.34; Master Spec v3 P6, F1): to a
+  // registered buyer, CDNR; against a B2CL invoice, CDNUR; against a B2CS supply,
+  // netted into B2CS. The nil table and the HSN summary are net of them too.
+  const cdnr = new Map<string, Gstr1['cdnr'][number] & { buckets: Map<string, RateBucket> }>();
+  const cdnur = new Map<string, Gstr1['cdnur'][number] & { buckets: Map<string, RateBucket> }>();
+  const noteNumbers = new Set<string>();
+  for (const line of notes) {
+    noteNumbers.add(line.note_number);
+    if (line.taxability === 'unclassified' || line.taxability === 'not_registered') continue;
+    const registered = !!line.buyer_gstin;
+    if (line.taxability === 'taxable') {
+      const b2clInvoice = !registered && !line.intra_state && compareMoney(line.invoice_total, profile.b2clThreshold) > 0;
+      if (registered || b2clInvoice) {
+        const table = registered ? cdnr : cdnur;
+        const note = table.get(line.note_id) ?? {
+          noteNumber: line.note_number,
+          noteDate: line.noted_on,
+          invoiceNumber: line.invoice_number,
+          invoiceDate: line.issued_on,
+          ...(registered ? { buyerGstin: line.buyer_gstin as string, buyerName: line.customer_name } : {}),
+          noteValue: line.note_total,
+          placeOfSupply: line.place_of_supply ?? '',
+          rates: [],
+          buckets: new Map(),
+        };
+        const b = note.buckets.get(line.gst_rate) ?? bucket(line.gst_rate);
+        addTo(b, line);
+        note.buckets.set(line.gst_rate, b);
+        (table as Map<string, typeof note>).set(line.note_id, note);
+      } else {
+        const key = `${line.place_of_supply}:${line.intra_state}:${line.gst_rate}`;
+        const row = b2cs.get(key) ?? {
+          placeOfSupply: line.place_of_supply ?? '',
+          intraState: line.intra_state,
+          rate: line.gst_rate,
+          taxableValue: '0.00',
+          igst: '0.00',
+          cgst: '0.00',
+          sgst: '0.00',
+          cess: '0.00',
+        };
+        subtractFrom(row as unknown as RateBucket, line);
+        b2cs.set(key, row);
+      }
+    } else {
+      const n = nil.get(`${line.intra_state ? 'intra' : 'inter'}:${registered}`)!;
+      if (line.taxability === 'nil_rated') n.nilRated = subtractMoney(n.nilRated, line.taxable_value);
+      if (line.taxability === 'exempt') n.exempt = subtractMoney(n.exempt, line.taxable_value);
+      if (line.taxability === 'non_gst') n.nonGst = subtractMoney(n.nonGst, line.taxable_value);
+    }
+    if (line.taxability !== 'non_gst') {
+      const table = registered ? hsn.b2b : hsn.b2c;
+      const key = `${line.hsn_code}:${line.uqc}:${line.gst_rate}`;
+      const row = table.get(key) ?? {
+        hsnCode: line.hsn_code,
+        uqc: line.uqc,
+        rate: line.gst_rate,
+        quantity: '0.000',
+        totalValue: '0.00',
+        taxableValue: '0.00',
+        igst: '0.00',
+        cgst: '0.00',
+        sgst: '0.00',
+        cess: '0.00',
+      };
+      subtractFrom(row as unknown as RateBucket, line);
+      row.totalValue = sumMoney([row.taxableValue, row.igst, row.cgst, row.sgst, row.cess]);
+      table.set(key, row);
+    }
+  }
+
   if (unclassified.size > 0) {
     issues.push(
       `${unclassified.size} invoice(s) have lines with no HSN code or GST rule, left out above: ${[...unclassified].slice(0, 10).join(', ')}${
@@ -1080,6 +1161,14 @@ export function buildGstr1(currency: string, from: string, to: string, profile: 
       issued: numbers.length,
       cancelled: 0,
     },
+    cdnr: [...cdnr.values()].map(withRates),
+    cdnur: [...cdnur.values()].map(withRates),
+    creditNotes: {
+      series: 'Credit notes',
+      from: [...noteNumbers].sort()[0] ?? null,
+      to: [...noteNumbers].sort().reverse()[0] ?? null,
+      issued: noteNumbers.size,
+    },
     issues,
   };
 }
@@ -1094,9 +1183,13 @@ function addQuantity(a: string, b: string): string {
   return `${total / 1000n}.${(total % 1000n).toString().padStart(3, '0')}`;
 }
 
-export function buildGstr3b(currency: string, from: string, to: string, profile: TaxProfile, lines: GstLineRow[]): Gstr3b {
+export function buildGstr3b(currency: string, from: string, to: string, profile: TaxProfile, lines: GstLineRow[], notes: CreditNoteLineRow[] = []): Gstr3b {
   const taxable = lines.filter((l) => l.taxability === 'taxable');
+  const taxableNotes = notes.filter((l) => l.taxability === 'taxable');
+  // Outward supplies net of the period's credit notes (GST Act s.34).
   const sum = (rows: GstLineRow[], key: 'taxable_value' | 'igst' | 'cgst' | 'sgst' | 'cess') => sumMoney(rows.map((r) => r[key]));
+  const net = (rows: GstLineRow[], credited: GstLineRow[], key: 'taxable_value' | 'igst' | 'cgst' | 'sgst' | 'cess') =>
+    subtractMoney(sum(rows, key), sum(credited, key));
   const interUnregistered = new Map<string, { taxable: string[]; igst: string[] }>();
   for (const l of taxable) {
     if (l.intra_state || l.buyer_gstin) continue;
@@ -1106,35 +1199,47 @@ export function buildGstr3b(currency: string, from: string, to: string, profile:
     e.igst.push(l.igst);
     interUnregistered.set(pos, e);
   }
-  const notes = [
+  for (const l of taxableNotes) {
+    if (l.intra_state || l.buyer_gstin) continue;
+    const pos = l.place_of_supply ?? '';
+    const e = interUnregistered.get(pos) ?? { taxable: [], igst: [] };
+    e.taxable.push(subtractMoney('0', l.taxable_value));
+    e.igst.push(subtractMoney('0', l.igst));
+    interUnregistered.set(pos, e);
+  }
+  const remarks = [
     'Input tax credit (table 4) is not tracked in Morbeez — fresh produce bought from farmers carries no GST. Add ITC from your purchase records.',
     'Tax on reverse charge (e.g. goods transport by a GTA) is not tracked — add it from your records.',
   ];
   if (lines.some((l) => l.taxability === 'unclassified')) {
-    notes.push('Some sales in the period have no HSN code or GST rule and are left out — see the GSTR-1 view.');
+    remarks.push('Some sales in the period have no HSN code or GST rule and are left out — see the GSTR-1 view.');
   }
-  if (profile.registrationType !== 'regular') notes.unshift('GSTR-3B is filed by regular taxpayers — shown for reference.');
+  if (profile.registrationType !== 'regular') remarks.unshift('GSTR-3B is filed by regular taxpayers — shown for reference.');
+  const noteCount = new Set(notes.map((n) => n.note_id)).size;
+  if (noteCount > 0) remarks.push(`${noteCount} credit note(s) issued in the period are netted off the outward supplies.`);
   const outward = {
-    taxableValue: sum(taxable, 'taxable_value'),
-    igst: sum(taxable, 'igst'),
-    cgst: sum(taxable, 'cgst'),
-    sgst: sum(taxable, 'sgst'),
-    cess: sum(taxable, 'cess'),
+    taxableValue: net(taxable, taxableNotes, 'taxable_value'),
+    igst: net(taxable, taxableNotes, 'igst'),
+    cgst: net(taxable, taxableNotes, 'cgst'),
+    sgst: net(taxable, taxableNotes, 'sgst'),
+    cess: net(taxable, taxableNotes, 'cess'),
   };
+  const nilExempt = (rows: GstLineRow[]) => rows.filter((l) => l.taxability === 'nil_rated' || l.taxability === 'exempt');
+  const nonGst = (rows: GstLineRow[]) => rows.filter((l) => l.taxability === 'non_gst');
   return {
     currency,
     from,
     to,
     outwardTaxable: outward,
-    outwardNilExempt: sum(lines.filter((l) => l.taxability === 'nil_rated' || l.taxability === 'exempt'), 'taxable_value'),
-    outwardNonGst: sum(lines.filter((l) => l.taxability === 'non_gst'), 'taxable_value'),
+    outwardNilExempt: net(nilExempt(lines), nilExempt(notes), 'taxable_value'),
+    outwardNonGst: net(nonGst(lines), nonGst(notes), 'taxable_value'),
     interStateToUnregistered: [...interUnregistered.entries()].map(([pos, e]) => ({
       placeOfSupply: pos,
       taxableValue: sumMoney(e.taxable),
       igst: sumMoney(e.igst),
     })),
     taxPayable: { igst: outward.igst, cgst: outward.cgst, sgst: outward.sgst, cess: outward.cess },
-    notes,
+    notes: remarks,
   };
 }
 

@@ -16,7 +16,8 @@ import {
   InvoiceRecord,
   PaymentMethod,
 } from './entities/finance-engine.entity';
-import { addDays, allocateInOrder, daysBetween, financeChargeAnnual, laterDate } from './finance-math';
+import { addDays, allocateInOrder, daysBetween, disputeCatchUp, financeChargeAnnual, laterDate } from './finance-math';
+import { DISPUTE_STALE_DAYS } from './disputes.service';
 import { RecordCustomerPaymentDto } from './dto/record-customer-payment.dto';
 
 const PAYMENT_ENTITY = 'customer_payment';
@@ -136,8 +137,11 @@ export class ReceivablesService {
       sourceInvoiceId: null,
       issuedAt: input.deliveredAt,
       // Fixed now from the terms in force (the order's own, else the
-      // customer's) — a later terms change never re-dates it.
+      // customer's) — a later terms change never re-dates it. On
+      // Bill-to-Bill terms this is the backstop: the bill falls due sooner
+      // if the customer's next bill comes first (MS §30; invoice_balance).
       dueDate: addDays(today, input.creditTermDays ?? customer.paymentTermsDays),
+      billToBill: customer.billToBill && (input.creditTermDays === null || input.creditTermDays === undefined),
       // What the customer owes: the goods plus any GST on them.
       amount: tax.total,
       createdBy: actorUserId,
@@ -333,15 +337,16 @@ export class ReceivablesService {
     const asOf = asOfInput ?? today;
     if (asOf > today) throw new BadRequestException('asOf cannot be after today');
 
-    const candidates = await this.db.withTenant(tenantId, (client) =>
-      this.receivables.financeChargeCandidatesWithClient(client, asOf),
-    );
-    const byCustomer = new Map<string, typeof candidates>();
-    for (const c of candidates) byCustomer.set(c.customerId, [...(byCustomer.get(c.customerId) ?? []), c]);
+    const { candidates, catchUps } = await this.db.withTenant(tenantId, async (client) => ({
+      candidates: await this.receivables.financeChargeCandidatesWithClient(client, asOf),
+      catchUps: await this.receivables.catchUpCandidatesWithClient(client, asOf, DISPUTE_STALE_DAYS, null),
+    }));
+    const customerIds = [...new Set([...candidates.map((c) => c.customerId), ...catchUps.map((c) => c.customerId)])];
 
     const chargeIds: string[] = [];
     let deferred = 0;
-    for (const [customerId, invoices] of byCustomer) {
+    for (const customerId of customerIds) {
+      const invoices = candidates.filter((c) => c.customerId === customerId);
       await this.db.withTenant(tenantId, async (client) => {
         await this.receivables.lockCustomerWithClient(client, customerId);
         const customer = await this.customers.getByIdWithClient(client, customerId);
@@ -349,8 +354,9 @@ export class ReceivablesService {
         const open = new Map(
           (await this.receivables.openInvoicesForCustomerWithClient(client, customerId)).map((i) => [i.id, i]),
         );
-        // A dispute pauses the charge on the disputed amount only (client Q&A, finance).
-        const disputed = await this.receivables.openDisputedByInvoiceWithClient(client, invoices.map((i) => i.invoiceId));
+        // A dispute pauses the charge on the disputed amount only (client Q&A, finance; MS §32) —
+        // unless nobody has acted on it for 30 days.
+        const pausing = await this.receivables.pausingDisputesByInvoiceWithClient(client, invoices.map((i) => i.invoiceId), DISPUTE_STALE_DAYS);
 
         for (const candidate of invoices) {
           const current = open.get(candidate.invoiceId);
@@ -358,7 +364,8 @@ export class ReceivablesService {
           const periodStart = laterDate(candidate.lastPeriodEnd ?? '0000-01-01', addDays(candidate.dueDate, candidate.graceDays));
           const days = daysBetween(periodStart, asOf);
           if (days <= 0) continue;
-          const underDispute = disputed.get(current.id) ?? '0.00';
+          const pauses = pausing.get(current.id) ?? [];
+          const underDispute = sumMoney(pauses.map((p) => p.amount));
           const principal = compareMoney(underDispute, current.outstanding) >= 0 ? '0.00' : subtractMoney(current.outstanding, underDispute);
           if (compareMoney(principal, '0') <= 0) continue;
           const amount = financeChargeAnnual(principal, customer.financeChargeRateAnnual, days);
@@ -366,19 +373,49 @@ export class ReceivablesService {
             deferred += 1;
             continue;
           }
-          chargeIds.push(
-            await this.postFinanceChargeWithClient(client, tenantId, actorUserId, {
-              customerId,
-              customerName: customer.name,
-              source: current,
-              periodStart,
-              periodEnd: asOf,
-              days,
-              principal,
-              rate: customer.financeChargeRateAnnual,
-              amount,
-            }),
-          );
+          const chargeId = await this.postFinanceChargeWithClient(client, tenantId, actorUserId, {
+            customerId,
+            customerName: customer.name,
+            source: current,
+            periodStart,
+            periodEnd: asOf,
+            days,
+            principal,
+            rate: customer.financeChargeRateAnnual,
+            amount,
+          });
+          // What this period left out, so it can be charged once the pause ends.
+          await this.receivables.insertPausesWithClient(client, tenantId, chargeId, pauses);
+          chargeIds.push(chargeId);
+        }
+
+        // Pauses that are over: the part not accepted, or all of a dispute left
+        // 30 days without action, charged for every day it was left out (MS §32).
+        for (const c of await this.receivables.catchUpCandidatesWithClient(client, asOf, DISPUTE_STALE_DAYS, customerId)) {
+          const catchUp = disputeCatchUp(c.principal, customer.financeChargeRateAnnual, c.periods);
+          if (!catchUp) continue;
+          if (compareMoney(catchUp.amount, MIN_FINANCE_CHARGE) < 0) {
+            deferred += 1;
+            continue;
+          }
+          const chargeId = await this.postFinanceChargeWithClient(client, tenantId, actorUserId, {
+            customerId,
+            customerName: customer.name,
+            source: { id: c.invoiceId, invoiceNumber: c.invoiceNumber },
+            periodStart: catchUp.periodStart,
+            periodEnd: catchUp.periodEnd,
+            days: catchUp.days,
+            principal: c.principal,
+            rate: customer.financeChargeRateAnnual,
+            amount: catchUp.amount,
+            disputeId: c.disputeId,
+            dueDate: asOf,
+            description: `Finance charge on ${c.invoiceNumber}: ${c.principal} ${
+              c.stale ? 'disputed with no action for 30 days' : 'disputed and not accepted'
+            } × ${customer.financeChargeRateAnnual}% a year × ${catchUp.days} days ÷ 365, for the days it was left out`,
+          });
+          await this.receivables.insertCatchUpsWithClient(client, tenantId, chargeId, c.pauseIds);
+          chargeIds.push(chargeId);
         }
       });
     }
@@ -725,17 +762,21 @@ export class ReceivablesService {
     c: {
       customerId: string;
       customerName: string;
-      source: OpenInvoice;
+      source: Pick<OpenInvoice, 'id' | 'invoiceNumber'>;
       periodStart: string;
       periodEnd: string;
       days: number;
       principal: string;
       rate: string;
       amount: string;
+      /** A catch-up for a dispute's paused days: its dispute, due date and wording. */
+      disputeId?: string;
+      dueDate?: string;
+      description?: string;
     },
   ): Promise<string> {
     const invoiceNumber = await this.receivables.nextInvoiceNumberWithClient(client, tenantId, 'finance_charge');
-    const description = `Finance charge on ${c.source.invoiceNumber}: ${c.principal} × ${c.rate}% a year × ${c.days} days ÷ 365`;
+    const description = c.description ?? `Finance charge on ${c.source.invoiceNumber}: ${c.principal} × ${c.rate}% a year × ${c.days} days ÷ 365`;
     const { invoiceId } = await this.receivables.insertInvoiceWithClient(client, {
       tenantId,
       invoiceNumber,
@@ -744,7 +785,7 @@ export class ReceivablesService {
       orderId: null,
       sourceInvoiceId: c.source.id,
       issuedAt: new Date(),
-      dueDate: c.periodEnd,
+      dueDate: c.dueDate ?? c.periodEnd,
       amount: c.amount,
       createdBy: actorUserId,
       lines: [
@@ -762,6 +803,7 @@ export class ReceivablesService {
       days: c.days,
       amount: c.amount,
       createdBy: actorUserId,
+      disputeId: c.disputeId ?? null,
     });
     await this.ledger.postWithClient(client, {
       tenantId,
@@ -783,7 +825,7 @@ export class ReceivablesService {
       action: 'create',
       entityType: INVOICE_ENTITY,
       entityId: invoiceId,
-      after: { invoiceNumber, sourceInvoiceId: c.source.id, periodStart: c.periodStart, periodEnd: c.periodEnd, amount: c.amount },
+      after: { invoiceNumber, sourceInvoiceId: c.source.id, periodStart: c.periodStart, periodEnd: c.periodEnd, amount: c.amount, disputeId: c.disputeId ?? null },
     });
     return chargeId;
   }

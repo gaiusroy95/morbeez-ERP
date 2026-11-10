@@ -49,4 +49,6 @@ export interface AgentRecord {
   phone: string | null;
   defaultCommissionPerKg: string;
   status: 'active' | 'archived';
+  /** For TDS on commission (194H). */
+  pan: string | null;
 }

@@ -166,6 +166,7 @@ const cents = (s) => Math.round(Number(s) * 100);
     check('general customer update no longer accepts credit fields (400)', oldPatch.status === 400, String(oldPatch.status));
     const terms = await owner.post(`/customers/${c1.id}/credit-terms`, {
       version: c1now.version,
+      financeChargeEnabled: true,
       financeChargeRateAnnual: 18.25,
       financeChargeGraceDays: 0,
     });

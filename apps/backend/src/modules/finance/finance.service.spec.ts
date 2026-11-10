@@ -207,7 +207,7 @@ describe('FinanceService', () => {
       account('revenue_sales', 'revenue', '0.00', '2800.00', '-2800.00'),
       account('finance_costs', 'expense', '17.50', '0.00', '17.50'),
     ]);
-    repo.subledgerTotals.mockResolvedValue({ receivable: '1800.00', payable: '0.00', advances: '500.00' });
+    repo.subledgerTotals.mockResolvedValue({ receivable: '1800.00', payable: '0.00', advances: '500.00', agents: '0.00' });
 
     const tb = await service.getTrialBalance('tenant-1');
 
@@ -217,6 +217,7 @@ describe('FinanceService', () => {
       { name: 'Accounts receivable', ledger: '1800.00', subledger: '1800.00', agrees: true },
       { name: 'Accounts payable — farmers', ledger: '0.00', subledger: '0.00', agrees: true },
       { name: 'Farmer advances', ledger: '500.00', subledger: '500.00', agrees: true },
+      { name: 'Accounts payable — agents', ledger: '0.00', subledger: '0.00', agrees: true },
     ]);
   });
 
@@ -225,7 +226,7 @@ describe('FinanceService', () => {
       account('accounts_payable_farmer', 'liability', '0.00', '1900.00', '-1900.00'),
       account('inventory_asset', 'asset', '1900.00', '0.00', '1900.00'),
     ]);
-    repo.subledgerTotals.mockResolvedValue({ receivable: '0.00', payable: '1850.00', advances: '0.00' });
+    repo.subledgerTotals.mockResolvedValue({ receivable: '0.00', payable: '1850.00', advances: '0.00', agents: '0.00' });
 
     const tb = await service.getTrialBalance('tenant-1');
 

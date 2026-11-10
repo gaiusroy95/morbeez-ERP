@@ -63,7 +63,7 @@ export class AiRepository {
     const s = r.rows[0];
     return s
       ? { targetMarginPct: s.m, maxPriceMovePct: s.step, minCustomerMarginPct: s.minc, costOfCapitalPct: s.coc, defaultCostPerKm: s.km, disabledTypes: s.disabled_types, version: s.version }
-      : { targetMarginPct: '20.00', maxPriceMovePct: '15.00', minCustomerMarginPct: '5.00', costOfCapitalPct: '12.00', defaultCostPerKm: '18.00', disabledTypes: [], version: 0 };
+      : { targetMarginPct: '20.00', maxPriceMovePct: '15.00', minCustomerMarginPct: '5.00', costOfCapitalPct: '18.00', defaultCostPerKm: '18.00', disabledTypes: [], version: 0 };
   }
 
   async saveSettings(client: PoolClient, tenantId: string, userId: string, version: number, s: Omit<AiSettings, 'version'>): Promise<boolean> {

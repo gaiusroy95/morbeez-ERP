@@ -58,6 +58,8 @@ const baseCustomer: CustomerRecord = {
   financeChargeGraceDays: 0,
   creditHold: false,
   creditHoldReason: null,
+  financeChargeEnabled: false,
+  billToBill: false,
   isWalkIn: false,
   doNotCall: false,
   qrToken: 'QR0000000000TEST',

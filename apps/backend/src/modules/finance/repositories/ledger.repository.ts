@@ -51,7 +51,12 @@ export type LedgerAccount =
   | 'crate_recoveries'
   | 'crate_purchases'
   | 'backhaul_income'
-  | 'fastag_balance';
+  | 'fastag_balance'
+  | 'sales_returns'
+  | 'bad_debt_expense'
+  | 'allowance_doubtful_accounts'
+  | 'agent_commission'
+  | 'accounts_payable_agent';
 
 export type LedgerEntryType =
   | 'invoice_issued'
@@ -92,10 +97,15 @@ export type LedgerEntryType =
   | 'crates_purchased'
   | 'backhaul_income_received'
   | 'fastag_recharged'
-  | 'fastag_charged';
+  | 'fastag_charged'
+  | 'credit_note_issued'
+  | 'bad_debt_provisioned'
+  | 'receivable_written_off'
+  | 'agent_commission_accrued'
+  | 'agent_paid';
 
 export interface LedgerParty {
-  type: 'customer' | 'farmer';
+  type: 'customer' | 'farmer' | 'agent';
   id: string;
 }
 
@@ -120,7 +130,7 @@ export interface LedgerPosting<A extends string = LedgerAccount> {
 
 export interface PostedLine {
   account: LedgerAccount;
-  partyType: 'customer' | 'farmer' | null;
+  partyType: 'customer' | 'farmer' | 'agent' | null;
   partyId: string | null;
   debit: string;
   credit: string;
@@ -222,7 +232,7 @@ export class LedgerRepository {
     if (!entry.rows[0]) return null;
     const lines = await client.query<{
       account_code: LedgerAccount;
-      party_type: 'customer' | 'farmer' | null;
+      party_type: 'customer' | 'farmer' | 'agent' | null;
       party_id: string | null;
       debit: string;
       credit: string;

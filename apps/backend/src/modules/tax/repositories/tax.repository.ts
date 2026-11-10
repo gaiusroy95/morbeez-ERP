@@ -58,6 +58,14 @@ export interface GstLineRow {
   cess: string;
 }
 
+/** A credit note's share of one invoice line, classified as that line was taxed (Master Spec v3 P6, F1). */
+export interface CreditNoteLineRow extends GstLineRow {
+  note_id: string;
+  note_number: string;
+  noted_on: string;
+  note_total: string;
+}
+
 export interface DeductionRow {
   id: string;
   section_code: string;
@@ -413,6 +421,31 @@ export class TaxRepository {
        JOIN tax.invoice_line_tax lt ON lt.invoice_line_id = l.id
        WHERE i.kind IN ('sale', 'crate_charge', 'spot_sale') AND (i.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
        ORDER BY i.invoice_number, l.id`,
+      [timezone, from, to],
+    );
+    return result.rows;
+  }
+
+  /**
+   * Credit notes issued in the period, line by line, as the lines they credit
+   * were taxed — what GSTR-1 reports (CDNR, CDNUR) and GSTR-3B nets off. A
+   * finance-charge invoice's notes are left out, as its invoices are.
+   */
+  async creditNoteLines(client: PoolClient, timezone: string, from: string, to: string): Promise<CreditNoteLineRow[]> {
+    const result = await client.query<CreditNoteLineRow>(
+      `SELECT n.id AS note_id, n.credit_note_number AS note_number, (n.issued_at AT TIME ZONE $1)::date::text AS noted_on, n.amount::text AS note_total,
+              i.id AS invoice_id, i.invoice_number, (i.issued_at AT TIME ZONE $1)::date::text AS issued_on,
+              c.name AS customer_name, it.buyer_gstin, it.place_of_supply, it.intra_state, it.total::text AS invoice_total,
+              lt.taxability, lt.hsn_code, lt.uqc, lt.gst_rate::text, '0.000' AS quantity, nl.taxable_value::text,
+              nl.cgst::text, nl.sgst::text, nl.igst::text, nl.cess::text
+       FROM money.credit_note n
+       JOIN money.credit_note_line nl ON nl.credit_note_id = n.id
+       JOIN money.invoice i ON i.id = n.invoice_id
+       JOIN tax.invoice_tax it ON it.invoice_id = i.id
+       JOIN trading_partners.customer c ON c.id = i.customer_id
+       JOIN tax.invoice_line_tax lt ON lt.invoice_line_id = nl.invoice_line_id
+       WHERE i.kind IN ('sale', 'crate_charge', 'spot_sale') AND (n.issued_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
+       ORDER BY n.credit_note_number, nl.id`,
       [timezone, from, to],
     );
     return result.rows;

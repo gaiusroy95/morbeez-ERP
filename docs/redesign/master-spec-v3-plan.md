@@ -282,6 +282,21 @@ Rules and their proof (written before the code, 9 Nov 2026):
   the paisa in tests; the variance appears on closed trips.
 
 ### P6 — Finance completions (MS §11–12, §30–31, §53; FX 2, 5, 6, 12)
+
+Rules and their proof (written before the code, 10 Nov 2026; Accounting Engine rule IDs where it has them):
+
+| # | Rule | Built as | Proved by |
+|---|---|---|---|
+| F1 | Credit notes (CN.1–CN.4): against an invoice, never editing it; Dr Sales returns and allowances (contra revenue) and the output tax it carried, Cr receivable; approved by someone other than the invoice's issuer | `money.credit_note` (CN-000001), reducing the invoice's outstanding in `invoice_balance`; issued by closing a dispute with an accepted amount (or directly by the owner) | `credit-notes.spec.ts`; `finance-p6-e2e.js` (trial balance even) |
+| F2 | Dispute finance (MS §32): the accepted part stops for good (its credit note); the rejected part's paused interest is caught up from the original due date | A dispute closes with accepted and rejected amounts; the finance-charge run charges the rejected amount for the paused days once | `finance-math.spec.ts`; `finance-p6-e2e.js` |
+| F3 | Bad debt (BD.2, BD.4): written off only by the owner or a finance lead, never automatically; Dr Bad debts, Cr receivable; the customer goes on credit hold for review | `money.receivable_write_off`, reducing outstanding; customer credit hold "Bad debt written off — review credit terms" | `finance-p6-e2e.js` |
+| F4 | Agent commission (AGT.1–AGT.3): accepted KG × the purchase's commission per KG, when the lot is accepted; Dr Agent commission, Cr Accounts payable — agents (party: the agent), traceable to the lot and rate | New accounts and the `agent` ledger party; paid like a farmer payable, with TDS 194H withheld where it applies | `finance-p6-e2e.js` |
+| F5 | Finance cost (MS §31): internal cost of capital 18% by default; the customer charge only when switched on, only past due | `ai_settings` default 18 (a business that never changed it moves to 18); `customer.finance_charge_enabled`, off by default, on for customers who already had a rate | `receivables.service.spec.ts`; `finance-p6-e2e.js` |
+| F6 | Credit terms as dated versions, not overwrites (FX 12) | `customer_terms_version`: every change of limit, days, charge, hold, with who and when; the customer's Credit tab lists them | `finance-p6-e2e.js` |
+| F7 | Farmer payment terms (MS §12): Immediate, Bill-to-Bill, Net 3/7/10/15/20/30/45/60, Custom; due dates; overdue; average payment days | `farmer.payment_terms_days` (+ Bill-to-Bill); a payable's due date from the terms in force when it accrued; the farmer profile's overdue and average days | `finance-p6-e2e.js` |
+| F8 | Customer Bill-to-Bill (MS §30): the previous bill falls due when the next is issued | The invoice keeps its terms; `invoice_balance` reads a Bill-to-Bill invoice's due date as the next invoice's issue date | `finance-p6-e2e.js` |
+| F9 | Driver cash recovery (MS §53): approved expenses, then settlements, then advance recovery | Checked against what's built; a test either proves it or the gap is written down | `finance-p6-e2e.js` |
+
 - Farmer payment terms (Immediate, Bill-to-Bill, Net 3/7/10/15/20/30/45/60,
   Custom), due dates on payables, farmer overdue and average payment days.
 - Customer **Bill-to-Bill** term (the previous bill falls due at the next

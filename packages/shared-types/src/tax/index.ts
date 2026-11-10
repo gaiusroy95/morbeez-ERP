@@ -232,6 +232,21 @@ export interface Gstr1 {
     b2c: HsnSummaryRow[];
   };
   documents: { series: string; from: string | null; to: string | null; issued: number; cancelled: number };
+  /** Master Spec v3 P6: credit notes to registered buyers (table 9B, CDNR). */
+  cdnr: {
+    noteNumber: string;
+    noteDate: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    buyerGstin: string;
+    buyerName: string;
+    noteValue: string;
+    placeOfSupply: string;
+    rates: RateBucket[];
+  }[];
+  /** Credit notes to unregistered buyers against B2CL invoices (CDNUR); notes on B2CS supplies are netted into b2cs. */
+  cdnur: { noteNumber: string; noteDate: string; invoiceNumber: string; invoiceDate: string; noteValue: string; placeOfSupply: string; rates: RateBucket[] }[];
+  creditNotes: { series: string; from: string | null; to: string | null; issued: number };
   issues: string[];
 }
 

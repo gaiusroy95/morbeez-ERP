@@ -143,8 +143,16 @@ export interface InvoiceRecord {
   dueDate: IsoDate;
   amount: string;
   paid: string;
+  /** Taken off by credit notes (CN.1). */
+  credited: string;
+  /** Written off as a bad debt (BD.2). */
+  writtenOff: string;
   outstanding: string;
   state: InvoiceState;
+  /** Bill-to-Bill (MS §30): due when the next bill is issued, or at dueDate's backstop if sooner. */
+  billToBill: boolean;
+  /** Who issued it — they can't approve a credit note against it (CN.4). */
+  createdBy: string;
   lines?: InvoiceLineRecord[]; // detail only
   payments?: { paymentId: string; amount: string; receivedAt: IsoDateTime; method: PaymentMethod; reversed: boolean }[];
 }
@@ -252,7 +260,81 @@ export interface InvoiceDispute {
   idleDays: number;
   resolvedAt: IsoDateTime | null;
   resolution: string | null;
+  /** Once closed (MS §32): what was accepted (credited) and what wasn't (charged from the original due date). */
+  acceptedAmount: string | null;
+  rejectedAmount: string | null;
+  creditNoteId: string | null;
+  creditNoteNumber: string | null;
   version: number;
+}
+
+/** A credit note (Accounting Engine CN.1–CN.4): what the customer owes less on one invoice, GST included. */
+export interface CreditNoteRecord {
+  id: string;
+  creditNoteNumber: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  disputeId: string | null;
+  reason: string;
+  taxableValue: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  cess: string;
+  amount: string;
+  issuedAt: IsoDateTime;
+  issuedBy: string;
+  issuedByLogin: string | null;
+}
+
+/** A receivable written off as a bad debt (BD.2) — by the owner or a finance lead, never automatically. */
+export interface ReceivableWriteOffRecord {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  amount: string;
+  reason: string;
+  writtenOffAt: IsoDateTime;
+  writtenOffBy: string;
+  writtenOffByLogin: string | null;
+}
+
+/** An agent's commission account (MS §11; AGT.1–AGT.3): earned on graded lots, settled by payments. */
+export interface AgentAccount {
+  agentId: string;
+  name: string;
+  phone: string | null;
+  pan: string | null;
+  status: 'active' | 'archived';
+  earned: string;
+  settled: string;
+  owed: string;
+  commissions?: {
+    id: string;
+    lotId: string;
+    purchaseOrderId: string;
+    purchaseOrderNumber: number;
+    productName: string;
+    acceptedKg: string;
+    ratePerKg: string;
+    amount: string;
+    accruedAt: IsoDateTime;
+  }[];
+  payments?: {
+    id: string;
+    agentId: string;
+    amount: string;
+    tdsSection: string | null;
+    tdsAmount: string;
+    netPaid: string;
+    method: PaymentMethod;
+    reference: string | null;
+    paidAt: IsoDateTime;
+  }[];
 }
 
 /** GET /finance/collections — the owner's Collections (redesign V1.1, screen 14). */

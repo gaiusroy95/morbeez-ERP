@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { CustomersService } from './customers.service';
 import { CustomersRepository } from './repositories/customers.repository';
@@ -25,6 +25,8 @@ const mockCustomer: CustomerRecord = {
   financeChargeGraceDays: 0,
   creditHold: false,
   creditHoldReason: null,
+  financeChargeEnabled: false,
+  billToBill: false,
   isWalkIn: false,
   doNotCall: false,
   qrToken: 'QR0000000000TEST',
@@ -56,6 +58,9 @@ describe('CustomersService', () => {
             createWithClient: jest.fn(),
             updateWithClient: jest.fn(),
             setStatusWithClient: jest.fn(),
+            updateCreditTermsWithClient: jest.fn(),
+            recordTermsVersionWithClient: jest.fn(),
+            holdForReviewWithClient: jest.fn(),
           },
         },
         {
@@ -84,6 +89,8 @@ describe('CustomersService', () => {
     await service.create('tenant-1', 'user-1', { name: 'Test Restaurant' });
 
     expect(db.withTenant).toHaveBeenCalledWith('tenant-1', expect.any(Function));
+    // F6: the terms it starts with are its first dated version.
+    expect(repo.recordTermsVersionWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 'created', 'user-1');
     expect(audit.record).toHaveBeenCalledWith(
       fakeClient,
       expect.objectContaining({
@@ -94,6 +101,39 @@ describe('CustomersService', () => {
         entityId: mockCustomer.id,
       }),
     );
+  });
+
+  describe('credit terms (Master Spec v3 P6, F5, F6, F8)', () => {
+    it('every change is a new dated version, never an overwrite', async () => {
+      repo.findByIdWithClient.mockResolvedValue(mockCustomer);
+      repo.updateCreditTermsWithClient.mockResolvedValue({ ...mockCustomer, creditLimit: '90000.00', version: 2 });
+      await service.updateCreditTerms('tenant-1', 'user-1', mockCustomer.id, { version: 1, creditLimit: 90000 });
+      expect(repo.recordTermsVersionWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 'terms', 'user-1');
+    });
+
+    it('the finance charge is switched on only with a rate', async () => {
+      repo.findByIdWithClient.mockResolvedValue({ ...mockCustomer, financeChargeRateAnnual: '0.00' });
+      await expect(service.updateCreditTerms('tenant-1', 'user-1', mockCustomer.id, { version: 1, financeChargeEnabled: true })).rejects.toBeInstanceOf(BadRequestException);
+      repo.updateCreditTermsWithClient.mockResolvedValue(mockCustomer);
+      await service.updateCreditTerms('tenant-1', 'user-1', mockCustomer.id, { version: 1, financeChargeEnabled: true, financeChargeRateAnnual: 18 });
+      expect(repo.updateCreditTermsWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 1, expect.objectContaining({ financeChargeEnabled: true, financeChargeRateAnnual: 18 }));
+    });
+
+    it('Bill-to-Bill needs a backstop of at least a day', async () => {
+      repo.findByIdWithClient.mockResolvedValue({ ...mockCustomer, paymentTermsDays: 0 });
+      await expect(service.updateCreditTerms('tenant-1', 'user-1', mockCustomer.id, { version: 1, billToBill: true })).rejects.toBeInstanceOf(BadRequestException);
+      repo.updateCreditTermsWithClient.mockResolvedValue(mockCustomer);
+      await service.updateCreditTerms('tenant-1', 'user-1', mockCustomer.id, { version: 1, billToBill: true, paymentTermsDays: 15 });
+      expect(repo.updateCreditTermsWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 1, expect.objectContaining({ billToBill: true, paymentTermsDays: 15 }));
+    });
+
+    it('BD.4: a write-off puts the customer on hold, as a version of their terms', async () => {
+      repo.findByIdWithClient.mockResolvedValue(mockCustomer);
+      repo.holdForReviewWithClient.mockResolvedValue({ ...mockCustomer, creditHold: true, creditHoldReason: 'Bad debt' });
+      await service.holdForReviewWithClient(fakeClient as never, 'tenant-1', 'user-1', mockCustomer.id, 'Bad debt');
+      expect(repo.holdForReviewWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 'Bad debt');
+      expect(repo.recordTermsVersionWithClient).toHaveBeenCalledWith(fakeClient, mockCustomer.id, 'write_off', 'user-1');
+    });
   });
 
   it('update() reads the before-state, applies the change, and audits both', async () => {

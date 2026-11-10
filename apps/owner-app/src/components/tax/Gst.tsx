@@ -450,6 +450,39 @@ export function Gstr1View({ data, reference }: { data: Gstr1; reference: TaxRefe
       </div>
       <div className="table-wrap">
         <table className="table statement">
+          <caption className="st-caption">Credit notes — registered buyers (table 9B, CDNR); unregistered against B2C large invoices (CDNUR)</caption>
+          <thead>
+            <tr>
+              <th>Note · invoice</th>
+              <th>Buyer</th>
+              <th className="num">Note value</th>
+              <th className="num">Rate</th>
+              {TAX_HEAD}
+            </tr>
+          </thead>
+          <tbody>
+            {data.cdnr.length + data.cdnur.length === 0 && <EmptyRow colSpan={9}>None.</EmptyRow>}
+            {[...data.cdnr.map((n) => ({ ...n, buyer: `${n.buyerName} · ${n.buyerGstin}` })), ...data.cdnur.map((n) => ({ ...n, buyer: `Unregistered · ${stateOf(n.placeOfSupply)}` }))].flatMap((n) =>
+              n.rates.map((b) => (
+                <tr key={`${n.noteNumber}-${b.rate}`}>
+                  <td>
+                    {n.noteNumber}
+                    <div className="cell-sub">
+                      {n.noteDate} · against {n.invoiceNumber} of {n.invoiceDate}
+                    </div>
+                  </td>
+                  <td>{n.buyer}</td>
+                  <td className="num">{formatAmount(n.noteValue)}</td>
+                  <td className="num">{Number(b.rate)}%</td>
+                  <RateCells b={b} />
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="table-wrap">
+        <table className="table statement">
           <caption className="st-caption">Nil-rated, exempt and non-GST (table 8) — fresh vegetables land here</caption>
           <thead>
             <tr>
@@ -476,6 +509,12 @@ export function Gstr1View({ data, reference }: { data: Gstr1; reference: TaxRefe
       <p className="st-status muted">
         Documents issued (table 13): {data.documents.series} {data.documents.from ?? '—'} to {data.documents.to ?? '—'} ·{' '}
         {data.documents.issued} issued, {data.documents.cancelled} cancelled
+        {data.creditNotes.issued > 0 && (
+          <>
+            {' · '}
+            {data.creditNotes.series} {data.creditNotes.from} to {data.creditNotes.to} · {data.creditNotes.issued} issued
+          </>
+        )}
       </p>
     </div>
   );

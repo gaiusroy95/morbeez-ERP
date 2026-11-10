@@ -4,7 +4,7 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
-import { BankDetails, FarmerRecord } from '../entities/farmer.entity';
+import { BankDetails, FarmerPaymentTerms, FarmerRecord } from '../entities/farmer.entity';
 import { Env } from '../../../config/env.validation';
 
 interface FarmerRow {
@@ -20,6 +20,8 @@ interface FarmerRow {
   updated_at: Date;
   created_by: string;
   place: string | null;
+  payment_terms: FarmerPaymentTerms;
+  payment_terms_days: number | null;
 }
 
 function toRecord(row: FarmerRow): FarmerRecord {
@@ -41,6 +43,8 @@ function toRecord(row: FarmerRow): FarmerRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdBy: row.created_by,
+    paymentTerms: row.payment_terms,
+    paymentTermsDays: row.payment_terms_days,
   };
 }
 
@@ -73,7 +77,7 @@ export class FarmersRepository {
       const [rows, count] = await Promise.all([
         client.query<FarmerRow>(
           `SELECT id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
-                  reliability_rating, status, version, created_at, updated_at, created_by
+                  reliability_rating, status, version, created_at, updated_at, created_by, payment_terms, payment_terms_days
            FROM trading_partners.farmer
            ORDER BY name
            LIMIT $1 OFFSET $2`,
@@ -99,7 +103,7 @@ export class FarmersRepository {
       `SELECT id, tenant_id, name, contact, place,
               CASE WHEN bank_details_encrypted IS NULL THEN NULL
                    ELSE pgp_sym_decrypt(bank_details_encrypted, $2) END AS bank_details_decrypted,
-              reliability_rating, status, version, created_at, updated_at, created_by
+              reliability_rating, status, version, created_at, updated_at, created_by, payment_terms, payment_terms_days
        FROM trading_partners.farmer
        WHERE id = $1`,
       [id, this.encryptionKey],
@@ -111,7 +115,14 @@ export class FarmersRepository {
     client: PoolClient,
     tenantId: string,
     createdBy: string,
-    fields: { name: string; contact: Record<string, unknown>; bankDetails?: BankDetails; place?: string | null },
+    fields: {
+      name: string;
+      contact: Record<string, unknown>;
+      bankDetails?: BankDetails;
+      place?: string | null;
+      paymentTerms?: FarmerPaymentTerms;
+      paymentTermsDays?: number | null;
+    },
   ): Promise<FarmerRecord> {
     // Same shape regardless of whether bankDetails is present — a fixed
     // parameter count/order that doesn't depend on building the SQL text
@@ -120,14 +131,14 @@ export class FarmersRepository {
     // from silently misaligning params.
     const result = await client.query<FarmerRow>(
       `INSERT INTO trading_partners.farmer
-         (tenant_id, name, contact, bank_details_encrypted, created_by, place)
+         (tenant_id, name, contact, bank_details_encrypted, created_by, place, payment_terms, payment_terms_days)
        VALUES (
          $1, $2, $3,
          CASE WHEN $4::text IS NULL THEN NULL ELSE pgp_sym_encrypt($4, $5) END,
-         $6, $7
+         $6, $7, COALESCE($8, 'immediate'), $9
        )
        RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
-                 reliability_rating, status, version, created_at, updated_at, created_by`,
+                 reliability_rating, status, version, created_at, updated_at, created_by, payment_terms, payment_terms_days`,
       [
         tenantId,
         fields.name,
@@ -136,6 +147,8 @@ export class FarmersRepository {
         this.encryptionKey,
         createdBy,
         fields.place ?? null,
+        fields.paymentTerms ?? null,
+        fields.paymentTermsDays ?? null,
       ],
     );
     return toRecord(result.rows[0]);
@@ -151,6 +164,8 @@ export class FarmersRepository {
       bankDetails: BankDetails;
       reliabilityRating: number;
       place: string | null;
+      paymentTerms: FarmerPaymentTerms;
+      paymentTermsDays: number | null;
     }>,
   ): Promise<FarmerRecord> {
     const result = await client.query<FarmerRow>(
@@ -160,11 +175,13 @@ export class FarmersRepository {
          bank_details_encrypted = CASE WHEN $5::text IS NULL THEN bank_details_encrypted ELSE pgp_sym_encrypt($5, $6) END,
          reliability_rating = COALESCE($7, reliability_rating),
          place = CASE WHEN $8::boolean THEN $9 ELSE place END,
+         payment_terms = COALESCE($10, payment_terms),
+         payment_terms_days = CASE WHEN $10::text IS NULL THEN payment_terms_days ELSE $11 END,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
        RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
-                 reliability_rating, status, version, created_at, updated_at, created_by`,
+                 reliability_rating, status, version, created_at, updated_at, created_by, payment_terms, payment_terms_days`,
       [
         id,
         expectedVersion,
@@ -175,6 +192,8 @@ export class FarmersRepository {
         fields.reliabilityRating,
         fields.place !== undefined,
         fields.place ?? null,
+        fields.paymentTerms ?? null,
+        fields.paymentTermsDays ?? null,
       ],
     );
     if (result.rowCount === 0) {
@@ -192,7 +211,7 @@ export class FarmersRepository {
       `UPDATE trading_partners.farmer SET status = $2, version = version + 1, updated_at = now()
        WHERE id = $1
        RETURNING id, tenant_id, name, contact, place, NULL AS bank_details_decrypted,
-                 reliability_rating, status, version, created_at, updated_at, created_by`,
+                 reliability_rating, status, version, created_at, updated_at, created_by, payment_terms, payment_terms_days`,
       [id, status],
     );
     return result.rows[0] ? toRecord(result.rows[0]) : null;

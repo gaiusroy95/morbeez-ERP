@@ -151,7 +151,7 @@ function client(token) {
     // ---- Finance charge: annual rate ÷ 365, paused on a disputed amount ----
     const today = (await db.query(`SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date::text AS d`)).rows[0].d;
     let terms = await owner.get(`/customers/${hotel.id}`);
-    terms = await owner.post(`/customers/${hotel.id}/credit-terms`, { version: terms.version, financeChargeRateAnnual: 18.25, financeChargeGraceDays: 0 });
+    terms = await owner.post(`/customers/${hotel.id}/credit-terms`, { version: terms.version, financeChargeEnabled: true, financeChargeRateAnnual: 18.25, financeChargeGraceDays: 0 });
     check('credit terms take an annual rate', terms.financeChargeRateAnnual === '18.25', terms.financeChargeRateAnnual);
     const hotelInvoices = (await owner.get(`/finance/invoices?customerId=${hotel.id}`)).items;
     for (const i of hotelInvoices) {

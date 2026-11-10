@@ -13,3 +13,15 @@ function toCents(value: string): bigint {
   const cents = BigInt(whole || '0') * 100n + BigInt((fraction + '00').slice(0, 2));
   return negative ? -cents : cents;
 }
+
+/** `value` less another, exactly. */
+export function subtractMoney(value: string, less: string): string {
+  return sumMoney([value, less.startsWith('-') ? less.slice(1) : `-${less}`]);
+}
+
+/** `ratePct`% of `value`, half-up to the paisa — what the server withholds (Constitution III.2). */
+export function percentOfMoney(value: string, ratePct: string): string {
+  const basisPoints = toCents(ratePct); // "2.00" % → 200 basis points
+  const cents = (toCents(value) * basisPoints * 2n + 10_000n) / 20_000n;
+  return sumMoney([`${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`]);
+}

@@ -1,5 +1,11 @@
 export type FarmerStatus = 'active' | 'archived';
 
+/** Master Spec §12: when a graded lot's payable falls due. */
+export type FarmerPaymentTerms = 'immediate' | 'bill_to_bill' | 'net' | 'custom';
+
+/** The Net terms the spec offers (MS §12); Custom takes any 1–180 days. */
+export const FARMER_NET_DAYS = [3, 7, 10, 15, 20, 30, 45, 60] as const;
+
 export interface FarmerContact {
   phone?: string;
   email?: string;
@@ -29,4 +35,8 @@ export interface FarmerRecord {
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
+  /** Immediate: due the day the lot is graded; Net/Custom: that many days later; Bill-to-Bill: when the next lot is, or after paymentTermsDays if sooner. */
+  paymentTerms: FarmerPaymentTerms;
+  /** Net, Custom and Bill-to-Bill (its backstop); null for Immediate. */
+  paymentTermsDays: number | null;
 }

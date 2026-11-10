@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -50,4 +51,16 @@ export class UpdateFarmerDto {
   @Min(0)
   @Max(5)
   reliabilityRating?: number;
+
+  @ApiPropertyOptional({ enum: ['immediate', 'bill_to_bill', 'net', 'custom'], description: 'When a graded lot falls due (MS §12)' })
+  @IsOptional()
+  @IsIn(['immediate', 'bill_to_bill', 'net', 'custom'])
+  paymentTerms?: 'immediate' | 'bill_to_bill' | 'net' | 'custom';
+
+  @ApiPropertyOptional({ description: 'Net: 3, 7, 10, 15, 20, 30, 45 or 60; Custom and Bill-to-Bill (the longest a payable may wait): 1–180. Not for Immediate.' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(180)
+  paymentTermsDays?: number;
 }

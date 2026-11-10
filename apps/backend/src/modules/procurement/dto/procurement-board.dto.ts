@@ -47,4 +47,33 @@ export class CreateAgentDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   defaultCommissionPerKg?: number;
+
+  @ApiPropertyOptional({ description: 'For TDS on commission (194H): 5 letters, 4 digits, 1 letter' })
+  @IsOptional()
+  @Matches(/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/, { message: 'A PAN is 5 letters, 4 digits, 1 letter' })
+  pan?: string;
+}
+
+/** Editing an agent: their phone, default commission, PAN, or whether they still work with the business. */
+export class UpdateAgentDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Matches(/^[0-9+ -]{6,20}$/, { message: 'phone looks wrong' })
+  phone?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  defaultCommissionPerKg?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Matches(/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/, { message: 'A PAN is 5 letters, 4 digits, 1 letter' })
+  pan?: string;
+
+  @ApiPropertyOptional({ enum: ['active', 'archived'] })
+  @IsOptional()
+  @IsIn(['active', 'archived'])
+  status?: 'active' | 'archived';
 }

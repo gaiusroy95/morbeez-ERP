@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
@@ -20,7 +20,7 @@ import { PurchaseOrderRecord } from './entities/purchase-order.entity';
 import { PickupRecord } from './entities/pickup.entity';
 import { LotRecord } from './entities/lot.entity';
 import { AgentRecord, ProcurementBoard } from './entities/procurement-board.entity';
-import { CreateAgentDto, ProcurementBoardQueryDto } from './dto/procurement-board.dto';
+import { CreateAgentDto, ProcurementBoardQueryDto, UpdateAgentDto } from './dto/procurement-board.dto';
 import { FarmerPaymentRecord, LotPaymentStatus } from '../finance/entities/finance-engine.entity';
 
 @ApiTags('procurement')
@@ -47,6 +47,12 @@ export class ProcurementController {
   @RequirePermissions('procurement:write')
   createAgent(@CurrentUser() user: AuthContext, @Body() dto: CreateAgentDto): Promise<AgentRecord> {
     return this.procurementService.createAgent(user.tenantId, user.userId, dto);
+  }
+
+  @Patch('agents/:id')
+  @RequirePermissions('procurement:write')
+  updateAgent(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAgentDto): Promise<AgentRecord> {
+    return this.procurementService.updateAgent(user.tenantId, user.userId, id, dto);
   }
 
   // ---- Purchase orders ----

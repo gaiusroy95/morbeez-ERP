@@ -6,6 +6,7 @@ import type {
   CustomersBoard,
   CustomersFilter,
   CustomerStatement,
+  CustomerTermsVersion,
   FarmerProfile,
   FarmersBoard,
   FarmersFilter,
@@ -26,6 +27,14 @@ export function useCustomerProfile(id: string | null) {
     queryKey: ['customers', 'profile', id],
     queryFn: () => apiGet<CustomerProfile>(`customers/${id}/profile`),
     enabled: id !== null,
+  });
+}
+
+/** Every version of the customer's credit terms, newest first (Master Spec v3 P6, F6). */
+export function useCustomerTermsHistory(id: string) {
+  return useQuery({
+    queryKey: ['customers', 'terms-history', id],
+    queryFn: () => apiGet<CustomerTermsVersion[]>(`customers/${id}/terms-history`),
   });
 }
 

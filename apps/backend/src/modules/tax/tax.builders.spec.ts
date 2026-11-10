@@ -1,6 +1,6 @@
 import { buildGstr1, buildGstr3b } from './tax.service';
 import { buildEinvoiceJson, EinvoiceSource, missingData, notApplicableReason } from './einvoice';
-import { GstLineRow } from './repositories/tax.repository';
+import { CreditNoteLineRow, GstLineRow } from './repositories/tax.repository';
 import { DEFAULT_PROFILE } from '../tax-rules/repositories/tax-rules.repository';
 import { TaxProfile } from '../tax-rules/entities/tax-rules.entity';
 import { deducteeTypeFromPan, gstinProblem, tdsDepositDueDate, tdsQuarter, financialYear } from '../../common/india';
@@ -89,6 +89,57 @@ describe('GSTR-1 builder', () => {
     expect(r.outwardTaxable).toEqual({ taxableValue: '151500.00', igst: '7500.00', cgst: '37.50', sgst: '37.50', cess: '0.00' });
     expect(r.outwardNilExempt).toBe('500.00');
     expect(r.interStateToUnregistered).toEqual([{ placeOfSupply: '29', taxableValue: '150000.00', igst: '7500.00' }]);
+  });
+
+  describe('credit notes (GST Act s.34) — Master Spec v3 P6, F1', () => {
+    const note = (over: Partial<CreditNoteLineRow>): CreditNoteLineRow => ({
+      ...line({ quantity: '0.000' }),
+      note_id: 'n1',
+      note_number: 'CN-000001',
+      noted_on: '2026-09-20',
+      note_total: '210.00',
+      ...over,
+    });
+    const notes: CreditNoteLineRow[] = [
+      // Against the B2B invoice: CDNR, its taxable line and its exempt line.
+      note({ invoice_number: 'INV-000001', buyer_gstin: '27AABCH1234A1Z5', taxable_value: '200.00', cgst: '5.00', sgst: '5.00', note_total: '260.00' }),
+      note({ invoice_number: 'INV-000001', buyer_gstin: '27AABCH1234A1Z5', taxability: 'exempt', hsn_code: '0702', gst_rate: '0.00', taxable_value: '50.00', cgst: '0.00', sgst: '0.00', note_total: '260.00' }),
+      // Against the B2CL invoice: CDNUR.
+      note({ note_id: 'n2', note_number: 'CN-000002', invoice_number: 'INV-000002', place_of_supply: '29', intra_state: false, invoice_total: '157500.00', taxable_value: '1000.00', cgst: '0.00', sgst: '0.00', igst: '50.00', note_total: '1050.00' }),
+      // Against a B2CS sale: netted into B2CS.
+      note({ note_id: 'n3', note_number: 'CN-000003', invoice_number: 'INV-000003', taxable_value: '100.00', cgst: '2.50', sgst: '2.50', note_total: '105.00' }),
+    ];
+
+    it('GSTR-1: CDNR for registered buyers, CDNUR against B2CL, netted into B2CS, nil and HSN', () => {
+      const r = buildGstr1('INR', '2026-09-01', '2026-09-30', profile, lines, 0, notes);
+      expect(r.cdnr).toEqual([
+        {
+          noteNumber: 'CN-000001',
+          noteDate: '2026-09-20',
+          invoiceNumber: 'INV-000001',
+          invoiceDate: '2026-09-10',
+          buyerGstin: '27AABCH1234A1Z5',
+          buyerName: 'Hotel Sagar',
+          noteValue: '260.00',
+          placeOfSupply: '27',
+          rates: [{ rate: '5.00', taxableValue: '200.00', igst: '0.00', cgst: '5.00', sgst: '5.00', cess: '0.00' }],
+        },
+      ]);
+      expect(r.cdnur).toEqual([expect.objectContaining({ noteNumber: 'CN-000002', invoiceNumber: 'INV-000002', rates: [expect.objectContaining({ taxableValue: '1000.00', igst: '50.00' })] })]);
+      expect(r.b2cs).toEqual([expect.objectContaining({ placeOfSupply: '27', rate: '5.00', taxableValue: '400.00', cgst: '10.00', sgst: '10.00' })]);
+      expect(r.nil.find((n) => n.description.startsWith('Intra-state supplies to registered'))?.exempt).toBe('450.00');
+      expect(r.hsn.b2b.find((h) => h.hsnCode === '0710')).toMatchObject({ quantity: '10.000', taxableValue: '800.00', cgst: '20.00', totalValue: '840.00' });
+      expect(r.creditNotes).toEqual({ series: 'Credit notes', from: 'CN-000001', to: 'CN-000003', issued: 3 });
+    });
+
+    it('GSTR-3B: outward supplies and tax payable net of the credit notes', () => {
+      const r = buildGstr3b('INR', '2026-09-01', '2026-09-30', profile, lines, notes);
+      expect(r.outwardTaxable).toEqual({ taxableValue: '150200.00', igst: '7450.00', cgst: '30.00', sgst: '30.00', cess: '0.00' });
+      expect(r.taxPayable).toEqual({ igst: '7450.00', cgst: '30.00', sgst: '30.00', cess: '0.00' });
+      expect(r.outwardNilExempt).toBe('450.00');
+      expect(r.interStateToUnregistered).toEqual([{ placeOfSupply: '29', taxableValue: '149000.00', igst: '7450.00' }]);
+      expect(r.notes.join(' ')).toMatch(/3 credit note\(s\)/);
+    });
   });
 });
 

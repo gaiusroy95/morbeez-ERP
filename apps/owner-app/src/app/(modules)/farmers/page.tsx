@@ -15,7 +15,7 @@ import { useCurrency, useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatDate, formatDateTime, formatMoney, formatQuantity } from '@/lib/format';
 import { optionalText } from '@/lib/parse';
-import { useT } from '@/lib/i18n';
+import { useT, type Translate } from '@/lib/i18n';
 import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatPoNumber } from '@/lib/hooks/use-procurement';
 import { useFarmerProfile, useFarmersBoard } from '@/lib/hooks/use-parties';
@@ -36,6 +36,17 @@ function farmerStatus(f: Pick<FarmerCard, 'status' | 'owed'>): { label: string; 
   if (f.status === 'archived') return { label: 'Archived', tone: 'muted' };
   if (Number(f.owed ?? 0) > 0) return { label: 'Payment due', tone: 'pending' };
   return { label: 'Active', tone: 'done' };
+}
+
+/** Master Spec §12: Net terms are these days; Custom any 1–180. */
+const NET_DAYS = [3, 7, 10, 15, 20, 30, 45, 60];
+
+/** The farmer's payment terms in words. */
+function farmerTermsLabel(f: Pick<FarmerRecord, 'paymentTerms' | 'paymentTermsDays'>, t: Translate): string {
+  if (f.paymentTerms === 'immediate') return t('Immediate');
+  if (f.paymentTerms === 'bill_to_bill') return t('Bill-to-Bill (at most {n} days)', { n: f.paymentTermsDays ?? 0 });
+  if (f.paymentTerms === 'net') return t('Net {n}', { n: f.paymentTermsDays ?? 0 });
+  return t('{n} days', { n: f.paymentTermsDays ?? 0 });
 }
 
 /**
@@ -92,6 +103,7 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
           <KeyValues
             items={[
               ['Place', f.place ?? '—'],
+              ['Payment terms', farmerTermsLabel(f, t)],
               ['Route', routeName ?? '—'],
               ['Phone', f.contact?.phone ?? '—'],
               ['Main product', main ?? '—'],
@@ -196,6 +208,8 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
                 { label: 'Balance', value: formatMoney(money.owed, currency), tone: Number(money.owed) > 0 ? 'bad' : undefined },
                 { label: 'Paid to date', value: formatMoney(money.paid, currency) },
                 { label: 'Unpaid since', value: money.oldestUnpaidAt ? formatDate(money.oldestUnpaidAt.slice(0, 10)) : '—' },
+                { label: 'Overdue', value: formatMoney(money.overdue, currency), tone: Number(money.overdue) > 0 ? 'bad' : undefined },
+                { label: 'Avg. Payment Days', value: money.avgPaymentDays === null ? '—' : t('{n} days', { n: money.avgPaymentDays }) },
               ]}
             />
             <h3 className="detail-subhead">{t('Payments')}</h3>
@@ -352,6 +366,8 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
     holder: '',
     account: '',
     ifsc: '',
+    terms: !farmer || farmer.paymentTerms === 'immediate' ? 'immediate' : farmer.paymentTerms === 'net' ? `net:${farmer.paymentTermsDays}` : farmer.paymentTerms,
+    days: farmer?.paymentTermsDays && farmer.paymentTerms !== 'net' ? String(farmer.paymentTermsDays) : '',
   });
   const [problem, setProblem] = useState<string | null>(null);
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
@@ -377,8 +393,14 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
         return setProblem(t('Bank details need the account holder, a 6–20 digit account number and an IFSC code (like SBIN0001234) — or leave all three blank.'));
       }
     }
+    const needsDays = form.terms === 'bill_to_bill' || form.terms === 'custom';
+    const days = Number(form.days);
+    if (needsDays && !(Number.isInteger(days) && days >= 1 && days <= 180)) return setProblem(t('Enter the days — a whole number from 1 to 180.'));
+    const [paymentTerms, netDays] = form.terms.startsWith('net:') ? ['net', Number(form.terms.slice(4))] : [form.terms, needsDays ? days : undefined];
     setProblem(null);
     const body: Record<string, unknown> = {
+      paymentTerms,
+      ...(netDays !== undefined ? { paymentTermsDays: netDays } : {}),
       name: form.name.trim(),
       place: form.place.trim() || null,
       contact: { phone: optionalText(form.phone), notes: optionalText(form.notes) },
@@ -405,6 +427,25 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
       <Field label={t('Phone (optional)')}>
         {(p) => <input {...p} type="tel" maxLength={20} value={form.phone} onChange={(e) => set({ phone: e.target.value })} />}
       </Field>
+      <Field label={t('Payment terms')} hint={t('When a graded lot falls due — new lots only; owed lots keep their due dates')}>
+        {(p) => (
+          <select {...p} value={form.terms} onChange={(e) => set({ terms: e.target.value })}>
+            <option value="immediate">{t('Immediate')}</option>
+            <option value="bill_to_bill">{t('Bill-to-Bill — due at the next pickup')}</option>
+            {NET_DAYS.map((n) => (
+              <option key={n} value={`net:${n}`}>
+                {t('Net {n}', { n })}
+              </option>
+            ))}
+            <option value="custom">{t('Custom')}</option>
+          </select>
+        )}
+      </Field>
+      {(form.terms === 'bill_to_bill' || form.terms === 'custom') && (
+        <Field label={form.terms === 'custom' ? t('Days to pay') : t('Longest a payable may wait (days)')}>
+          {(p) => <input {...p} inputMode="numeric" value={form.days} onChange={(e) => set({ days: e.target.value })} />}
+        </Field>
+      )}
       <Field label={t('Notes (optional)')}>
         {(p) => <input {...p} maxLength={500} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />}
       </Field>

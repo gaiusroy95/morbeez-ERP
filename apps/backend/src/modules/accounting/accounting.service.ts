@@ -71,6 +71,7 @@ const CASH_LABEL: Record<string, string> = {
   accounts_receivable: 'Collected from customers',
   accounts_payable_farmer: 'Paid to farmers for graded produce',
   farmer_advance: 'Advances paid to farmers',
+  accounts_payable_agent: 'Commission paid to agents',
   cash_with_drivers: 'Trip cash floats (advances less returns)',
   cash_shortage: 'Trip cash shortages',
   cash_over: 'Trip cash overages',

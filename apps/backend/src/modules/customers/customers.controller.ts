@@ -10,7 +10,7 @@ import { CustomersService } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { UpdateCreditTermsDto } from './dto/update-credit-terms.dto';
-import { CustomerRecord } from './entities/customer.entity';
+import { CustomerRecord, CustomerTermsVersion } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
 import { CustomersBoardQueryDto } from './dto/customers-board.dto';
 import { CustomerProfile, CustomersBoard } from './entities/customer-insights.entity';
@@ -75,6 +75,13 @@ export class CustomersController {
     @Body() dto: UpdateCustomerDto,
   ): Promise<CustomerRecord> {
     return this.customersService.update(user.tenantId, user.userId, id, dto);
+  }
+
+  /** Every version of the customer's credit terms, newest first (Master Spec v3 P6, F6). */
+  @Get(':id/terms-history')
+  @RequirePermissions('customers:read')
+  termsHistory(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string): Promise<CustomerTermsVersion[]> {
+    return this.customersService.termsHistory(user.tenantId, id);
   }
 
   @Post(':id/credit-terms')

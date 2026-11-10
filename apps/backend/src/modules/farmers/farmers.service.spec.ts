@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { PoolClient } from 'pg';
-import { FarmersService } from './farmers.service';
+import { FarmersService, paymentTermsOf } from './farmers.service';
+import { UpdateFarmerDto } from './dto/update-farmer.dto';
 import { FarmersRepository } from './repositories/farmers.repository';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
@@ -20,6 +21,8 @@ const mockFarmer: FarmerRecord = {
   createdAt: new Date(),
   updatedAt: new Date(),
   createdBy: 'user-1',
+  paymentTerms: 'immediate',
+  paymentTermsDays: null,
 };
 
 const fakeClient = {} as PoolClient;
@@ -91,5 +94,25 @@ describe('FarmersService', () => {
     const auditCall = audit.record.mock.calls[0][1];
     expect((auditCall.before as Record<string, unknown>).bankDetails).toBe('[redacted]');
     expect((auditCall.after as Record<string, unknown>).bankDetails).toBe('[redacted]');
+  });
+});
+
+describe('farmer payment terms (Master Spec §12) — Master Spec v3 P6, F7', () => {
+  const dto = (over: Partial<UpdateFarmerDto>) => ({ version: 1, ...over }) as UpdateFarmerDto;
+
+  it('Immediate takes no days; Net takes the spec\'s days; Custom and Bill-to-Bill take 1–180', () => {
+    expect(paymentTermsOf(dto({ paymentTerms: 'immediate' }))).toEqual({ paymentTerms: 'immediate', paymentTermsDays: null });
+    for (const days of [3, 7, 10, 15, 20, 30, 45, 60]) expect(paymentTermsOf(dto({ paymentTerms: 'net', paymentTermsDays: days }))?.paymentTermsDays).toBe(days);
+    expect(paymentTermsOf(dto({ paymentTerms: 'custom', paymentTermsDays: 12 }))).toEqual({ paymentTerms: 'custom', paymentTermsDays: 12 });
+    expect(paymentTermsOf(dto({ paymentTerms: 'bill_to_bill', paymentTermsDays: 21 }))).toEqual({ paymentTerms: 'bill_to_bill', paymentTermsDays: 21 });
+    expect(paymentTermsOf(dto({ name: 'Renamed' }))).toBeNull();
+  });
+
+  it('refuses what the spec does not offer', () => {
+    expect(() => paymentTermsOf(dto({ paymentTerms: 'net', paymentTermsDays: 12 }))).toThrow(/use Custom for 12/);
+    expect(() => paymentTermsOf(dto({ paymentTerms: 'immediate', paymentTermsDays: 7 }))).toThrow(/no days/);
+    expect(() => paymentTermsOf(dto({ paymentTerms: 'bill_to_bill' }))).toThrow(/longest a payable may wait/);
+    expect(() => paymentTermsOf(dto({ paymentTerms: 'custom' }))).toThrow(/number of days/);
+    expect(() => paymentTermsOf(dto({ paymentTermsDays: 7 }))).toThrow(/goes with paymentTerms/);
   });
 });

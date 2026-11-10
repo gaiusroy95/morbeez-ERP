@@ -29,6 +29,10 @@ export interface CustomerRecord {
   financeChargeGraceDays: number;
   creditHold: boolean;
   creditHoldReason: string | null;
+  /** Finance charge on or off (MS §30) — off by default; the rate applies only when on. */
+  financeChargeEnabled: boolean;
+  /** Bill-to-Bill (MS §30): each bill falls due when the next is issued, or after paymentTermsDays if sooner. */
+  billToBill: boolean;
   /** The spot sales' walk-in buyer, who pays on the spot and never owes. */
   isWalkIn: boolean;
   /** Asked not to be called by the AI voice agent. */
@@ -56,6 +60,29 @@ export interface FarmerRecord {
   status: 'active' | 'archived';
   version: number;
   createdAt: IsoDateTime;
+  /** When a graded lot's payable falls due (MS §12). */
+  paymentTerms: FarmerPaymentTerms;
+  /** Net, Custom, and Bill-to-Bill (its backstop); null for Immediate. */
+  paymentTermsDays: number | null;
+}
+
+/** Master Spec §12: Immediate, Bill-to-Bill, Net 3/7/10/15/20/30/45/60, Custom. */
+export type FarmerPaymentTerms = 'immediate' | 'bill_to_bill' | 'net' | 'custom';
+
+/** Credit terms as they stood from a date (Master Spec v3 P6, F6) — every change a new version. */
+export interface CustomerTermsVersion {
+  version: number;
+  creditLimit: string;
+  paymentTermsDays: number;
+  billToBill: boolean;
+  financeChargeEnabled: boolean;
+  financeChargeRateAnnual: string;
+  financeChargeGraceDays: number;
+  creditHold: boolean;
+  creditHoldReason: string | null;
+  source: 'initial' | 'created' | 'terms' | 'write_off';
+  effectiveFrom: IsoDateTime;
+  changedBy: string | null;
 }
 
 export interface ProductRecord {
@@ -132,6 +159,10 @@ export interface UpdateCreditTermsBody {
   financeChargeGraceDays?: number;
   creditHold?: boolean;
   creditHoldReason?: string;
+  /** Finance charge on or off (MS §30). */
+  financeChargeEnabled?: boolean;
+  /** Bill-to-Bill (MS §30), with paymentTermsDays as the longest a bill may wait. */
+  billToBill?: boolean;
 }
 
 // ---- Customers and Farmers lists and profiles (redesign Phase 5) ----
@@ -203,7 +234,7 @@ export interface CustomerProfile {
 /** GET finance/customers/:id/statement. */
 export interface CustomerStatementLine {
   at: IsoDateTime;
-  kind: 'invoice' | 'finance_charge' | 'payment' | 'payment_reversal';
+  kind: 'invoice' | 'finance_charge' | 'payment' | 'payment_reversal' | 'credit_note' | 'write_off';
   reference: string;
   description: string;
   debit: string;
@@ -268,5 +299,9 @@ export interface FarmerProfile {
     oldestUnpaidAt: IsoDateTime | null;
     lastPaidAt: IsoDateTime | null;
     payments: { id: string; paidAt: IsoDateTime; amount: string; method: string; reference: string | null }[];
+    /** Owed past its due date, by the terms each lot accrued under (MS §12). */
+    overdue: string;
+    /** Average days from a lot's grading to its last payment, over lots fully paid. */
+    avgPaymentDays: string | null;
   } | null;
 }

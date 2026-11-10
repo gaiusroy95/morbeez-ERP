@@ -435,10 +435,13 @@ export class FinanceRepository {
     const events = `
       SELECT i.issued_at AS at, CASE WHEN i.kind = 'sale' THEN 'invoice' ELSE 'finance_charge' END AS kind,
              i.invoice_number AS reference,
-             CASE WHEN i.kind = 'sale' THEN 'Invoice, due ' || to_char(i.due_date, 'DD Mon YYYY')
+             -- The due date in force (a Bill-to-Bill bill falls due at the next one), not only the stored backstop.
+             CASE WHEN i.kind = 'sale' THEN 'Invoice, due ' || to_char(b.due_date, 'DD Mon YYYY')
                   ELSE 'Finance charge on ' || si.invoice_number END AS description,
              i.amount AS debit, 0::numeric AS credit
-        FROM money.invoice i LEFT JOIN money.invoice si ON si.id = i.source_invoice_id
+        FROM money.invoice i
+        JOIN money.invoice_balance b ON b.invoice_id = i.id
+        LEFT JOIN money.invoice si ON si.id = i.source_invoice_id
        WHERE i.customer_id = $1
       UNION ALL
       SELECT p.received_at, 'payment', COALESCE(p.reference, initcap(replace(p.method, '_', ' '))),
@@ -448,7 +451,15 @@ export class FinanceRepository {
       SELECT r.reversed_at, 'payment_reversal', COALESCE(p.reference, initcap(replace(p.method, '_', ' '))),
              'Payment reversed: ' || r.reason, p.amount, 0
         FROM money.customer_payment_reversal r JOIN money.customer_payment p ON p.id = r.payment_id
-       WHERE p.customer_id = $1`;
+       WHERE p.customer_id = $1
+      UNION ALL
+      SELECT n.issued_at, 'credit_note', n.credit_note_number, 'Credit note on ' || i.invoice_number || ': ' || n.reason, 0, n.amount
+        FROM money.credit_note n JOIN money.invoice i ON i.id = n.invoice_id
+       WHERE n.customer_id = $1
+      UNION ALL
+      SELECT w.written_off_at, 'write_off', i.invoice_number, 'Written off as a bad debt: ' || w.reason, 0, w.amount
+        FROM money.receivable_write_off w JOIN money.invoice i ON i.id = w.invoice_id
+       WHERE w.customer_id = $1`;
     const opening = await client.query<{ opening: string }>(
       `SELECT ROUND(COALESCE(SUM(debit - credit), 0), 2)::text AS opening FROM (${events}) e WHERE at < $2`,
       [customerId, startAt],
@@ -485,15 +496,17 @@ export class FinanceRepository {
   /**
    * The control accounts as their sub-ledgers see them, for reconciling
    * against the trial balance: AR = open invoices − credit on account;
-   * AP = open payables; farmer advances = unapplied farmer payments.
+   * AP = open payables; farmer advances = unapplied farmer payments;
+   * agents = commission earned less settled (AGT.2).
    */
-  async subledgerTotals(client: PoolClient): Promise<{ receivable: string; payable: string; advances: string }> {
-    const result = await client.query<{ receivable: string; payable: string; advances: string }>(
+  async subledgerTotals(client: PoolClient): Promise<{ receivable: string; payable: string; advances: string; agents: string }> {
+    const result = await client.query<{ receivable: string; payable: string; advances: string; agents: string }>(
       `SELECT
          ROUND((SELECT COALESCE(SUM(outstanding), 0) FROM money.invoice_balance)
              - (SELECT COALESCE(SUM(unapplied), 0) FROM money.customer_payment_balance), 2)::text AS receivable,
          ROUND((SELECT COALESCE(SUM(outstanding), 0) FROM money.farmer_payable_balance), 2)::text AS payable,
-         ROUND((SELECT COALESCE(SUM(unapplied), 0) FROM money.farmer_payment_balance), 2)::text AS advances`,
+         ROUND((SELECT COALESCE(SUM(unapplied), 0) FROM money.farmer_payment_balance), 2)::text AS advances,
+         ROUND((SELECT COALESCE(SUM(amount), 0) FROM money.agent_commission) - (SELECT COALESCE(SUM(amount), 0) FROM money.agent_payment), 2)::text AS agents`,
     );
     return result.rows[0];
   }

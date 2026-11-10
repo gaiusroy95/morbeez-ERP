@@ -223,6 +223,21 @@ describe('computeEarnings', () => {
       expect(capped).toMatchObject({ deductions: '250.00', net: '750.00' });
     });
 
+    it('driver cash priority (MS §53): the settlement is paid first; an advance is recovered only from what is left, never below zero', () => {
+      // Pay ₹1,000 and a ₹300 deduction agreed in the settlement: ₹700 left, so a ₹900 advance recovers ₹700 and waits for the rest.
+      const r = computeEarnings(
+        base({
+          rates: [rate('daily', '500.00')],
+          work: [day('2026-09-02'), day('2026-09-03')],
+          adjustments: [{ description: 'Damaged crate', amount: '-300.00' }],
+          advances: [{ id: 'a1', paidOn: '2026-08-01', outstanding: '900.00' }],
+        }),
+      );
+      expect(r.lines.map((l) => l.kind)).toEqual(['basic', 'adjustment', 'advance_recovery']);
+      expect(r.lines.find((l) => l.kind === 'advance_recovery')?.amount).toBe('-700.00');
+      expect(r.net).toBe('0.00');
+    });
+
     it('adjustments add to gross or to deductions by sign', () => {
       const r = computeEarnings(
         base({

@@ -7,7 +7,8 @@ import { apiGet, apiSend } from '@/lib/api/client';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useActiveCustomers, useCurrency, useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
-import { formatDateTime, formatMoney } from '@/lib/format';
+import { formatDateTime, formatMoney, formatRate } from '@/lib/format';
+import { subtractMoney, sumMoney } from '@/lib/decimal';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { FilterTabs } from '@/components/ui/ListControls';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -16,10 +17,11 @@ import { Field, FormDialog } from '@/components/ui/Form';
 const REFRESH = [KEYS.finance, KEYS.alerts];
 
 /**
- * Invoice disputes (client Q&A, finance). While one is open, finance
- * charges pause on the disputed amount only. Untouched for 30 days it
- * becomes a critical exception. Closing one records what was agreed — it
- * never writes off or reverses anything by itself.
+ * Invoice disputes (client Q&A, finance; Master Spec §32). While one is open,
+ * finance charges pause on the disputed amount only; untouched for 30 days it
+ * becomes a critical exception and the pause ends. Closing settles it: the
+ * part accepted is credited (a credit note), the rest is owed and its charge
+ * caught up from the original due date. Nothing is written off automatically.
  */
 export function Disputes() {
   const { data: session } = useSession();
@@ -61,7 +63,7 @@ export function Disputes() {
     >
       <p className="muted panel-note">
         While a dispute is open, no finance charge accrues on the disputed amount. After 30 days with nothing done, it
-        alerts you.
+        alerts you and the charge resumes from the dispute date.
       </p>
       {list.isPending ? (
         <SkeletonLines lines={4} />
@@ -113,6 +115,14 @@ export function Disputes() {
                     ) : (
                       <>
                         {d.resolution}
+                        {d.acceptedAmount !== null && (
+                          <div className="cell-sub">
+                            {Number(d.acceptedAmount) > 0
+                              ? `Accepted ${formatRate(d.acceptedAmount, currency)}${d.creditNoteNumber ? ` (${d.creditNoteNumber})` : ''}`
+                              : 'Nothing accepted'}
+                            {d.rejectedAmount !== null && Number(d.rejectedAmount) > 0 ? ` · ${formatRate(d.rejectedAmount, currency)} owed` : ''}
+                          </div>
+                        )}
                         <div className="cell-sub">{formatDateTime(d.resolvedAt, timeZone)}</div>
                       </>
                     )}
@@ -241,26 +251,39 @@ function NoteDialog({ dispute, onClose }: { dispute: InvoiceDispute; onClose: ()
 
 function CloseDialog({ dispute, currency, onClose }: { dispute: InvoiceDispute; currency: string; onClose: () => void }) {
   const [outcome, setOutcome] = useState<'resolved' | 'withdrawn'>('resolved');
+  const [accepted, setAccepted] = useState('0');
   const [resolution, setResolution] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
   const close = useAction(
-    () => apiSend('POST', `finance/disputes/${dispute.id}/close`, { version: dispute.version, outcome, resolution: resolution.trim() }),
+    (acceptedAmount: number) =>
+      apiSend('POST', `finance/disputes/${dispute.id}/close`, { version: dispute.version, outcome, resolution: resolution.trim(), acceptedAmount }),
     REFRESH,
     onClose,
   );
+  const value = accepted.replace(/,/g, '').trim();
+  const validAmount = /^\d+(\.\d{1,2})?$/.test(value) && Number(value) <= Number(dispute.amount);
+  const acceptedAmount = outcome === 'withdrawn' || !validAmount ? '0.00' : sumMoney([value]);
+  const rejected = subtractMoney(dispute.amount, acceptedAmount);
   return (
     <FormDialog
       title={`Close the dispute on ${dispute.invoiceNumber}`}
       description={
         <p>
-          {formatMoney(dispute.amount, currency)} disputed: {dispute.reason}. Closing writes nothing off and reverses
-          nothing — if the customer is owed a credit, record it separately. Finance charges resume on this amount.
+          {formatMoney(dispute.amount, currency)} disputed: {dispute.reason}. What you accept is credited to the customer
+          (a credit note) and stops for good; the rest is owed, and its finance charge is caught up from the original due
+          date.
         </p>
       }
       submitLabel="Close dispute"
       pending={close.isPending}
-      error={close.error}
+      error={problem ?? close.error}
       onClose={onClose}
-      onSubmit={() => close.mutate(undefined)}
+      onSubmit={() => {
+        if (outcome === 'resolved' && !validAmount) return setProblem(`Accept between ${formatMoney('0', currency)} and ${formatMoney(dispute.amount, currency)}.`);
+        if (resolution.trim().length < 3) return setProblem('Say what was agreed.');
+        setProblem(null);
+        close.mutate(Number(acceptedAmount));
+      }}
     >
       <Field label="Outcome">
         {(p) => (
@@ -270,9 +293,21 @@ function CloseDialog({ dispute, currency, onClose }: { dispute: InvoiceDispute; 
           </select>
         )}
       </Field>
+      {outcome === 'resolved' && (
+        <Field
+          label={`Amount accepted (${currency})`}
+          hint={`0 rejects it; ${formatMoney(dispute.amount, currency)} accepts all of it.`}
+        >
+          {(p) => <input {...p} inputMode="decimal" value={accepted} onChange={(e) => setAccepted(e.target.value)} />}
+        </Field>
+      )}
       <Field label="What was agreed" wide>
         {(p) => <input {...p} value={resolution} maxLength={1000} onChange={(e) => setResolution(e.target.value)} />}
       </Field>
+      <p className="muted dispute-settlement" aria-live="polite">
+        {Number(acceptedAmount) > 0 ? `${formatRate(acceptedAmount, currency)} credited · ` : ''}
+        {Number(rejected) > 0 ? `${formatRate(rejected, currency)} still owed, charged from the original due date` : 'nothing left owed on the dispute'}
+      </p>
     </FormDialog>
   );
 }

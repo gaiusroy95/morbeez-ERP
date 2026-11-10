@@ -137,6 +137,25 @@ export class FarmerInsightsRepository {
     return r.rows.map((x) => ({ id: x.id, paidAt: x.paid_at, amount: x.amount, method: x.method, reference: x.reference }));
   }
 
+  /**
+   * Master Spec §12: what's owed past its due date, and how long lots take to
+   * be paid — tenant-local days from grading to the payment that finished it
+   * (0 when an advance or deductions covered it at once).
+   */
+  async paymentTimingWithClient(client: PoolClient, farmerId: string): Promise<{ overdue: string; avgPaymentDays: string | null }> {
+    const r = await client.query<{ overdue: string; avg_days: string | null }>(
+      `WITH tz AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id())
+       SELECT COALESCE(SUM(b.outstanding) FILTER (WHERE b.outstanding > 0 AND b.due_date < (now() AT TIME ZONE tz.timezone)::date), 0)::numeric(12,2)::text AS overdue,
+              ROUND(AVG(((COALESCE(a.settled_at, b.accrued_at) AT TIME ZONE tz.timezone)::date - (b.accrued_at AT TIME ZONE tz.timezone)::date))
+                    FILTER (WHERE b.outstanding <= 0), 1)::text AS avg_days
+         FROM money.farmer_payable_balance b CROSS JOIN tz
+         LEFT JOIN LATERAL (SELECT MAX(x.allocated_at) AS settled_at FROM money.farmer_payment_allocation x WHERE x.payable_id = b.payable_id) a ON true
+        WHERE b.farmer_id = $1`,
+      [farmerId],
+    );
+    return { overdue: r.rows[0].overdue, avgPaymentDays: r.rows[0].avg_days };
+  }
+
   async pinWithClient(client: PoolClient, farmerId: string): Promise<{ latitude: string; longitude: string } | null> {
     const r = await client.query<{ latitude: string; longitude: string }>(
       "SELECT latitude::text, longitude::text FROM fulfilment.place_pin WHERE kind = 'farmer' AND ref_id = $1",
