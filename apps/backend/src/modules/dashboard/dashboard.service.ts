@@ -229,6 +229,7 @@ export class DashboardService {
       const home = await this.dashboard.home(client, today.startAt, today.endAt, today.toDate);
       const row = await this.dashboard.alerts(client, ALERT_THRESHOLDS);
       const insight = await this.dashboard.latestInsight(client);
+      const yesterday = await this.dashboard.yesterdayClosures(client, today.toDate);
 
       const net = subtractMoney(current.delivered_revenue, current.procurement_spend);
       const prior = subtractMoney(previous.delivered_revenue, previous.procurement_spend);
@@ -263,6 +264,7 @@ export class DashboardService {
           activeTrips: home.trips_active,
         },
         alerts: alerts.filter((a) => a.count > 0).sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]),
+        yesterday,
         insight,
       };
     });

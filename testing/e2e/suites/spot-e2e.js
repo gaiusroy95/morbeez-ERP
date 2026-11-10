@@ -83,6 +83,7 @@ const money = (c) => (c / 100).toFixed(2);
   for (const lot of [tLot, oLot]) must(await owner.post(`/inventory/lots/${lot.id}/transfer`, { version: lot.version, toLocationId: loc.id }), 'transfer');
 
   let trip = must(await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 500 }), 'trip');
+  must(await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version }), 'publish');
   must(await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: o.id }), 'stop');
   const planned = await driverLogin.post('/spot-sales', { clientRef: randomUUID(), tripId: trip.id, paymentMethod: 'cash', lines: [{ productId: tomato.id, quantity: 1, unitPrice: 30 }] });
   check('only on a trip on the road', planned.status === 409 && /on the road/.test(msg(planned)), msg(planned));
@@ -150,6 +151,7 @@ const money = (c) => (c / 100).toFixed(2);
   const vijay = must(await owner.post('/workforce', { name: 'Vijay Rao', roleType: 'driver' }), 'vijay');
   const other = vehicles.find((v) => v.registrationNumber === 'MH14HR7777');
   const vTrip = must(await owner.post('/logistics/trips', { vehicleId: other.id, driverEmployeeId: vijay.id }), 'other trip');
+  must(await owner.post(`/logistics/trips/${vTrip.id}/publish`, { version: vTrip.version }), 'publish');
   const notMine = await driverLogin.post('/spot-sales', { clientRef: randomUUID(), tripId: vTrip.id, paymentMethod: 'cash', lines: [{ productId: tomato.id, quantity: 1, unitPrice: 30 }] });
   const notMineStock = await driverLogin.get(`/spot-sales/trips/${vTrip.id}/stock`);
   check("a driver can't sell from, or see, another driver's trip (DRV.15)", notMine.status === 403 && notMineStock.status === 403);

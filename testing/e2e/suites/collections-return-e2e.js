@@ -128,6 +128,7 @@ function client(token) {
     const raju = (await owner.get('/workforce?pageSize=100')).items.find((w) => w.name === 'Raju Driver');
     const today = (await driver.get('/logistics/trips/mine/day')).today;
     const next = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: raju.employeeId ?? raju.id, plannedDate: today });
+    await owner.post(`/logistics/trips/${next.id}/publish`, { version: next.version });
     day = await driver.get('/logistics/trips/mine/day');
     check("the next trip's last reading is this trip's closing KM", day.trip?.id === next.id && day.lastOdometerKm === '48842.0', JSON.stringify({ trip: day.trip?.id === next.id, km: day.lastOdometerKm }));
     await owner.post(`/logistics/trips/${next.id}/cancel`, { version: next.version });

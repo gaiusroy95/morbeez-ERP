@@ -21,14 +21,15 @@ request after the server has been idle can take about a minute; try again.
 1. Workforce → the driver → **App login**: send the set-up link to the driver's phone.
 2. Customers → each shop on the route → **Delivery QR**: print it and stick it at the shop (leave one shop without a QR on purpose — check 4c).
 3. Customers and farmers on the route: each has a map pin (for the arrival times).
-4. Trips → **Create Trip** for today: one farm, three shops, a cash advance.
+4. Trips → **Create Trip** for today: one farm, three shops, a cash advance. Leave it a **draft** for now (check 1b).
 5. Optional: a backhaul offer on the trip (Trip → Backhaul → Offer backhaul).
 
 ## The day
 
 | # | What to do | What should happen | ✓ / notes |
 |---|---|---|---|
-| 1 | Driver: open the set-up link, set a password, sign in, set a PIN, choose the language. | The Dashboard shows today's trip, the vehicle, "Start Day". | |
+| 1 | Driver: open the set-up link, set a password, sign in, set a PIN, choose the language. | Signed in, in their language; no trip yet — it's still a draft (1b). | |
+| 1b | Signed in, with the trip still a draft: the driver syncs. Then the owner: the trip → **Check & publish** → Publish to the driver. Driver syncs again. | A draft shows nothing on the phone ("No trip for today yet"). The Check lists eight checks, each passing or a warning. Once published, the Dashboard shows today's trip, the vehicle, "Start Day", with its stops. | |
 | 2 | Driver: **airplane mode on**. Start Day: read the odometer, hold to start. | Starts at once on the phone; the header says Offline · 1 to send. | |
 | 3 | Driver: airplane mode off. | Within a minute: Online, nothing to send. Owner: the trip shows On the road with the opening KM and the start position. | |
 | 4a | Farm: accept one product, weigh it (KG or bags), load photo; reject another with a reason and photo; hold to complete. | Procurement shows the farm done and what's on the vehicle. Owner: the trip's Stops tab shows it, with the photos. | |
@@ -45,6 +46,7 @@ request after the server has been idle can take about a minute; try again.
 | 12 | Route (side menu → Current trip): look at the stops still to do. | Each shows "≈ hh:mm", roughly right (straight-line estimate × 1.3 at 30 km/h, plus time at each stop). Navigate opens Google Maps at the stop. | |
 | 13 | Side menu → Ask the office: an advance of ₹500 with a reason (once offline, then online); at a shop not on the books, a new customer with **Pin this place**. | Each is read back before it's sent; Approvals shows it waiting to send, then pending. Owner: Approvals lists both; approving the advance (less than asked, by UPI) and the shop shows them approved on the phone; the shop is a customer with its map pin. | |
 | 14 | Before the day the owner adds the van's FASTag (Vehicles → the van → FASTag) and recharges it. Driver: a toll with **Paid by FASTag**. | No bill needed; the handover's expenses don't include it. Owner: the van's FASTag statement shows the toll with the trip; the balance went down. | |
+| 15 | At the end: driver holds **3 sec** to hand over and submit. The owner closes the trip (twelve areas, each PASS or EXCEPTION). Driver syncs. | The close lists every area. Once closed, the phone shows no trip, the stops and customers' phones are gone from it; Trip History still shows the trip, without phones or addresses. | |
 
 ## Conflicts (the office and the phone disagree)
 

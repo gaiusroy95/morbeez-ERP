@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../../../infra/database/database.service';
 import { OptimisticLockException } from '../../../common/persistence/optimistic-lock.exception';
 import { clampPageSize, PaginatedResult } from '../../../common/persistence/pagination';
-import { TripRecord, TripStatus } from '../entities/trip.entity';
+import { stageOf, TripRecord, TripStatus } from '../entities/trip.entity';
 import { dateOnly } from '../../../common/persistence/date-only';
 
 interface TripRow {
@@ -30,6 +30,8 @@ interface TripRow {
   cash_declared: string | null;
   submit_note: string | null;
   review_note: string | null;
+  published_at: Date | null;
+  published_by: string | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -40,6 +42,9 @@ function toRecord(row: TripRow): TripRecord {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    stage: stageOf(row.status, row.published_at ?? null),
+    publishedAt: row.published_at ?? null,
+    publishedBy: row.published_by ?? null,
     number: row.number,
     routeId: row.route_id ?? null,
     vehicleId: row.vehicle_id,
@@ -116,15 +121,18 @@ export class TripsRepository {
 
     return this.db.withTenant(tenantId, async (client) => {
       const [rows, count] = await Promise.all([
+        // A draft isn't the driver's to see until the owner publishes it (Master Spec v3 §58).
         client.query<TripRow>(
           `SELECT * FROM fulfilment.trip
            WHERE driver_employee_id = $3 AND ($4::text IS NULL OR status = $4)
+             AND (status <> 'planned' OR published_at IS NOT NULL)
            ORDER BY created_at DESC
            LIMIT $1 OFFSET $2`,
           [size, offset, driverEmployeeId, status ?? null],
         ),
         client.query<{ count: string }>(
-          `SELECT count(*) FROM fulfilment.trip WHERE driver_employee_id = $1 AND ($2::text IS NULL OR status = $2)`,
+          `SELECT count(*) FROM fulfilment.trip WHERE driver_employee_id = $1 AND ($2::text IS NULL OR status = $2)
+             AND (status <> 'planned' OR published_at IS NOT NULL)`,
           [driverEmployeeId, status ?? null],
         ),
       ]);
@@ -180,6 +188,21 @@ export class TripsRepository {
       ],
     );
     return toRecord(result.rows[0]);
+  }
+
+  /**
+   * Published to its driver, as the owner checked it: only a planned draft,
+   * only at the version they looked at. The version isn't bumped — publishing
+   * changes nothing the driver or the owner might be editing.
+   */
+  async publishWithClient(client: PoolClient, id: string, version: number, userId: string): Promise<TripRecord | null> {
+    const result = await client.query<TripRow>(
+      `UPDATE fulfilment.trip SET published_at = now(), published_by = $3, updated_at = now()
+        WHERE id = $1 AND version = $2 AND status = 'planned' AND published_at IS NULL
+        RETURNING *`,
+      [id, version, userId],
+    );
+    return result.rows[0] ? toRecord(result.rows[0]) : null;
   }
 
   /** [readings]: the odometer and the phone's position when the day started, when the driver gave them. */

@@ -90,7 +90,7 @@
     <string name="on_credit">கடனில் — வசூலிக்க எதுவும் இல்லை</string>
     <string name="no_trip">இன்னும் பயணம் இல்லை</string>
     <string name="checking_route">உங்கள் வழித்தடத்தைச் சரிபார்க்கிறது…</string>
-    <string name="no_trip_hint">வழித்தடம் தயாரானதும் இங்கே தோன்றும். இப்போதே சரிபார்க்க ஒத்திசை அழுத்தவும்.</string>
+    <string name="no_trip_hint">உரிமையாளர் உங்கள் பயணத்தை வெளியிட்டதும் இங்கே தோன்றும். இப்போதே சரிபார்க்க ஒத்திசை அழுத்தவும்.</string>
     <string name="status_planned">திட்டமிடப்பட்டது</string>
     <string name="status_in_progress">பயணத்தில்</string>
     <string name="status_completed">உரிமையாளருக்காகக் காத்திருக்கிறது</string>
@@ -261,7 +261,7 @@
     <string name="step_complete">நிறைவு</string>
     <string name="next_action">அடுத்த வேலை</string>
     <string name="no_trip_today">இன்றைக்கு இன்னும் பயணம் இல்லை</string>
-    <string name="no_trip_today_hint">உங்கள் பயணத்தை உரிமையாளர் திட்டமிடுவார். திட்டமிட்டதும் இங்கே தெரியும்.</string>
+    <string name="no_trip_today_hint">உங்கள் பயணத்தை உரிமையாளர் திட்டமிட்டு, சரிபார்த்து வெளியிடுவார். வெளியிட்டதும் இங்கே தோன்றும்.</string>
     <string name="check_again">மீண்டும் பார்</string>
     <string name="start_your_day">உங்கள் நாளைத் தொடங்குங்கள்</string>
     <plurals name="start_day_stops">
@@ -322,7 +322,7 @@
     <!-- Start Day -->
     <string name="start_day_intro">உரிமையாளர் திட்டமிட்ட பயணம் இது. வாகனத்தைச் சரிபார்த்து, ஓடோமீட்டரைப் படித்து, தொடங்க பொத்தானை அழுத்திப் பிடிக்கவும்.</string>
     <string name="hold_to_start">அழுத்திப் பிடித்து நாளைத் தொடங்கு</string>
-    <string name="no_trip_to_start">இன்று உங்களுக்குப் பயணம் திட்டமிடப்படவில்லை. முதலில் உரிமையாளர் பயணத்தைத் திட்டமிடுவார்.</string>
+    <string name="no_trip_to_start">இன்று உங்களுக்குப் பயணம் வெளியிடப்படவில்லை. முதலில் உரிமையாளர் திட்டமிட்டு வெளியிடுவார்.</string>
     <string name="already_started">இந்தப் பயணம் ஏற்கனவே தொடங்கிவிட்டது.</string>
     <string name="planned_by_owner">உரிமையாளர் திட்டமிட்டது</string>
     <plurals name="n_stops">
@@ -583,7 +583,7 @@
     <string name="closing_below_opening">இது தொடக்க கி.மீ-ஆன %1$s கி.மீ-ஐ விடக் குறைவு.</string>
     <string name="trip_km">பயண கி.மீ</string>
     <string name="cash_handover">பண ஒப்படைப்பு</string>
-    <string name="hold_to_hand_over">அழுத்திப் பிடித்து உரிமையாளரிடம் ஒப்படை</string>
+    <string name="hold_to_hand_over">3 விநாடி அழுத்திப் பிடித்து ஒப்படைத்து பயணத்தைச் சமர்ப்பி</string>
     <string name="return_first">முதலில் இறுதி கி.மீ-ஐப் பதிவு செய்யுங்கள்: \"தளத்துக்குத் திரும்பு\" அழுத்தவும்.</string>
     <string name="checking_handover">அலுவலகத்துடன் கணக்கைச் சரிபார்க்கிறது…</string>
     <string name="expected_cash">எதிர்பார்க்கப்படும் ரொக்கம்</string>

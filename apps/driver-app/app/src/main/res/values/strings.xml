@@ -103,7 +103,7 @@
     <string name="on_credit">On credit — nothing to collect</string>
     <string name="no_trip">No trip yet</string>
     <string name="checking_route">Checking for your route…</string>
-    <string name="no_trip_hint">When dispatch plans your route it appears here. Tap sync to check now.</string>
+    <string name="no_trip_hint">When the owner publishes your trip it appears here. Tap sync to check now.</string>
     <string name="status_planned">Planned</string>
     <string name="status_in_progress">On the road</string>
     <string name="status_completed">Awaiting owner</string>
@@ -281,7 +281,7 @@
     <string name="step_complete">Complete</string>
     <string name="next_action">Next action</string>
     <string name="no_trip_today">No trip for today yet</string>
-    <string name="no_trip_today_hint">The owner plans your trip. Once they have, it appears here.</string>
+    <string name="no_trip_today_hint">The owner plans your trip, checks it and publishes it. Once they have, it appears here.</string>
     <string name="check_again">Check again</string>
     <string name="start_your_day">Start your day</string>
     <plurals name="start_day_stops">
@@ -342,7 +342,7 @@
     <!-- Start Day -->
     <string name="start_day_intro">The owner planned this trip. Check the vehicle, read the odometer, then hold the button to start.</string>
     <string name="hold_to_start">Hold to start day</string>
-    <string name="no_trip_to_start">No trip is planned for you today. The owner plans the trip first.</string>
+    <string name="no_trip_to_start">No trip is published for you today. The owner plans and publishes it first.</string>
     <string name="already_started">This trip is already on the road.</string>
     <string name="planned_by_owner">Planned by the owner</string>
     <plurals name="n_stops">
@@ -603,7 +603,7 @@
     <string name="closing_below_opening">That\'s below the opening KM, %1$s km.</string>
     <string name="trip_km">Trip KM</string>
     <string name="cash_handover">Cash handover</string>
-    <string name="hold_to_hand_over">Hold to hand over to the owner</string>
+    <string name="hold_to_hand_over">Hold 3 sec to hand over and submit the trip</string>
     <string name="return_first">Record the closing KM first: tap Return to base.</string>
     <string name="checking_handover">Checking the figures with the office…</string>
     <string name="expected_cash">Expected cash</string>

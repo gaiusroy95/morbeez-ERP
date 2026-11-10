@@ -71,6 +71,7 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     po = await owner.post(`/procurement/purchase-orders/${po.id}/confirm`, { version: po.version });
     const pickup = await owner.post(`/procurement/purchase-orders/${po.id}/pickups`, {});
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const farmStop = await owner.post(`/logistics/trips/${trip.id}/stops/pickup`, { pickupId: pickup.id });
     const stopA = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: orderA.id });
     const stopB = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: orderB.id });
@@ -78,10 +79,11 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     let beansRow = vs.rows.find((r) => r.productId === beans.id);
     check('before the farm: the vehicle is empty and the deliveries are 610 kg short', beansRow?.onVehicle === '0.000' && beansRow.toDeliver === '610.000' && beansRow.short === '610.000', JSON.stringify(beansRow));
 
-    trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
+    trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: 10000 });
     const loadedOnStart = (await db.query(`SELECT count(*)::int AS n FROM stock.inventory_movement WHERE trip_id = $1 AND movement_type = 'loaded'`, [trip.id])).rows[0].n;
     check('starting it loads nothing from the store — nothing was reserved there', loadedOnStart === 0);
 
+    await owner.post(`/logistics/trips/${trip.id}/stops/${farmStop.id}/arrive`, {});
     await owner.post(`/logistics/trips/${trip.id}/stops/${farmStop.id}/complete-pickup`, {
       weights: [{ productId: beans.id, netQuantity: 985, rejectedQuantity: 15, rejectionReason: 'Damaged' }],
     });
@@ -102,8 +104,10 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     check('…counted in stock as on vehicles', storeAtFarm?.physical === '985.000' && storeAtFarm.onVehicles === '985.000', JSON.stringify(storeAtFarm));
 
     // ---- Deliveries from the vehicle ----
+    await owner.post(`/logistics/trips/${trip.id}/stops/${stopA.id}/arrive`, {});
     await owner.post(`/logistics/trips/${trip.id}/stops/${stopA.id}/complete-delivery`, SIGNED);
     const fullB = await owner.get(`/orders/${orderB.id}`);
+    await owner.post(`/logistics/trips/${trip.id}/stops/${stopB.id}/arrive`, {});
     const tooMuch = await owner.raw('POST', `/logistics/trips/${trip.id}/stops/${stopB.id}/complete-delivery`, { ...SIGNED, lines: [{ orderLineId: fullB.lines[0].id, deliveredQuantity: 700 }] });
     check("a delivery the vehicle can't cover is refused", tooMuch.status === 409 && /Not enough Beans on the vehicle/.test(tooMuch.body?.error?.message ?? ''), tooMuch.body?.error?.message);
     await owner.post(`/logistics/trips/${trip.id}/stops/${stopB.id}/complete-delivery`, { ...SIGNED, lines: [{ orderLineId: fullB.lines[0].id, deliveredQuantity: 250 }] });
@@ -122,6 +126,7 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     check('the quantities: picked up 985, delivered 600 → 385 should be on the vehicle', qRow?.loaded === '0.000' && qRow.procured === '985.000' && qRow.delivered === '600.000' && qRow.expected === '385.000', JSON.stringify(qRow));
 
     // ---- Closing: the 385 kg go back to the owner ----
+    await owner.post(`/logistics/trips/${trip.id}/closing-km`, { closingKm: 10050 });
     trip = await owner.post(`/logistics/trips/${trip.id}/complete`, { version: (await owner.get(`/logistics/trips/${trip.id}`)).version, cashDeclared: 0 });
     const closed = await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: 0, closingStock: [{ productId: beans.id, quantity: 385 }] });
     check('the count matches: 385 kg counted, 385 kg expected', closed.closingStock?.find((c) => c.productId === beans.id)?.counted === '385.000' && closed.closingStock.find((c) => c.productId === beans.id).expected === '385.000', JSON.stringify(closed.closingStock));
@@ -145,8 +150,9 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     check('cancelling an order lets its kilos go', storeReleased?.reserved === '100.000' && storeReleased.available === '285.000', JSON.stringify(storeReleased));
 
     let trip2 = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip2.id}/publish`, { version: trip2.version });
     const stopC = await owner.post(`/logistics/trips/${trip2.id}/stops/delivery`, { orderId: orderC.id });
-    trip2 = await owner.post(`/logistics/trips/${trip2.id}/start`, { version: trip2.version });
+    trip2 = await owner.post(`/logistics/trips/${trip2.id}/start`, { version: trip2.version, openingKm: 10100 });
     const split = (await db.query('SELECT location_id IS NULL AS in_store, quantity::text, reserved_quantity::text FROM stock.lot_balance WHERE lot_id = $1 AND quantity > 0 ORDER BY quantity', [lot.id])).rows;
     check(
       'starting the trip loads just the 100 kg reserved — the lot is split: 100 on the vehicle, 285 left in the store',
@@ -154,10 +160,12 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
       JSON.stringify(split),
     );
     const lineC = (await owner.get(`/orders/${orderC.id}`)).lines[0];
+    await owner.post(`/logistics/trips/${trip2.id}/stops/${stopC.id}/arrive`, {});
     await owner.post(`/logistics/trips/${trip2.id}/stops/${stopC.id}/complete-delivery`, { ...SIGNED, lines: [{ orderLineId: lineC.id, deliveredQuantity: 90 }] });
     vs = await owner.get(`/logistics/trips/${trip2.id}/vehicle-stock`);
     beansRow = vs.rows.find((r) => r.productId === beans.id);
     check('delivered 90 of 100: the other 10 kg are free on the vehicle', beansRow?.onVehicle === '10.000' && beansRow.reserved === '0.000' && beansRow.free === '10.000', JSON.stringify(beansRow));
+    await owner.post(`/logistics/trips/${trip2.id}/closing-km`, { closingKm: 10150 });
     trip2 = await owner.post(`/logistics/trips/${trip2.id}/complete`, { version: (await owner.get(`/logistics/trips/${trip2.id}`)).version, cashDeclared: 0 });
     const noReason = await owner.raw('POST', `/logistics/trips/${trip2.id}/reconcile`, { version: trip2.version, cashReturned: 0, closingStock: [{ productId: beans.id, quantity: 8 }] });
     check('2 kg missing at closing is an exception that needs the owner’s reason', noReason.status === 409 && /load/.test(noReason.body?.error?.message ?? ''), noReason.body?.error?.message);
@@ -176,14 +184,17 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
     // ---- A trip not closed yet: the next one sets off with its stock aboard ----
     const orderE = await owner.post('/orders', { customerId: udupi.id, confirm: true, lines: [{ productId: beans.id, quantity: 20, unitPrice: 32 }] });
     let trip3 = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip3.id}/publish`, { version: trip3.version });
     const stopE = await owner.post(`/logistics/trips/${trip3.id}/stops/delivery`, { orderId: orderE.id });
-    trip3 = await owner.post(`/logistics/trips/${trip3.id}/start`, { version: trip3.version });
+    trip3 = await owner.post(`/logistics/trips/${trip3.id}/start`, { version: trip3.version, openingKm: 10200 });
     await owner.post(`/logistics/trips/${trip3.id}/stops/${stopE.id}/skip`, { reason: 'Shop shut' });
+    await owner.post(`/logistics/trips/${trip3.id}/closing-km`, { closingKm: 10250 });
     trip3 = await owner.post(`/logistics/trips/${trip3.id}/complete`, { version: (await owner.get(`/logistics/trips/${trip3.id}`)).version, cashDeclared: 0 });
     const orderF = await owner.post('/orders', { customerId: annapurna.id, confirm: true, lines: [{ productId: beans.id, quantity: 10, unitPrice: 30 }] });
     let trip4 = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip4.id}/publish`, { version: trip4.version });
     const stopF = await owner.post(`/logistics/trips/${trip4.id}/stops/delivery`, { orderId: orderF.id });
-    trip4 = await owner.post(`/logistics/trips/${trip4.id}/start`, { version: trip4.version });
+    trip4 = await owner.post(`/logistics/trips/${trip4.id}/start`, { version: trip4.version, openingKm: 10300 });
     const q4 = (await owner.get(`/logistics/trips/${trip4.id}/quantities`)).rows.find((r) => r.productId === beans.id);
     check(
       "the next trip sets off with the 20 kg the last one brought back still aboard, plus its own 10 kg",
@@ -203,7 +214,9 @@ const SIGNED = { recipientName: 'Manager', signatureData: 'data:image/png;base64
       `${JSON.stringify(closed3.closingStock)} ${JSON.stringify(vanStill)}`,
     );
     const lineF = (await owner.get(`/orders/${orderF.id}`)).lines[0];
+    await owner.post(`/logistics/trips/${trip4.id}/stops/${stopF.id}/arrive`, {});
     await owner.post(`/logistics/trips/${trip4.id}/stops/${stopF.id}/complete-delivery`, { ...SIGNED, lines: [{ orderLineId: lineF.id, deliveredQuantity: 10 }] });
+    await owner.post(`/logistics/trips/${trip4.id}/closing-km`, { closingKm: 10350 });
     trip4 = await owner.post(`/logistics/trips/${trip4.id}/complete`, { version: (await owner.get(`/logistics/trips/${trip4.id}`)).version, cashDeclared: 0 });
     await owner.post(`/logistics/trips/${trip4.id}/reconcile`, { version: trip4.version, cashReturned: 0, closingStock: [{ productId: beans.id, quantity: 20 }] });
     const storeLast = (await owner.get('/inventory/stock')).find((r) => r.productId === beans.id);

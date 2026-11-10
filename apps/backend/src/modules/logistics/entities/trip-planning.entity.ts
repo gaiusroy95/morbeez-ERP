@@ -1,4 +1,4 @@
-import { TripStatus } from './trip.entity';
+import { TripStage, TripStatus } from './trip.entity';
 
 export type TripsBoardDay = 'today' | 'tomorrow' | 'all';
 
@@ -7,6 +7,8 @@ export interface TripCard {
   id: string;
   number: string;
   status: TripStatus;
+  /** Draft until published (Master Spec v3 §7.5). */
+  stage: TripStage;
   /** The planned date, or the day it was made when it has none (YYYY-MM-DD). */
   day: string;
   /** When it set off (in progress) or came back (submitted, closed), HH:MM in the business's time. */

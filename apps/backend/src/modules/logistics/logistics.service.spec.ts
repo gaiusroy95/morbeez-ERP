@@ -80,6 +80,9 @@ const baseDriver: EmployeeRecord = {
 const baseTrip: TripRecord = {
   id: 'trip-1',
   tenantId: 'tenant-1',
+  stage: 'published',
+  publishedAt: new Date('2026-10-28T05:00:00Z'),
+  publishedBy: 'owner-1',
   number: 'T-20261028-001',
   routeId: null,
   vehicleId: 'vehicle-1',

@@ -72,6 +72,7 @@ const rupees = (n) => `₹${Number(n).toLocaleString('en-IN')}`;
       await gradedLot(product, qty);
       const order = await owner.post('/orders', { customerId: customer.id, confirm: true, lines: [{ productId: product.id, quantity: qty, unitPrice: price }] });
       let trip = await owner.post('/logistics/trips', { vehicleId: truck.id, driverEmployeeId: suresh.id, orderIds: [order.id] });
+      await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
       trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
       const [stop] = await owner.get(`/logistics/trips/${trip.id}/stops`);
       await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/complete-delivery`, { recipientName: 'Manager', signatureData: 'data:image/png;base64,iVBORw0KGgo=' });

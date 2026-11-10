@@ -164,7 +164,92 @@ export class TripReconciliationsRepository {
         ORDER BY s.sequence_number`,
       [tripId],
     );
+    // ---- The areas added in Master Spec v3 P1 (§60) ----
+    // Workforce: the driver's work on this trip recorded (it's recorded when
+    // they submit); a pay rate in force; what the farm-stop crew was credited.
+    const work = await client.query<{ driver: string; recorded: boolean; has_rate: boolean; crew_credits: number }>(
+      `SELECT e.name AS driver,
+              EXISTS (SELECT 1 FROM workforce.assignment a
+                       WHERE a.trip_id = t.id AND a.employee_id = t.driver_employee_id AND a.status <> 'cancelled') AS recorded,
+              EXISTS (SELECT 1 FROM workforce.pay_rate r
+                       WHERE r.employee_id = t.driver_employee_id AND r.effective_from <= COALESCE(t.planned_date, CURRENT_DATE)
+                         AND (r.effective_to IS NULL OR r.effective_to >= COALESCE(t.planned_date, CURRENT_DATE))) AS has_rate,
+              (SELECT count(*)::int FROM workforce.assignment a
+                WHERE a.kind = 'loading' AND a.status <> 'cancelled' AND a.notes LIKE '%, trip ' || t.number) AS crew_credits
+         FROM fulfilment.trip t JOIN trading_partners.employee e ON e.id = t.driver_employee_id
+        WHERE t.id = $1`,
+      [tripId],
+    );
+    // Workload: every completed stop's arrival and completion times.
+    const untimed = await client.query<{ name: string }>(
+      `SELECT COALESCE(c.name, f.name, 'a stop') AS name
+         FROM fulfilment.trip_stop s
+         LEFT JOIN commerce.customer_order o ON o.id = s.order_id
+         LEFT JOIN trading_partners.customer c ON c.id = o.customer_id
+         LEFT JOIN commerce.pickup p ON p.id = s.pickup_id
+         LEFT JOIN trading_partners.farmer f ON f.id = p.farmer_id
+        WHERE s.trip_id = $1 AND s.status = 'completed' AND (s.arrived_at IS NULL OR s.completed_at IS NULL)
+        ORDER BY s.sequence_number`,
+      [tripId],
+    );
+    // Vehicle: the odometer at the start and the return; fuel put in on the trip.
+    const km = await client.query<{ opening_km: string | null; closing_km: string | null; litres: string }>(
+      `SELECT t.opening_km::text AS opening_km, t.closing_km::text AS closing_km,
+              (COALESCE((SELECT SUM(x.litres) FROM fulfilment.trip_expense x WHERE x.trip_id = t.id AND x.category = 'fuel'), 0)
+               + COALESCE((SELECT SUM(l.litres) FROM fleet.fuel_log l WHERE l.trip_id = t.id), 0))::numeric(12,3)::text AS litres
+         FROM fulfilment.trip t WHERE t.id = $1`,
+      [tripId],
+    );
+    // Exceptions: disputes raised on the trip's deliveries, and driver requests from it, still open.
+    const open = await client.query<{ what: string }>(
+      `SELECT 'a dispute from ' || c.name AS what
+         FROM money.invoice_dispute d
+         JOIN money.invoice i ON i.id = d.invoice_id
+         JOIN fulfilment.trip_stop s ON s.order_id = i.order_id AND s.trip_id = $1
+         JOIN trading_partners.customer c ON c.id = d.customer_id
+        WHERE d.status = 'open'
+       UNION ALL
+       SELECT 'the driver''s ' || replace(r.kind, '_', ' ') || ' request'
+         FROM fulfilment.driver_request r
+        WHERE r.trip_id = $1 AND r.status = 'pending'`,
+      [tripId],
+    );
+    // Accounting: each money event on the trip has its journal, and each balances.
+    const books = await client.query<{ missing: string[] | null; unbalanced: number }>(
+      `WITH events AS (
+         SELECT 'the advance' AS what, 'trip' AS source_type, t.id AS source_id
+           FROM fulfilment.trip t WHERE t.id = $1 AND t.advance_amount > 0
+         UNION ALL
+         SELECT 'a collection of ₹' || cc.amount::text, 'customer_payment', cp.id
+           FROM money.customer_collection cc
+           JOIN fulfilment.trip_stop s ON s.id = cc.trip_stop_id AND s.trip_id = $1
+           LEFT JOIN money.customer_payment cp ON cp.collection_id = cc.id
+         UNION ALL
+         SELECT 'an expense of ₹' || x.amount::text, 'trip_expense', x.id FROM fulfilment.trip_expense x WHERE x.trip_id = $1
+         UNION ALL
+         SELECT 'a bank deposit of ₹' || d.amount::text, 'trip_cash_deposit', d.id FROM fulfilment.trip_cash_deposit d WHERE d.trip_id = $1
+         UNION ALL
+         SELECT 'backhaul rent of ₹' || b.amount_received::text, 'backhaul', b.id FROM fulfilment.backhaul b WHERE b.trip_id = $1 AND b.paid_at IS NOT NULL
+       ),
+       posted AS (
+         SELECT ev.what, e.id AS entry_id
+           FROM events ev
+           LEFT JOIN money.ledger_entry e ON e.source_type = ev.source_type AND e.source_id = ev.source_id AND e.reverses_entry_id IS NULL
+       )
+       SELECT (SELECT array_agg(what) FROM posted WHERE entry_id IS NULL) AS missing,
+              (SELECT count(*)::int FROM (
+                 SELECT l.entry_id FROM money.ledger_line l WHERE l.entry_id IN (SELECT entry_id FROM posted WHERE entry_id IS NOT NULL)
+                 GROUP BY l.entry_id HAVING SUM(l.debit) <> SUM(l.credit)) u) AS unbalanced`,
+      [tripId],
+    );
+    const w = work.rows[0];
+    const k = km.rows[0];
     return {
+      workforce: { driver: w.driver, workRecorded: w.recorded, hasPayRate: w.has_rate, crewCredits: w.crew_credits },
+      untimedStops: untimed.rows.map((r) => r.name),
+      vehicle: { openingKm: k.opening_km, closingKm: k.closing_km, litres: k.litres },
+      openItems: open.rows.map((r) => r.what),
+      books: { missing: books.rows[0].missing ?? [], unbalanced: books.rows[0].unbalanced },
       stops: stops.rows.map((r) => ({ id: r.id, type: r.stop_type, status: r.status, name: r.name, notes: r.notes, hasPod: r.has_pod })),
       load: load.rows.map((r) => ({ product: r.product, uom: r.uom, pickedUp: r.picked_up, delivered: r.delivered, returned: r.returned })),
       unpaidCashCustomers: unpaid.rows,
@@ -260,4 +345,15 @@ export interface TripReviewFacts {
   lossExceptions?: { customer: string; product: string; kind: 'weighment' | 'breakage'; lossPct: string; tolerancePct: string }[];
   /** The trip's backhauls (driver app D5). */
   backhauls?: BackhaulRecord[];
+  // ---- Master Spec v3 §60 (P1): the areas every trip is checked on besides ----
+  /** The driver's work on the trip recorded; a pay rate in force; crew credits. */
+  workforce?: { driver: string; workRecorded: boolean; hasPayRate: boolean; crewCredits: number };
+  /** Completed stops missing their arrival or completion time. */
+  untimedStops?: string[];
+  /** Odometer at the start and the return; fuel put in on the trip (litres). */
+  vehicle?: { openingKm: string | null; closingKm: string | null; litres: string };
+  /** Open disputes on the trip's deliveries and the driver's pending requests from it. */
+  openItems?: string[];
+  /** Money events on the trip with no journal; journals that don't balance. */
+  books?: { missing: string[]; unbalanced: number };
 }

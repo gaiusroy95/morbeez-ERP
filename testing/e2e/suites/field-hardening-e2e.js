@@ -66,6 +66,7 @@ const key = () => ({ 'idempotency-key': randomUUID() });
   // ---- A trip: one shop, delivered ----
   const order = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 10, unitPrice: 30 }] });
   let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: rajuId, plannedDate: today, orderIds: [order.id] });
+  await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
   // The day's last reading, unless another trip read the odometer since — then the refusal says so, and the
   // phone's Start Day correction reads it again (D8); here, from the office's words.
   let opening = Math.ceil(Number(day.lastOdometerKm ?? 0)) + 10;
@@ -117,6 +118,7 @@ const key = () => ({ 'idempotency-key': randomUUID() });
   // ---- A trip the owner cancelled, and another driver's ----
   const order2 = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
   const planned = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: rajuId, plannedDate: today, orderIds: [order2.id] });
+  await owner.post(`/logistics/trips/${planned.id}/publish`, { version: planned.version });
   await owner.post(`/logistics/trips/${planned.id}/cancel`, { version: planned.version });
   const startCancelled = await driver.raw('POST', `/logistics/trips/${planned.id}/start`, { version: planned.version, openingKm: opening + 50 });
   check(
@@ -127,6 +129,7 @@ const key = () => ({ 'idempotency-key': randomUUID() });
 
   const order3 = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
   const theirs = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: other.employeeId ?? other.id, plannedDate: today, orderIds: [order3.id] });
+  await owner.post(`/logistics/trips/${theirs.id}/publish`, { version: theirs.version });
   const [theirStop] = await owner.get(`/logistics/trips/${theirs.id}/stops`);
   const notMine = await driver.raw('POST', `/logistics/trips/${theirs.id}/stops/${theirStop.id}/skip`, { reason: 'Shop closed' });
   check('a stop on another driver’s trip is refused — never done', refused(notMine) || notMine.status === 404, `${notMine.status} ${words(notMine)}`);

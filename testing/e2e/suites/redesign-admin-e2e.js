@@ -74,6 +74,7 @@ const money = (n) => Number(n).toFixed(2);
     // ---- A driver's expense beyond their authority ----
     const order = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: rajuId, plannedDate: today, orderIds: [order.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const lastKm = Number((await driver.get('/logistics/trips/mine/day')).lastOdometerKm ?? 0);
     trip = await driver.post(`/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: lastKm + 5 });
     // Delivery + collection only (level 2): spending isn't theirs to decide.

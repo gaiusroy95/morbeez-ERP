@@ -60,6 +60,7 @@ function client(token) {
     // ---- Farm weighment at the pickup ----
     const deliverTrip = async (order, lines) => {
       let trip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: driver.id, advanceAmount: 0 });
+      await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
       const stop = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: order.id });
       trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
       const res = await owner.raw('POST', `/logistics/trips/${trip.id}/stops/${stop.id}/complete-delivery`, { recipientName: 'Manager', signatureData: 'data:image/png;base64,iVBORw0KGgo=', lines });
@@ -70,6 +71,7 @@ function client(token) {
       po = await owner.post(`/procurement/purchase-orders/${po.id}/confirm`, { version: po.version });
       const pickup = await owner.post(`/procurement/purchase-orders/${po.id}/pickups`, {});
       let trip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: driver.id, advanceAmount: 0 });
+      await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
       const stop = await owner.post(`/logistics/trips/${trip.id}/stops/pickup`, { pickupId: pickup.id });
       trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
       await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/complete-pickup`, { weights: [{ productId: birds.id, netQuantity: kg }] });

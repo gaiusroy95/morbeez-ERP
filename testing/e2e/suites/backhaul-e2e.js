@@ -71,6 +71,7 @@ const message = (r) => r.body?.error?.message ?? '';
     const pickup = await owner.post(`/procurement/purchase-orders/${po.id}/pickups`, {});
     const order = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 20, unitPrice: 30 }] });
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: raju.employeeId ?? raju.id, plannedDate: today, pickupIds: [pickup.id], orderIds: [order.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const lastKm = Number((await driver.get('/logistics/trips/mine/day')).lastOdometerKm ?? 0);
     trip = await driver.post(`/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: lastKm + 10 });
     const stops = await driver.get(`/logistics/trips/${trip.id}/stops`);
@@ -108,9 +109,11 @@ const message = (r) => r.body?.error?.message ?? '';
     // ---- After the last delivery, step by step ----
     const beforeDeliveries = await driver.raw('POST', `${base}/${a.id}/steps`, { step: 'pickup_reached' });
     check('a backhaul runs on the way back: not before the last delivery', beforeDeliveries.status === 409 && /Finish the 2 stop\(s\)/.test(message(beforeDeliveries)), message(beforeDeliveries));
+    await driver.post(`/logistics/trips/${trip.id}/stops/${farm.id}/arrive`, {});
     await driver.post(`/logistics/trips/${trip.id}/stops/${farm.id}/complete-pickup`, { lines: [{ productId: tomato.id, outcome: 'accepted', netQuantity: 30 }] });
     await driver.post(`/logistics/trips/${trip.id}/start-deliveries`);
     await driver.upload(`/logistics/trips/${trip.id}/stops/${shop.id}/photos`, { photoType: 'pod' });
+    await driver.post(`/logistics/trips/${trip.id}/stops/${shop.id}/arrive`, {});
     await driver.post(`/logistics/trips/${trip.id}/stops/${shop.id}/complete-delivery`, { recipientName: 'Manager', allUnloaded: true, qrToken: shop.party.qrToken });
     await driver.post(`/logistics/trips/${trip.id}/stops/${shop.id}/collections`, { amount: 600, method: 'cash' }, { 'idempotency-key': '00000000-0000-4000-8000-0000000d5002' });
 
@@ -180,7 +183,7 @@ const message = (r) => r.body?.error?.message ?? '';
       JSON.stringify(check8),
     );
     const closed = await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: Number(handover.expected) });
-    check('closed as a pass, the backhaul cash in the closure', closed.outcome === 'pass' && Number(closed.variance) === 0 && closed.backhaulCash === '3500.00' && closed.checklist.length === 8, JSON.stringify({ o: closed.outcome, v: closed.variance, b: closed.backhaulCash, n: closed.checklist.length }));
+    check('closed as a pass, the backhaul cash in the closure', closed.outcome === 'pass' && Number(closed.variance) === 0 && closed.backhaulCash === '3500.00' && closed.checklist.length === 13, JSON.stringify({ o: closed.outcome, v: closed.variance, b: closed.backhaulCash, n: closed.checklist.length }));
     const float = (await db.query(
       `SELECT COALESCE(SUM(l.debit - l.credit), 0)::text AS net FROM money.ledger_line l JOIN money.ledger_entry e ON e.id = l.entry_id
         WHERE l.account_code = 'cash_with_drivers' AND ((e.source_type = 'backhaul' AND e.source_id = $1) OR (e.entry_type = 'trip_reconciled' AND e.source_id = $2))`,

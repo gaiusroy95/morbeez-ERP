@@ -90,7 +90,7 @@
     <string name="on_credit">കടമായി — ഒന്നും വാങ്ങാനില്ല</string>
     <string name="no_trip">ഇതുവരെ ട്രിപ്പ് ഇല്ല</string>
     <string name="checking_route">നിങ്ങളുടെ റൂട്ട് പരിശോധിക്കുന്നു…</string>
-    <string name="no_trip_hint">റൂട്ട് തയ്യാറാകുമ്പോൾ ഇവിടെ കാണാം. ഇപ്പോൾ പരിശോധിക്കാൻ സിങ്ക് അമർത്തുക.</string>
+    <string name="no_trip_hint">ഉടമ നിങ്ങളുടെ ട്രിപ്പ് പ്രസിദ്ധീകരിക്കുമ്പോൾ ഇവിടെ കാണാം. ഇപ്പോൾ പരിശോധിക്കാൻ സിങ്ക് അമർത്തുക.</string>
     <string name="status_planned">പ്ലാൻ ചെയ്തു</string>
     <string name="status_in_progress">യാത്രയിൽ</string>
     <string name="status_completed">ഉടമയെ കാത്തിരിക്കുന്നു</string>
@@ -261,7 +261,7 @@
     <string name="step_complete">പൂർത്തി</string>
     <string name="next_action">അടുത്ത ജോലി</string>
     <string name="no_trip_today">ഇന്നത്തേക്ക് ഇതുവരെ ട്രിപ്പ് ഇല്ല</string>
-    <string name="no_trip_today_hint">നിങ്ങളുടെ ട്രിപ്പ് ഉടമയാണ് പ്ലാൻ ചെയ്യുന്നത്. പ്ലാൻ ചെയ്താൽ ഇവിടെ കാണാം.</string>
+    <string name="no_trip_today_hint">നിങ്ങളുടെ ട്രിപ്പ് ഉടമ പ്ലാൻ ചെയ്ത് പരിശോധിച്ച് പ്രസിദ്ധീകരിക്കും. അതിനുശേഷം ഇവിടെ കാണാം.</string>
     <string name="check_again">വീണ്ടും നോക്കുക</string>
     <string name="start_your_day">നിങ്ങളുടെ ദിവസം തുടങ്ങൂ</string>
     <plurals name="start_day_stops">
@@ -322,7 +322,7 @@
     <!-- Start Day -->
     <string name="start_day_intro">ഉടമ പ്ലാൻ ചെയ്ത ട്രിപ്പാണ്. വാഹനം പരിശോധിച്ച്, ഓഡോമീറ്റർ നോക്കി, തുടങ്ങാൻ ബട്ടൺ അമർത്തിപ്പിടിക്കുക.</string>
     <string name="hold_to_start">അമർത്തിപ്പിടിച്ച് ദിവസം തുടങ്ങുക</string>
-    <string name="no_trip_to_start">ഇന്ന് നിങ്ങൾക്ക് ട്രിപ്പ് പ്ലാൻ ചെയ്തിട്ടില്ല. ആദ്യം ഉടമ ട്രിപ്പ് പ്ലാൻ ചെയ്യണം.</string>
+    <string name="no_trip_to_start">ഇന്ന് നിങ്ങൾക്ക് ട്രിപ്പ് പ്രസിദ്ധീകരിച്ചിട്ടില്ല. ആദ്യം ഉടമ പ്ലാൻ ചെയ്ത് പ്രസിദ്ധീകരിക്കും.</string>
     <string name="already_started">ഈ ട്രിപ്പ് ഇതിനകം തുടങ്ങിക്കഴിഞ്ഞു.</string>
     <string name="planned_by_owner">ഉടമ പ്ലാൻ ചെയ്തത്</string>
     <plurals name="n_stops">
@@ -583,7 +583,7 @@
     <string name="closing_below_opening">ഇത് തുടക്ക കി.മീ ആയ %1$s കി.മീ-യിലും കുറവാണ്.</string>
     <string name="trip_km">ട്രിപ്പ് കി.മീ</string>
     <string name="cash_handover">പണം ഏൽപ്പിക്കൽ</string>
-    <string name="hold_to_hand_over">അമർത്തിപ്പിടിച്ച് ഉടമയെ ഏൽപ്പിക്കുക</string>
+    <string name="hold_to_hand_over">3 സെക്കൻഡ് അമർത്തിപ്പിടിച്ച് ഏൽപ്പിച്ച് ട്രിപ്പ് സമർപ്പിക്കുക</string>
     <string name="return_first">ആദ്യം അവസാന കി.മീ രേഖപ്പെടുത്തുക: \"ബേസിലേക്ക് മടങ്ങുക\" അമർത്തുക.</string>
     <string name="checking_handover">ഓഫീസുമായി കണക്കുകൾ പരിശോധിക്കുന്നു…</string>
     <string name="expected_cash">പ്രതീക്ഷിക്കുന്ന പണം</string>

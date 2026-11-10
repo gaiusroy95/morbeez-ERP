@@ -125,6 +125,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
 
     // ---- Statuses follow the trip ----
     const trip = await owner.post('/logistics/trips', { vehicleId: truck.id, driverEmployeeId: suresh.id, plannedDate: today });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const stop = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: order.id });
     const stageOf = async () => (await owner.get('/orders/board?day=today')).items.find((c) => c.id === order.id).stage;
     check('on a planned trip → Scheduled', (await stageOf()) === 'scheduled');
@@ -224,6 +225,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
     // The trip planner offers it first, as planned for a trip on its day with its driver.
     await page.goto(`${BASE}/logistics`);
     const lateTrip = await owner.post('/logistics/trips', { vehicleId: truck.id, driverEmployeeId: suresh.id, plannedDate: today });
+    await owner.post(`/logistics/trips/${lateTrip.id}/publish`, { version: lateTrip.version });
     await page.reload();
     await page.waitForSelector('.list-card');
     await page.locator('.list-card', { hasText: lateTrip.number }).click();

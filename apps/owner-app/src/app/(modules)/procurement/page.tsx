@@ -12,6 +12,7 @@ import type {
   PickupRecord,
   ProcurementBoardDay,
   ProcurementCard,
+  ProcurementLifecycle,
   ProcurementStage,
   PurchaseOrderRecord,
   PurchaseOrderStatus,
@@ -825,7 +826,7 @@ function PickupRow({ pickup, canWrite }: { pickup: PickupRecord; canWrite: boole
 
 // ---- Detail ----
 
-function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void }) {
+function PurchaseOrderDetail({ id, lifecycle, onClose }: { id: string; lifecycle?: ProcurementLifecycle; onClose: () => void }) {
   const t = useT();
   const { data, error, isPending, refetch } = usePurchaseOrder(id);
   const currency = useCurrency();
@@ -887,6 +888,7 @@ function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void 
         items={[
           ['Farmer', farmerName(order.farmerId)],
           ['Status', poBadge(order)],
+          ...(lifecycle ? ([['Where it stands', t(LIFECYCLE[lifecycle])]] as [string, string][]) : []),
           ['Raised', formatDateTime(order.createdAt, timeZone)],
           ['Pickup', plan || '—'],
           ['Driver', order.plannedDriverId ? employeeName(order.plannedDriverId) : '—'],
@@ -1064,6 +1066,18 @@ function PurchaseOrderDetail({ id, onClose }: { id: string; onClose: () => void 
   );
 }
 
+/** Master Spec v3 §11, as the server reads it from the order, pickup, receipt and payment. */
+const LIFECYCLE: Record<ProcurementLifecycle, string> = {
+  draft: 'Draft',
+  confirmed: 'Confirmed',
+  assigned: 'Assigned to a trip',
+  pickup: 'At the farm',
+  partially_picked: 'Partially picked',
+  picked_up: 'Picked up',
+  settled: 'Settled',
+  cancelled: 'Cancelled',
+};
+
 const STAGE: Record<ProcurementStage, { label: string; tone: CardTone }> = {
   pending: { label: 'Pending', tone: 'pending' },
   awaiting_approval: { label: 'Awaiting approval', tone: 'pending' },
@@ -1180,7 +1194,7 @@ export default function ProcurementPage() {
         )}
         {canWrite && <CreateBar label="Create Procurement" onClick={() => setCreating(true)} />}
       </div>
-      {selected && <PurchaseOrderDetail key={selected} id={selected} onClose={() => setSelected(null)} />}
+      {selected && <PurchaseOrderDetail key={selected} id={selected} lifecycle={cards.find((c) => c.id === selected)?.lifecycle} onClose={() => setSelected(null)} />}
     </div>
   );
 }

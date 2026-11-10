@@ -23,6 +23,8 @@ import { CustomerCollectionsRepository } from './repositories/customer-collectio
 import { TripCashDepositsRepository } from './repositories/trip-cash-deposits.repository';
 import { TripCashDepositRecord } from './entities/trip-cash-deposit.entity';
 import { checklistOf, handoverOf, HandoverSummary } from './trip-closure';
+import { failedChecks, TripCheck, tripChecksOf } from './trip-checks';
+import { OptimisticLockException } from '../../common/persistence/optimistic-lock.exception';
 import { ChecklistItem } from './entities/trip-reconciliation.entity';
 import { TripReviewFacts } from './repositories/trip-reconciliations.repository';
 import { TripRecord, TripStatus } from './entities/trip.entity';
@@ -322,16 +324,90 @@ export class LogisticsService {
    * "may act on any trip." Everyone else must be the trip's own assigned
    * driver, resolved server-side from their own login, never trusted from
    * client input.
+   *
+   * And the driver's own trip only while it's theirs to work on (Master Spec
+   * v3 §7.5, §7.10, §58): a draft doesn't exist for them until the owner
+   * publishes it; a cancelled trip says so; a closed trip is closed — only
+   * its record ([access] 'record': the trip itself, its summary, incentives
+   * and handover) stays theirs. Everything else is 'live'.
    */
   async getTrip(
     tenantId: string,
     actorUserId: string,
     callerIsDispatcher: boolean,
     id: string,
+    access: 'live' | 'record' = 'live',
   ): Promise<TripRecord> {
     const trip = await this.findTripOrThrow(tenantId, id);
     await this.assertOwnership(tenantId, actorUserId, callerIsDispatcher, trip);
+    if (callerIsDispatcher) return trip;
+    if (trip.stage === 'draft') throw new NotFoundException('Trip not found');
+    if (access === 'live' && trip.status === 'cancelled') throw new ConflictException(`The office cancelled trip ${trip.number}`);
+    if (access === 'live' && trip.status === 'reconciled') throw new ConflictException(`Trip ${trip.number} is closed — the office has reconciled it`);
     return trip;
+  }
+
+  /**
+   * The owner's Check before Publish (Master Spec v3 §7.4): who drives, the
+   * vehicle's fitness and capacity, the date, every stop's quantities and
+   * order, credit holds, what's to collect.
+   */
+  async checkTrip(tenantId: string, tripId: string): Promise<{ trip: TripRecord; checks: TripCheck[] }> {
+    const trip = await this.findTripOrThrow(tenantId, tripId);
+    return this.db.withTenant(tenantId, async (client) => ({ trip, checks: await this.checksWithClient(client, trip) }));
+  }
+
+  private async checksWithClient(client: PoolClient, trip: TripRecord): Promise<TripCheck[]> {
+    const vehicle = await this.vehicles.getById(trip.tenantId, trip.vehicleId);
+    const driver = await this.workforce.getById(trip.tenantId, trip.driverEmployeeId);
+    let roadworthy: true | string = true;
+    try {
+      await this.fleet.assertRoadworthyWithClient(client, trip.vehicleId);
+    } catch (err) {
+      roadworthy = err instanceof Error ? err.message : String(err);
+    }
+    return tripChecksOf({
+      today: await this.planning.todayWithClient(client),
+      plannedDate: trip.plannedDate,
+      driver: { name: driver.name, active: driver.status === 'active', hasLogin: !!driver.userId },
+      vehicle: { registration: vehicle.registrationNumber, capacityKg: vehicle.capacityKg, roadworthy },
+      stops: await this.planning.checkStopsWithClient(client, trip.id),
+    });
+  }
+
+  /**
+   * Published to its driver (Master Spec v3 §7.5): only a draft, at the
+   * version the owner checked, and only when no check fails.
+   */
+  async publishTrip(tenantId: string, actorUserId: string, tripId: string, version: number): Promise<TripRecord> {
+    return this.db.withTenant(tenantId, async (client) => {
+      const before = await this.trips.findByIdWithClient(client, tripId);
+      if (!before) throw new NotFoundException('Trip not found');
+      if (before.stage !== 'draft') throw new ConflictException(`Trip ${before.number} is ${before.stage === 'published' ? 'already published' : 'past publishing'}`);
+      if (before.version !== version) throw new OptimisticLockException('Trip', tripId);
+      const failed = failedChecks(await this.checksWithClient(client, before));
+      if (failed.length > 0) throw new ConflictException(`Trip ${before.number} can't be published: ${failed.map((c) => c.detail).join(' ')}`);
+      const after = await this.trips.publishWithClient(client, tripId, version, actorUserId);
+      if (!after) throw new OptimisticLockException('Trip', tripId);
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: 'trip',
+        entityId: tripId,
+        before: { stage: before.stage },
+        after: { stage: after.stage, publishedAt: after.publishedAt },
+      });
+      return after;
+    });
+  }
+
+  /** A change to a published trip still has to pass its hard checks (the driver already sees it). */
+  private async assertStillPublishableWithClient(client: PoolClient, tripId: string): Promise<void> {
+    const trip = await this.trips.findByIdWithClient(client, tripId);
+    if (!trip || trip.stage !== 'published') return;
+    const failed = failedChecks(await this.checksWithClient(client, trip));
+    if (failed.length > 0) throw new ConflictException(`Trip ${trip.number} is published, and this change would break it: ${failed.map((c) => c.detail).join(' ')}`);
   }
 
   private async findTripOrThrow(tenantId: string, id: string): Promise<TripRecord> {
@@ -470,6 +546,7 @@ export class LogisticsService {
     // offline while the office cancelled or started the trip shows the driver why.
     if (before.status === 'cancelled') throw new ConflictException(`The office cancelled trip ${before.number}`);
     if (before.status !== 'planned') throw new ConflictException(`Trip ${before.number} has already started`);
+    if (before.stage === 'draft') throw new ConflictException(`Trip ${before.number} isn't published yet — check it and publish it first`);
     // Setting off needs authority for this trip — standing, or the owner's approval.
     await this.delegation.assertCan(tenantId, callerIsDispatcher, before, 'deliver');
 
@@ -618,8 +695,9 @@ export class LogisticsService {
     actorUserId: string,
     callerIsDispatcher: boolean,
     tripId: string,
+    access: 'live' | 'record' = 'live',
   ): Promise<TripStopRecord[]> {
-    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId, access);
     return this.db.withTenant(tenantId, async (client) => {
       const stops = await this.stops.listByTripWithClient(client, tripId);
       const details = await this.stops.detailsForTripWithClient(client, tripId);
@@ -673,6 +751,8 @@ export class LogisticsService {
         entityId: stop.id,
         after: stop as unknown as Record<string, unknown>,
       });
+      // Already on the driver's phone: the change must keep the trip publishable.
+      await this.assertStillPublishableWithClient(client, tripId);
       return stop;
     });
   }
@@ -714,6 +794,8 @@ export class LogisticsService {
         entityId: stop.id,
         after: stop as unknown as Record<string, unknown>,
       });
+      // Already on the driver's phone: the change must keep the trip publishable.
+      await this.assertStillPublishableWithClient(client, tripId);
       return stop;
     });
   }
@@ -1344,8 +1426,9 @@ export class LogisticsService {
     actorUserId: string,
     callerIsDispatcher: boolean,
     tripId: string,
+    access: 'live' | 'record' = 'live',
   ): Promise<TripExpenseRecord[]> {
-    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId, access);
     return this.db.withTenant(tenantId, (client) => this.expenses.listByTripWithClient(client, tripId));
   }
 
@@ -1694,7 +1777,7 @@ export class LogisticsService {
 
   /** What the driver should hand over — for the driver's own trip, or any trip for the owner. */
   async getHandover(tenantId: string, actorUserId: string, callerIsDispatcher: boolean, tripId: string): Promise<HandoverSummary> {
-    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId);
+    const trip = await this.getTrip(tenantId, actorUserId, callerIsDispatcher, tripId, 'record');
     return this.db.withTenant(tenantId, (client) => this.handoverWithClient(client, trip));
   }
 

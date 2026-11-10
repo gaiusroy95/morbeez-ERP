@@ -121,6 +121,13 @@ export interface DashboardHome {
   activeTrips: { active: number; total: number };
   today: { procurement: number; deliveries: number; collections: number; activeTrips: number };
   alerts: HomeAlert[];
+  /**
+   * Yesterday's reconciliation at a glance (Daily operations, the owner's
+   * start of day; Master Spec v3 P1): trips closed yesterday, pass or approved
+   * exception; cash short or over across them; deliveries that went short;
+   * trips submitted yesterday and still to close.
+   */
+  yesterday: { date: string; closed: number; pass: number; approvedException: number; cashShort: string; cashOver: string; shortDeliveries: number; toClose: number };
   insight: { id: string; title: string; explanation: string } | null;
 }
 

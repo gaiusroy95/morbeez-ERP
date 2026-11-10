@@ -494,6 +494,47 @@ export class DashboardRepository {
     return result.rows[0];
   }
 
+  /**
+   * Yesterday's closures, in the business's own day: how they closed, the
+   * cash short (variance > 0: missing) or over, the deliveries recorded short
+   * on those trips, and the trips handed in yesterday still waiting to close.
+   */
+  async yesterdayClosures(
+    client: PoolClient,
+    today: string,
+  ): Promise<{ date: string; closed: number; pass: number; approvedException: number; cashShort: string; cashOver: string; shortDeliveries: number; toClose: number }> {
+    const r = await client.query<{ closed: number; pass: number; approved: number; cash_short: string; cash_over: string; short_deliveries: number; to_close: number }>(
+      `WITH tz AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id()),
+            closed AS (
+              SELECT r.* FROM fulfilment.trip_reconciliation r CROSS JOIN tz
+               WHERE (r.reconciled_at AT TIME ZONE tz.timezone)::date = $1::date - 1)
+       SELECT (SELECT count(*)::int FROM closed) AS closed,
+              (SELECT count(*)::int FROM closed WHERE outcome = 'pass') AS pass,
+              (SELECT count(*)::int FROM closed WHERE outcome = 'approved_exception') AS approved,
+              (SELECT COALESCE(SUM(variance) FILTER (WHERE variance > 0), 0)::numeric(14,2)::text FROM closed) AS cash_short,
+              (SELECT COALESCE(-SUM(variance) FILTER (WHERE variance < 0), 0)::numeric(14,2)::text FROM closed) AS cash_over,
+              (SELECT count(*)::int FROM fulfilment.delivery_shortfall sf
+                 JOIN fulfilment.trip_stop s ON s.id = sf.trip_stop_id
+                WHERE s.trip_id IN (SELECT trip_id FROM closed)) AS short_deliveries,
+              (SELECT count(*)::int FROM fulfilment.trip t CROSS JOIN tz
+                WHERE t.status IN ('completed', 'on_hold') AND (t.completed_at AT TIME ZONE tz.timezone)::date = $1::date - 1) AS to_close`,
+      [today],
+    );
+    const x = r.rows[0];
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    return {
+      date: d.toISOString().slice(0, 10),
+      closed: x.closed,
+      pass: x.pass,
+      approvedException: x.approved,
+      cashShort: x.cash_short,
+      cashOver: x.cash_over,
+      shortDeliveries: x.short_deliveries,
+      toClose: x.to_close,
+    };
+  }
+
   /** The newest AI suggestion nobody has acted on yet, for the Home screen's insight card. */
   async latestInsight(client: PoolClient): Promise<{ id: string; title: string; explanation: string } | null> {
     const result = await client.query<{ id: string; title: string; explanation: string }>(

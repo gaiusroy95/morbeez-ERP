@@ -84,6 +84,7 @@ function client(token) {
     const orderA = await owner.post('/orders', { customerId: sagar.id, confirm: true, creditTermDays: 0, lines: [{ productId: tomato.id, quantity: 100, unitPrice: 30 }, { productId: onion.id, quantity: 50, unitPrice: 20 }] });
     const orderB = await owner.post('/orders', { customerId: leaf.id, confirm: true, lines: [{ productId: tomato.id, quantity: 80, unitPrice: 31 }] });
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: mohan.id, pickupIds: [pickup.id], orderIds: [orderA.id, orderB.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const early = await owner.raw('POST', `/logistics/trips/${trip.id}/start-deliveries`);
     check("deliveries can't set off before the trip is on the road", early.status === 409, String(early.status));
     trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });

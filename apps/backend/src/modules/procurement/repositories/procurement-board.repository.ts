@@ -1,3 +1,4 @@
+import { procurementLifecycleOf } from '../procurement-lifecycle';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ProcurementBoard, ProcurementBoardDay, ProcurementCard } from '../entities/procurement-board.entity';
@@ -56,7 +57,7 @@ export class ProcurementBoardRepository {
        picked AS (
          SELECT m.*,
                 (SELECT row_to_json(pk) FROM (
-                   SELECT k.scheduled_at, k.status, k.driver_employee_id, k.vehicle_id FROM commerce.pickup k
+                   SELECT k.id, k.scheduled_at, k.status, k.driver_employee_id, k.vehicle_id FROM commerce.pickup k
                     WHERE k.purchase_order_id = m.id AND k.status <> 'cancelled'
                     ORDER BY k.created_at DESC LIMIT 1) pk) AS pickup
          FROM matching m WHERE ${dayFilter}
@@ -67,6 +68,18 @@ export class ProcurementBoardRepository {
                        to_char(p.pickup_time, 'HH24:MI')) AS pickup_time,
               e.name AS driver_name, v.registration_number AS vehicle,
               (p.pickup->>'status') = 'completed' AS picked_up,
+              -- The Master Spec v3 §11 lifecycle's facts (ProcurementLifecycleFacts).
+              EXISTS (SELECT 1 FROM fulfilment.trip_stop s JOIN fulfilment.trip t ON t.id = s.trip_id
+                       WHERE s.pickup_id = (p.pickup->>'id')::uuid AND t.status <> 'cancelled') AS on_trip,
+              EXISTS (SELECT 1 FROM fulfilment.trip_stop s JOIN fulfilment.trip t ON t.id = s.trip_id
+                       WHERE s.pickup_id = (p.pickup->>'id')::uuid AND t.status <> 'cancelled'
+                         AND s.arrived_at IS NOT NULL AND s.status = 'pending') AS arrived,
+              EXISTS (SELECT 1 FROM fulfilment.trip_stop s JOIN fulfilment.trip t ON t.id = s.trip_id
+                       WHERE s.pickup_id = (p.pickup->>'id')::uuid AND t.status <> 'cancelled' AND s.status = 'completed') AS stop_done,
+              (SELECT COALESCE(SUM(lt.received_quantity), 0)::numeric(14,3)::text FROM commerce.lot lt WHERE lt.purchase_order_id = p.id) AS received,
+              (SELECT COALESCE(SUM(l.expected_quantity), 0)::numeric(14,3)::text FROM commerce.purchase_order_line l WHERE l.purchase_order_id = p.id) AS expected,
+              (SELECT SUM(b.outstanding)::numeric(14,2)::text FROM money.farmer_payable_balance b JOIN commerce.lot lt ON lt.id = b.lot_id
+                WHERE lt.purchase_order_id = p.id) AS owed,
               (SELECT json_agg(json_build_object('name', pr.name, 'quantity', l.expected_quantity::text, 'uom', pr.base_uom,
                                                  'bags', l.bags::text, 'kgPerBag', l.kg_per_bag::text) ORDER BY l.expected_quantity DESC, pr.name)
                  FROM commerce.purchase_order_line l JOIN trading_partners.product pr ON pr.id = l.product_id
@@ -104,6 +117,15 @@ export class ProcurementBoardRepository {
                   : r.status === 'placed' && r.approval_request_id
                     ? 'awaiting_approval'
                     : 'pending',
+          lifecycle: procurementLifecycleOf({
+            status: r.status,
+            onTrip: r.on_trip,
+            arrived: r.arrived,
+            pickedUp: r.picked_up || r.stop_done,
+            received: r.received,
+            expected: r.expected,
+            owed: r.owed,
+          }),
           day: r.day,
           pickupTime: r.pickup_time,
           farmerName: r.farmer_name,

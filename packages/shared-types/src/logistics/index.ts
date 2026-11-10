@@ -7,10 +7,23 @@ import type { PaymentMethod } from '../finance';
 // closes a trip ('reconciled').
 export type TripStatus = 'planned' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled' | 'reconciled';
 
+/** Where it stands (Master Spec v3 §7): a planned trip is a draft until the owner publishes it to its driver. */
+export type TripStage = 'draft' | 'published' | 'on_the_road' | 'submitted' | 'on_hold' | 'closed' | 'cancelled';
+
+/** GET logistics/trips/:id/check — the owner's Check before Publish; a failure stops publishing. */
+export interface TripCheck {
+  check: 'driver' | 'vehicle' | 'date' | 'stops' | 'quantities' | 'capacity' | 'credit' | 'collections';
+  status: 'pass' | 'warn' | 'fail';
+  detail: string;
+}
+
 export interface TripRecord {
   id: string;
   /** "T-20261028-001": the day's running number. */
   number: string;
+  stage: TripStage;
+  publishedAt: IsoDateTime | null;
+  publishedBy: string | null;
   routeId: string | null;
   vehicleId: string;
   driverEmployeeId: string;
@@ -179,7 +192,10 @@ export interface DriverRequest {
   resultRef: string | null;
 }
 
-export type ChecklistArea = 'procurement' | 'deliveries' | 'load' | 'collections' | 'handover' | 'expenses' | 'returns' | 'backhaul';
+export type ChecklistArea =
+  | 'procurement' | 'deliveries' | 'load' | 'collections' | 'handover' | 'expenses' | 'returns' | 'backhaul'
+  // Master Spec v3 §60 (P1)
+  | 'workforce' | 'workload' | 'vehicle' | 'exceptions' | 'accounting';
 
 export interface ChecklistItem {
   area: ChecklistArea;
@@ -367,6 +383,8 @@ export interface TripCard {
   id: string;
   number: string;
   status: TripStatus;
+  /** Draft until published (Master Spec v3 §7.5). */
+  stage: TripStage;
   day: IsoDate;
   /** Set off (in progress) or came back (submitted, closed), HH:MM. */
   time: string | null;

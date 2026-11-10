@@ -301,8 +301,11 @@ async function api(token, method, p, body) {
       await page.waitForFunction(() => /Planned/.test(document.querySelector('.detail')?.textContent ?? ''));
       return (await detail().locator('h2, h3').first().textContent()) ?? '';
     });
-    await step('trip: start is disabled with no stops', async () => {
-      if (!(await detail().getByRole('button', { name: 'Start trip' }).isDisabled())) throw new Error('enabled');
+    // Master Spec v3 §7.5: a new trip is a draft — checked and published before anyone starts it.
+    await step('trip: a draft, to check and publish — nothing to start yet', async () => {
+      await page.waitForFunction(() => /Draft — not published/.test(document.querySelector('.detail .key-values')?.textContent ?? ''));
+      if ((await detail().getByRole('button', { name: 'Start trip' }).count()) !== 0) throw new Error('a draft offers Start');
+      if ((await detail().getByRole('button', { name: 'Check & publish' }).count()) !== 1) throw new Error('no Check & publish');
     });
     await step('trip: add the confirmed order as a delivery', async () => {
       await detail().getByRole('button', { name: 'Add delivery' }).click();
@@ -311,6 +314,15 @@ async function api(token, method, p, body) {
       must(await submit('Add delivery'));
       await page.waitForFunction(() => /0 of 1 done/.test(document.querySelector('.detail').textContent));
       return options.slice(1).join(', ');
+    });
+    await step('trip: check and publish it to the driver', async () => {
+      await detail().getByRole('button', { name: 'Check & publish' }).click();
+      await dialog().locator('.trip-checks li').first().waitFor();
+      const checks = await dialog().locator('.trip-checks li').count();
+      if (checks !== 8) throw new Error(`${checks} checks`);
+      await dialog().getByRole('button', { name: 'Publish to the driver' }).click();
+      await page.waitForFunction(() => /Published/.test(document.querySelector('.detail .key-values')?.textContent ?? ''));
+      return `${checks} checks`;
     });
     await step('trip: start', async () => {
       await detail().getByRole('button', { name: 'Start trip' }).click();

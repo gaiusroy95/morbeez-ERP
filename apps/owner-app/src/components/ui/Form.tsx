@@ -20,6 +20,7 @@ export function FormDialog({
   onClose,
   tone,
   size,
+  submitDisabled,
   children,
 }: {
   title: string;
@@ -31,6 +32,8 @@ export function FormDialog({
   onClose: () => void;
   tone?: 'danger';
   size?: 'wide';
+  /** The submit button stays off — e.g. while a check the action depends on fails. */
+  submitDisabled?: boolean;
   children?: React.ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -59,7 +62,7 @@ export function FormDialog({
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          if (!pending) onSubmit();
+          if (!pending && !submitDisabled) onSubmit();
         }}
       >
         <h2 id={titleId} className="dialog-title">
@@ -79,7 +82,7 @@ export function FormDialog({
           <button
             type="submit"
             className={tone === 'danger' ? 'button button-danger' : 'button button-primary'}
-            disabled={pending}
+            disabled={pending || submitDisabled}
             aria-busy={pending}
           >
             {pending ? t('Saving…') : t(submitLabel)}

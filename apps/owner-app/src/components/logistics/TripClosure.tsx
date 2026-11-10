@@ -37,6 +37,12 @@ const AREA_LABEL: Record<ChecklistArea, string> = {
   collections: 'Collections',
   handover: 'Money handover',
   expenses: 'Expenses',
+  // Master Spec v3 §60 (P1)
+  workforce: 'Workforce',
+  workload: 'Workload (stop times)',
+  vehicle: 'Vehicle & KM',
+  exceptions: 'Open exceptions',
+  accounting: 'Accounting',
 };
 
 /** The handover formula, line by line: what the driver should be holding. */

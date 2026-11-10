@@ -62,6 +62,7 @@ const same = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
     po = await owner.post(`/procurement/purchase-orders/${po.id}/confirm`, { version: po.version });
     const pickup = await owner.post(`/procurement/purchase-orders/${po.id}/pickups`, {});
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const farmStop = await owner.post(`/logistics/trips/${trip.id}/stops/pickup`, { pickupId: pickup.id });
     const stopG = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: orderG.id });
     trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });

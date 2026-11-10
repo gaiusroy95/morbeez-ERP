@@ -74,6 +74,10 @@ const CHAINS = {
     'redesign-ai-e2e.js',
     'field-hardening-e2e.js',
     'driver-requests-fastag-e2e.js',
+    // Master Spec v3 P1: publish, the twelve close areas, access ending at the close, the §11 lifecycle, yesterday on Home.
+    'trip-publish-e2e.js',
+    // Last: one business can't see or touch the rows the suites above made.
+    'tenant-isolation-e2e.js',
   ],
   // WhatsApp orders, Sarvam AI reading them, AI calls by Sarvam's voice agent —
   // against local stand-ins for Meta and Sarvam (CHAIN_ENV); makes its own data.

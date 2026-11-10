@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screenshots
 
+import com.morbeez.driver.ui.screens.home.LocalHourOfDay
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -39,7 +41,7 @@ class FarmStopScreenshots {
 
     private fun draw(device: DeviceConfig = PHONE, content: @Composable () -> Unit) {
         paparazzi.unsafeUpdateConfig(deviceConfig = device)
-        paparazzi.snapshot { MorbeezTheme(darkBars = true) { content() } }
+        paparazzi.snapshot { MorbeezTheme(darkBars = true) { CompositionLocalProvider(LocalHourOfDay provides 10) { content() } } }
     }
 
     private fun farm(state: FarmUiState, step: FarmStep, rejecting: String? = null, device: DeviceConfig = PHONE) = draw(device) {

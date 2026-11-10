@@ -141,11 +141,13 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
       orderIds: [toSagar.id, toFresh.id],
       pickupIds: [rameshPickup.id],
     });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     check('the trip is numbered for its day', new RegExp(`^T-${today.replace(/-/g, '')}-\\d{3}$`).test(trip.number), trip.number);
     check('…with its route and crew', trip.routeId === route.id && trip.packerEmployeeId === packer.id && trip.loaderEmployeeId === loader.id);
     const tripStops = await owner.get(`/logistics/trips/${trip.id}/stops`);
     check("its stops are in the route's visiting order", tripStops.map((s) => s.party?.name).join(' → ') === 'Ramesh Patil → Fresh Mart → Hotel Sagar', tripStops.map((s) => s.party?.name).join(' → '));
     const next = await owner.post('/logistics/trips', { vehicleId: truck.id, driverEmployeeId: suresh.id, plannedDate: today });
+    await owner.post(`/logistics/trips/${next.id}/publish`, { version: next.version });
     check("the day's numbers run on", Number(next.number.slice(-3)) === Number(trip.number.slice(-3)) + 1, `${trip.number} → ${next.number}`);
     const twice = await owner.raw('POST', `/logistics/trips/${next.id}/stops/delivery`, { orderId: toSagar.id });
     check('an order on one trip can’t go on another', twice.status === 409 && twice.body?.error?.message.includes(trip.number), twice.body?.error?.message);

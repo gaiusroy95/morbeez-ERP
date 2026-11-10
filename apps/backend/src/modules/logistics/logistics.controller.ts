@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -28,6 +29,7 @@ import { CreateTripDto } from './dto/create-trip.dto';
 import { AddPickupStopDto } from './dto/add-pickup-stop.dto';
 import { AddDeliveryStopDto } from './dto/add-delivery-stop.dto';
 import { VersionDto } from './dto/version.dto';
+import { TripCheck } from './trip-checks';
 import { ReorderStopsDto } from './dto/reorder-stops.dto';
 import { DecideExpenseDto, RecordExpenseDto, UploadExpensePhotoDto } from './dto/record-expense.dto';
 import { ReconcileTripDto } from './dto/reconcile-trip.dto';
@@ -202,13 +204,28 @@ export class LogisticsController {
   @Get(':id')
   @RequirePermissions('logistics:read')
   getTrip(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<TripRecord> {
-    return this.logisticsService.getTrip(user.tenantId, user.userId, isDispatcher(user), id);
+    return this.logisticsService.getTrip(user.tenantId, user.userId, isDispatcher(user), id, 'record');
   }
 
   @Post()
   @RequirePermissions('logistics:dispatch')
   createTrip(@CurrentUser() user: AuthContext, @Body() dto: CreateTripDto): Promise<TripRecord> {
     return this.logisticsService.createTrip(user.tenantId, user.userId, dto);
+  }
+
+  /** The owner's Check before Publish: each check pass, warning or failure (Master Spec v3 §7.4). */
+  @Get(':id/check')
+  @RequirePermissions('logistics:dispatch')
+  checkTrip(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<{ trip: TripRecord; checks: TripCheck[] }> {
+    return this.logisticsService.checkTrip(user.tenantId, id);
+  }
+
+  /** Published to its driver — only then does the driver see it (§7.5, §58). Refused while a check fails. */
+  @Post(':id/publish')
+  @HttpCode(200)
+  @RequirePermissions('logistics:dispatch')
+  publishTrip(@CurrentUser() user: AuthContext, @Param('id') id: string, @Body() dto: VersionDto): Promise<TripRecord> {
+    return this.logisticsService.publishTrip(user.tenantId, user.userId, id, dto.version);
   }
 
   @Post(':id/start')

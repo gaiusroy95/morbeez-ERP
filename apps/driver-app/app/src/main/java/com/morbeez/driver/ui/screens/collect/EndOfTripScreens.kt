@@ -264,7 +264,7 @@ internal fun HandoverContent(
         bottomBar = {
             if (state.backhaulHoldsHandover) PrimaryAction(stringResource(R.string.drawer_backhaul), onBackhaul, glyph = Glyph.Truck)
             else if (state.needsReturn) PrimaryAction(stringResource(R.string.return_to_base), onReturn, glyph = Glyph.Truck)
-            else HoldToConfirm(stringResource(R.string.hold_to_hand_over), { onHandOver(typed?.toDouble(), note) }, enabled = ready)
+            else HoldToConfirm(stringResource(R.string.hold_to_hand_over), { onHandOver(typed?.toDouble(), note) }, enabled = ready, holdMillis = 3000)
         },
     ) {
         when {

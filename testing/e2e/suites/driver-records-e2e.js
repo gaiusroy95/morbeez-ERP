@@ -72,6 +72,7 @@ const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000
     // ---- Today's next trip: a cash shop ----
     const order = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
     let trip = await owner.post('/logistics/trips', { vehicleId: van, driverEmployeeId: rajuId, plannedDate: today, orderIds: [order.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const opening = Math.ceil(Number(day.lastOdometerKm ?? 0)) + 10;
     trip = await driver.post(`/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: opening });
     const base = `/logistics/trips/${trip.id}/expenses`;

@@ -66,6 +66,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
     // ---- A trip for tomorrow isn't today's ----
     const tomorrowOrder = await owner.post('/orders', { customerId: sagar.id, deliveryDate: addDays(today, 1), confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
     const later = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: raju.id, plannedDate: addDays(today, 1), orderIds: [tomorrowOrder.id] });
+    await owner.post(`/logistics/trips/${later.id}/publish`, { version: later.version });
     day = await driver.get('/logistics/trips/mine/day');
     check("tomorrow's trip isn't today's", day.trip === null);
     const early = await driver.raw('POST', `/logistics/trips/${later.id}/start`, { version: later.version, openingKm: 48700 });
@@ -87,6 +88,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
       lines: [{ productId: tomato.id, quantity: 100, unitPrice: 30 }],
     });
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: raju.id, plannedDate: today, pickupIds: [pickup.id], orderIds: [order.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     day = await driver.get('/logistics/trips/mine/day');
     check("today's trip, its vehicle and the last odometer reading", day.trip?.id === trip.id && day.vehicle?.registrationNumber === 'KA01D10001' && day.lastOdometerKm === '48620.0', JSON.stringify({ trip: day.trip?.number, vehicle: day.vehicle, km: day.lastOdometerKm }));
     check('…and what the vehicle must deliver', day.vehicleStock?.rows.some((r) => r.product === 'Tomato' && r.toDeliver === '100.000'), JSON.stringify(day.vehicleStock?.rows));
@@ -113,6 +115,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
     day = await driver.get('/logistics/trips/mine/day');
     check('the day now shows the trip on the road', day.trip?.status === 'in_progress' && day.trip.openingKm === '48650.0');
     const next = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: raju.id, plannedDate: addDays(today, 1) });
+    await owner.post(`/logistics/trips/${next.id}/publish`, { version: next.version });
     const nextKm = (await db.query(`SELECT GREATEST((SELECT max(opening_km) FROM fulfilment.trip WHERE vehicle_id = $1)) ::text AS km`, [van.id])).rows[0].km;
     check("the next trip's last reading is this one's opening KM", nextKm === '48650.0', nextKm);
     await owner.post(`/logistics/trips/${next.id}/cancel`, { version: next.version });

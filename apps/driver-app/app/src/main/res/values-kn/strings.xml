@@ -90,7 +90,7 @@
     <string name="on_credit">ಸಾಲದಲ್ಲಿ — ಸಂಗ್ರಹಿಸಲು ಏನೂ ಇಲ್ಲ</string>
     <string name="no_trip">ಇನ್ನೂ ಟ್ರಿಪ್ ಇಲ್ಲ</string>
     <string name="checking_route">ನಿಮ್ಮ ಮಾರ್ಗವನ್ನು ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ…</string>
-    <string name="no_trip_hint">ಮಾರ್ಗ ಸಿದ್ಧವಾದಾಗ ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ. ಈಗಲೇ ಪರಿಶೀಲಿಸಲು ಸಿಂಕ್ ಒತ್ತಿ.</string>
+    <string name="no_trip_hint">ಮಾಲೀಕರು ನಿಮ್ಮ ಟ್ರಿಪ್ ಪ್ರಕಟಿಸಿದಾಗ ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ. ಈಗಲೇ ಪರಿಶೀಲಿಸಲು ಸಿಂಕ್ ಒತ್ತಿ.</string>
     <string name="status_planned">ಯೋಜಿಸಲಾಗಿದೆ</string>
     <string name="status_in_progress">ಪ್ರಯಾಣದಲ್ಲಿ</string>
     <string name="status_completed">ಮಾಲೀಕರಿಗಾಗಿ ಕಾಯುತ್ತಿದೆ</string>
@@ -261,7 +261,7 @@
     <string name="step_complete">ಮುಕ್ತಾಯ</string>
     <string name="next_action">ಮುಂದಿನ ಕೆಲಸ</string>
     <string name="no_trip_today">ಇಂದಿಗೆ ಇನ್ನೂ ಟ್ರಿಪ್ ಇಲ್ಲ</string>
-    <string name="no_trip_today_hint">ನಿಮ್ಮ ಟ್ರಿಪ್ ಅನ್ನು ಮಾಲೀಕರು ಯೋಜಿಸುತ್ತಾರೆ. ಯೋಜಿಸಿದ ತಕ್ಷಣ ಇಲ್ಲಿ ಕಾಣುತ್ತದೆ.</string>
+    <string name="no_trip_today_hint">ನಿಮ್ಮ ಟ್ರಿಪ್ ಅನ್ನು ಮಾಲೀಕರು ಯೋಜಿಸಿ, ಪರಿಶೀಲಿಸಿ ಪ್ರಕಟಿಸುತ್ತಾರೆ. ಪ್ರಕಟಿಸಿದ ನಂತರ ಇಲ್ಲಿ ಕಾಣಿಸುತ್ತದೆ.</string>
     <string name="check_again">ಮತ್ತೆ ನೋಡಿ</string>
     <string name="start_your_day">ನಿಮ್ಮ ದಿನ ಆರಂಭಿಸಿ</string>
     <plurals name="start_day_stops">
@@ -322,7 +322,7 @@
     <!-- Start Day -->
     <string name="start_day_intro">ಮಾಲೀಕರು ಯೋಜಿಸಿದ ಟ್ರಿಪ್ ಇದು. ವಾಹನ ಪರಿಶೀಲಿಸಿ, ಓಡೋಮೀಟರ್ ಓದಿ, ಆರಂಭಿಸಲು ಬಟನ್ ಒತ್ತಿ ಹಿಡಿಯಿರಿ.</string>
     <string name="hold_to_start">ಒತ್ತಿ ಹಿಡಿದು ದಿನ ಆರಂಭಿಸಿ</string>
-    <string name="no_trip_to_start">ಇಂದು ನಿಮಗೆ ಟ್ರಿಪ್ ಯೋಜಿಸಿಲ್ಲ. ಮೊದಲು ಮಾಲೀಕರು ಟ್ರಿಪ್ ಯೋಜಿಸುತ್ತಾರೆ.</string>
+    <string name="no_trip_to_start">ಇಂದು ನಿಮಗೆ ಯಾವುದೇ ಟ್ರಿಪ್ ಪ್ರಕಟಿಸಿಲ್ಲ. ಮೊದಲು ಮಾಲೀಕರು ಯೋಜಿಸಿ ಪ್ರಕಟಿಸುತ್ತಾರೆ.</string>
     <string name="already_started">ಈ ಟ್ರಿಪ್ ಈಗಾಗಲೇ ಆರಂಭವಾಗಿದೆ.</string>
     <string name="planned_by_owner">ಮಾಲೀಕರು ಯೋಜಿಸಿದ್ದು</string>
     <plurals name="n_stops">
@@ -583,7 +583,7 @@
     <string name="closing_below_opening">ಇದು ಆರಂಭಿಕ ಕಿ.ಮೀ %1$s ಕಿ.ಮೀ ಗಿಂತ ಕಡಿಮೆ.</string>
     <string name="trip_km">ಟ್ರಿಪ್ ಕಿ.ಮೀ</string>
     <string name="cash_handover">ನಗದು ಒಪ್ಪಿಸುವಿಕೆ</string>
-    <string name="hold_to_hand_over">ಒತ್ತಿ ಹಿಡಿದು ಮಾಲೀಕರಿಗೆ ಒಪ್ಪಿಸಿ</string>
+    <string name="hold_to_hand_over">3 ಸೆಕೆಂಡ್ ಒತ್ತಿ ಹಿಡಿದು ಒಪ್ಪಿಸಿ ಟ್ರಿಪ್ ಸಲ್ಲಿಸಿ</string>
     <string name="return_first">ಮೊದಲು ಅಂತಿಮ ಕಿ.ಮೀ ದಾಖಲಿಸಿ: \"ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ\" ಒತ್ತಿ.</string>
     <string name="checking_handover">ಕಚೇರಿಯೊಂದಿಗೆ ಲೆಕ್ಕ ಪರಿಶೀಲಿಸುತ್ತಿದೆ…</string>
     <string name="expected_cash">ನಿರೀಕ್ಷಿತ ನಗದು</string>

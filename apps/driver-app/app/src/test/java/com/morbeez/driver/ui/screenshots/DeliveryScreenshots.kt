@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screenshots
 
+import com.morbeez.driver.ui.screens.home.LocalHourOfDay
+import androidx.compose.runtime.CompositionLocalProvider
 import com.morbeez.driver.ui.screens.home.DayLogic
 import com.morbeez.driver.ui.screens.route.RouteUiState
 import com.morbeez.driver.ui.screens.route.RouteContent
@@ -47,7 +49,7 @@ class DeliveryScreenshots {
 
     private fun draw(device: DeviceConfig = PHONE, content: @Composable () -> Unit) {
         paparazzi.unsafeUpdateConfig(deviceConfig = device)
-        paparazzi.snapshot { MorbeezTheme(darkBars = true) { content() } }
+        paparazzi.snapshot { MorbeezTheme(darkBars = true) { CompositionLocalProvider(LocalHourOfDay provides 10) { content() } } }
     }
 
     private fun deliver(state: DeliveryUiState, step: DeliveryStep, device: DeviceConfig = PHONE, refused: String? = null) = draw(device) {

@@ -12,6 +12,7 @@ import { toMilli } from '../../common/quantity';
 import { LogisticsService } from './logistics.service';
 import { BackhaulsRepository } from './repositories/backhauls.repository';
 import { SettlementRecord } from '../workforce/entities/payroll.entity';
+import { TripStopRecord } from './entities/trip-stop.entity';
 import { TripPlanningRepository } from './repositories/trip-planning.repository';
 import { DriverRecordsRepository, TripCardRow } from './repositories/driver-records.repository';
 import {
@@ -128,11 +129,15 @@ export class DriverRecordsService {
 
   /** Trip Details: one trip in full — the driver's own, or any for the owner. */
   async tripSummary(tenantId: string, userId: string, callerIsDispatcher: boolean, tripId: string): Promise<DriverTripSummary> {
-    const trip = await this.logistics.getTrip(tenantId, userId, callerIsDispatcher, tripId);
-    const stops = await this.logistics.listStops(tenantId, userId, callerIsDispatcher, tripId);
+    const trip = await this.logistics.getTrip(tenantId, userId, callerIsDispatcher, tripId, 'record');
+    // A closed trip is the driver's record, not their work any more (Master
+    // Spec v3 §58): the stops without the parties' phones, addresses, pins
+    // and QR tokens, and no customer's outstanding. The owner sees it all.
+    const closedForDriver = !callerIsDispatcher && (trip.status === 'reconciled' || trip.status === 'cancelled');
+    const stops = (await this.logistics.listStops(tenantId, userId, callerIsDispatcher, tripId, 'record')).map((s) => (closedForDriver ? recordOnly(s) : s));
     const delivered = stops.some((s) => s.stopType === 'delivery' && s.status === 'completed');
-    const collections = delivered ? await this.logistics.getTripCollections(tenantId, userId, callerIsDispatcher, tripId) : null;
-    const expenses = await this.logistics.listExpenses(tenantId, userId, callerIsDispatcher, tripId);
+    const collections = delivered && !closedForDriver ? await this.logistics.getTripCollections(tenantId, userId, callerIsDispatcher, tripId) : null;
+    const expenses = await this.logistics.listExpenses(tenantId, userId, callerIsDispatcher, tripId, 'record');
     const { card, backhauls, closed, vehicle, incentives } = await this.db.withTenant(tenantId, async (client) => ({
       card: (await this.repo.tripCardsWithClient(client, trip.driverEmployeeId, '1970-01-01', '9999-12-31', tripId))[0],
       backhauls: await this.backhauls.listByTripWithClient(client, tripId),
@@ -163,7 +168,7 @@ export class DriverRecordsService {
 
   /** A trip's incentives (D7) — the driver's own trip, or any for the owner: kept at the close, else an estimate. */
   async tripIncentives(tenantId: string, userId: string, callerIsDispatcher: boolean, tripId: string): Promise<TripIncentives> {
-    const trip = await this.logistics.getTrip(tenantId, userId, callerIsDispatcher, tripId);
+    const trip = await this.logistics.getTrip(tenantId, userId, callerIsDispatcher, tripId, 'record');
     return this.incentives.forTrip(tenantId, trip);
   }
 
@@ -317,6 +322,11 @@ function settlementOf(s: SettlementRecord): DriverSettlement {
     receivedAt: s.receivedAt,
     lines: (s.lines ?? []).map((l) => ({ kind: l.kind, description: l.description, amount: l.amount })),
   };
+}
+
+/** A stop as a closed trip's record keeps it: who and where, not how to reach them or their door's QR. */
+function recordOnly(s: TripStopRecord): TripStopRecord {
+  return s.party ? { ...s, party: { ...s.party, phone: null, address: null, latitude: null, longitude: null, qrToken: null } } : s;
 }
 
 function cardOf(r: TripCardRow): DriverTripCard {

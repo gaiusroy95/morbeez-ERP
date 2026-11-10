@@ -33,12 +33,17 @@ const msg = (r) => r.body?.error?.message ?? JSON.stringify(r.body);
   const ops = as(await login('ops-manager@dev.morbeez.local'));
   const acc = as(await login('accountant@dev.morbeez.local'));
   const today = must(await owner.get('/accounting/periods'), 'periods').today;
-  const from = `${today.slice(0, 8)}01`;
   const d = (n) => {
     const x = new Date(`${today}T00:00:00Z`);
     x.setUTCDate(x.getUTCDate() - n);
     return x.toISOString().slice(0, 10);
   };
+  // The pay period: the last seven days, whatever the date — the work below
+  // is dated 2–4 days ago, which a period from the 1st of the month misses in
+  // a month's first days. Nothing here posts before today (advances are paid
+  // today; a settlement posts on its period's end), so the books closed
+  // through last month never get in the way.
+  const from = d(6);
 
   // ---- Rules ----
   must(await owner.put('/workforce/payroll/settings', { version: 0, defaultStateCode: '27', minWagePolicy: 'top_up' }), 'settings');

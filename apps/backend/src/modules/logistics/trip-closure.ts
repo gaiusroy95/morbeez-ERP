@@ -190,9 +190,76 @@ export function checklistOf(
         : { area: 'expenses', status: 'pass', detail: `${rupees(handover.expenses)} spent on the road.` },
   );
 
+  // ---- Master Spec v3 §60 (P1) ----
+  // Workforce: the driver's work recorded (when they submitted). A missing
+  // pay rate shows here and in Pay run; it doesn't make the trip wrong.
+  if (facts.workforce) {
+    const wf = facts.workforce;
+    const crew = wf.crewCredits > 0 ? ` ${plural(wf.crewCredits, 'crew credit', 'crew credits')} for loading.` : '';
+    const rate = wf.hasPayRate ? '' : ` ${wf.driver} has no pay rate on file — set one under Workforce before the week's pay.`;
+    items.push(
+      wf.workRecorded
+        ? { area: 'workforce', status: 'pass', detail: `${wf.driver}'s work on this trip is recorded.${crew}${rate}` }
+        : { area: 'workforce', status: 'exception', detail: `${wf.driver}'s work on this trip isn't recorded.${rate}` },
+    );
+  }
+
+  // Workload: when each completed stop was reached and finished — the
+  // service effort customers' economics are worked out from (§17, §20).
+  if (facts.untimedStops) {
+    const done = facts.stops.filter((s) => s.status === 'completed').length;
+    items.push(
+      facts.untimedStops.length === 0
+        ? { area: 'workload', status: 'pass', detail: done === 0 ? 'No stops completed.' : `Arrival and completion times recorded at all ${plural(done, 'stop', 'stops')}.` }
+        : { area: 'workload', status: 'exception', detail: `No arrival or completion time at: ${facts.untimedStops.join(', ')}.` },
+    );
+  }
+
+  // Vehicle: the odometer read at the start and at the return, and a trip KM
+  // that could be true.
+  if (facts.vehicle) {
+    const v = facts.vehicle;
+    const kmRun = v.openingKm !== null && v.closingKm !== null ? Number(v.closingKm) - Number(v.openingKm) : null;
+    const fuel = Number(v.litres) > 0 ? ` ${trimQty(v.litres)} L of fuel put in${kmRun && kmRun > 0 ? ` (${(kmRun / Number(v.litres)).toFixed(1)} km/L)` : ''}.` : '';
+    items.push(
+      v.openingKm === null || v.closingKm === null
+        ? { area: 'vehicle', status: 'exception', detail: `No ${v.openingKm === null ? 'opening' : 'closing'} KM recorded${v.openingKm === null && v.closingKm === null ? ' (nor closing)' : ''}.` }
+        : kmRun !== null && kmRun > MAX_TRIP_KM
+          ? { area: 'vehicle', status: 'exception', detail: `${trimQty(String(kmRun))} km in a day (${trimQty(v.openingKm)} → ${trimQty(v.closingKm)}) — check the readings.${fuel}` }
+          : { area: 'vehicle', status: 'pass', detail: `${trimQty(String(kmRun))} km (${trimQty(v.openingKm)} → ${trimQty(v.closingKm)}).${fuel}` },
+    );
+  }
+
+  // Exceptions: nothing raised on the trip still waiting for the owner.
+  if (facts.openItems) {
+    items.push(
+      facts.openItems.length === 0
+        ? { area: 'exceptions', status: 'pass', detail: 'No dispute or request from this trip is open.' }
+        : { area: 'exceptions', status: 'exception', detail: `Still open: ${facts.openItems.join('; ')}.` },
+    );
+  }
+
+  // Accounting: every money event on the trip is in the books, each journal balanced.
+  if (facts.books) {
+    const b = facts.books;
+    const problems = [
+      ...(b.missing.length ? [`not in the books: ${b.missing.join('; ')}`] : []),
+      ...(b.unbalanced > 0 ? [`${plural(b.unbalanced, 'journal doesn’t', 'journals don’t')} balance`] : []),
+    ];
+    items.push(
+      problems.length === 0
+        ? { area: 'accounting', status: 'pass', detail: 'Every collection, expense, deposit, backhaul payment and the advance is in the books, each journal balanced.' }
+        : { area: 'accounting', status: 'exception', detail: `${problems.join('; ')}.` },
+    );
+  }
+
   return items;
 }
 
+/** More than this in one trip is a misread odometer, not a day's driving. */
+const MAX_TRIP_KM = 1500;
+
+/** "100.500" → "100.5", "48620.0" → "48620" — and "48620" stays 48620: only zeros after a decimal point go. */
 function trimQty(q: string): string {
-  return q.replace(/\.?0+$/, '') || '0';
+  return q.includes('.') ? q.replace(/\.?0+$/, '') || '0' : q;
 }

@@ -95,11 +95,15 @@ export interface CreatePurchaseOrderBody {
 export type ProcurementBoardDay = 'today' | 'tomorrow' | 'all';
 export type ProcurementStage = 'pending' | 'awaiting_approval' | 'in_progress' | 'completed' | 'cancelled';
 
+/** Master Spec v3 §11, derived from the order, its pickup, what was received and the farmer's payment. */
+export type ProcurementLifecycle = 'draft' | 'confirmed' | 'assigned' | 'pickup' | 'partially_picked' | 'picked_up' | 'settled' | 'cancelled';
+
 export interface ProcurementCard {
   id: string;
   number: number;
   status: PurchaseOrderStatus;
   stage: ProcurementStage;
+  lifecycle: ProcurementLifecycle;
   day: IsoDate;
   pickupTime: string | null;
   farmerName: string;

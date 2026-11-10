@@ -2753,3 +2753,43 @@ dl.request-facts dd {
 .call-transcript li[data-role='agent'] {
   color: var(--ink-muted);
 }
+
+/* ---- Master Spec v3 P1: yesterday at a glance, the trip's Check before Publish ---- */
+.yesterday-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.yesterday-bad {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.trip-checks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trip-checks li {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+@media (max-width: 520px) {
+  .trip-checks li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

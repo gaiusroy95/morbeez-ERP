@@ -76,6 +76,7 @@ function client(token) {
 
     // ---- Level 2 on the road: delivers and collects; can't buy; spending waits for approval ----
     let trip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: backup.id, advanceAmount: 500 });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const o1 = await order(20);
     const s1 = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: o1.id });
     const o2 = await order(10);
@@ -120,6 +121,7 @@ function client(token) {
     // ---- Per-trip approval ----
     await owner.patch(`/delegation/drivers/${backup.id}`, { delegationLevel: 3, standingDelegation: false });
     let trip2 = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: backup.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip2.id}/publish`, { version: trip2.version });
     const o3 = await order(5);
     await owner.post(`/logistics/trips/${trip2.id}/stops/delivery`, { orderId: o3.id });
     const unapproved = await driver.raw('POST', `/logistics/trips/${trip2.id}/start`, { version: trip2.version });
@@ -143,6 +145,7 @@ function client(token) {
 
     // ---- Day-off mode ----
     let trip3 = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: (await owner.post('/workforce', { name: `Regular ${stamp}`, roleType: 'driver' })).id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${trip3.id}/publish`, { version: trip3.version });
     const o4 = await order(5);
     await owner.post(`/logistics/trips/${trip3.id}/stops/delivery`, { orderId: o4.id });
     const day = await owner.post('/delegation/day-off', { driverEmployeeId: backup.id, level: 3, tripIds: [trip3.id], note: 'Family function' });
@@ -168,6 +171,7 @@ function client(token) {
     const again = await owner.post('/workforce/me/driver', { name: 'Owner (driving)' });
     check('the owner drives too: one driver record for their own login', me.id === again.id && me.delegationLevel === 4 && me.standingDelegation);
     const ownTrip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: me.id, advanceAmount: 0 });
+    await owner.post(`/logistics/trips/${ownTrip.id}/publish`, { version: ownTrip.version });
     const ownList = await owner.get('/logistics/trips/mine');
     check("the owner's own route shows in Driver mode", ownList.items.some((t) => t.id === ownTrip.id));
 

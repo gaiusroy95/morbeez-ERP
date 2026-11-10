@@ -112,6 +112,7 @@ const cents = (s) => Math.round(Number(s) * 100);
     o2 = await owner.post(`/orders/${o2.id}/confirm`, { version: o2.version });
 
     let trip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: driver.id, advanceAmount: 2000 });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const stop1 = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: o1.id });
     const stop2 = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: o2.id });
     trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });

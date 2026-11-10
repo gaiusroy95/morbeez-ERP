@@ -49,6 +49,7 @@ const key = () => ({ 'idempotency-key': randomUUID() });
   // A trip on the road: what the requests are made from, and the tolls paid on.
   const order = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
   let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: rajuId, plannedDate: today, orderIds: [order.id], advanceAmount: 1000 });
+  await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
   let opening = Math.ceil(Number(day.lastOdometerKm ?? 0)) + 10;
   const tryStart = await driver.raw('POST', `/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: opening });
   if (tryStart.status === 400 && /last reading, ([\d.]+) km/.test(words(tryStart))) {

@@ -172,6 +172,7 @@ const must = (r, what) => {
   ]);
   const oGreen = await order(green, [{ productId: onion.id, quantity: 5, unitPrice: 28 }]);
   let trip = must(await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId: driver.id }), 'trip');
+  must(await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version }), 'publish');
   for (const o of [oHotel, oGreen]) must(await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: o.id }), 'stop');
   trip = must(await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version }), 'start');
   for (const stop of must(await owner.get(`/logistics/trips/${trip.id}/stops`), 'stops')) {

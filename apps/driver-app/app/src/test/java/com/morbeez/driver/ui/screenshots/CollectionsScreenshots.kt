@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screenshots
 
+import com.morbeez.driver.ui.screens.home.LocalHourOfDay
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
@@ -36,7 +38,7 @@ class CollectionsScreenshots {
 
     private fun draw(device: DeviceConfig = PHONE, content: @Composable () -> Unit) {
         paparazzi.unsafeUpdateConfig(deviceConfig = device)
-        paparazzi.snapshot { MorbeezTheme(darkBars = true) { content() } }
+        paparazzi.snapshot { MorbeezTheme(darkBars = true) { CompositionLocalProvider(LocalHourOfDay provides 10) { content() } } }
     }
 
     @Test fun collections() = draw(TALL) { CollectionsContent(collections, onBack = {}, onCollect = { _, _ -> }, onReturn = {}) }

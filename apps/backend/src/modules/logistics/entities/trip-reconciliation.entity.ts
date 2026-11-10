@@ -22,7 +22,13 @@ export type ChecklistArea =
   | 'handover'
   | 'expenses'
   | 'returns'
-  | 'backhaul';
+  | 'backhaul'
+  // Master Spec v3 §60 (P1):
+  | 'workforce'
+  | 'workload'
+  | 'vehicle'
+  | 'exceptions'
+  | 'accounting';
 
 export interface TripReconciliationRecord {
   id: string;

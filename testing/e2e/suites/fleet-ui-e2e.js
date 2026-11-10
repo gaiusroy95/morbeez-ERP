@@ -154,11 +154,25 @@ async function signIn(browser, email) {
   });
   await page.screenshot({ path: path.join(OUT, 'fl-3-assets.png'), fullPage: true });
 
-  await step('cost report: this financial year, per vehicle', async () => {
+  await step('cost report: the financial year preset, then from two months back, per vehicle', async () => {
     await tab(page, 'Cost report');
     await page.waitForSelector('text=What each vehicle cost');
-    await page.locator('.range-controls select').first().selectOption('fy');
-    await page.waitForFunction(() => /MH14HR7777/.test(document.querySelector('.table')?.textContent ?? ''));
+    const controls = page.locator('.range-controls').first();
+    await controls.locator('select').selectOption('fy');
+    const [y, m] = today.split('-').map(Number);
+    const fyStart = `${m >= 4 ? y : y - 1}-04-01`;
+    const from = await controls.locator('input[type=date]').first().inputValue();
+    if (from !== fyStart) throw new Error(`financial year starts ${from}, expected ${fyStart}`);
+    // fleet-e2e's fuel, service and hire bill reach back to last month — in
+    // April that's last financial year, so the window starts two months back.
+    const twoAgo = new Date(Date.UTC(y, m - 3, 1)).toISOString().slice(0, 10);
+    if (twoAgo < fyStart) await controls.locator('input[type=date]').first().fill(twoAgo);
+    // Wait for the rows this step reads, not just any table: the range's
+    // figures arrive after the preset changes, and a half-loaded table is empty.
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll('.table tbody tr')].map((r) => r.textContent ?? '');
+      return rows.some((r) => /MH14HR7777/.test(r)) && rows.some((r) => /MH12AB4521/.test(r) && /450/.test(r));
+    });
     const rows = await rowsText();
     const main = rows.find((r) => /MH12AB4521/.test(r)) ?? '';
     if (!/450/.test(main) || !/9\.00/.test(main)) throw new Error(main);
@@ -170,11 +184,21 @@ async function signIn(browser, email) {
   await step('settings: remind 45 days ahead', async () => {
     await tab(page, 'Settings');
     await page.getByLabel('Remind about documents (days before expiry)').fill('45');
-    await page.getByRole('button', { name: 'Save settings' }).click();
-    await page.waitForFunction(() => document.querySelector('.form-grid button[type=submit]')?.disabled === true);
+    // The save must have landed before the reload — a disabled button only
+    // means it's on its way, and a reload then abandons it.
+    const [saved] = await Promise.all([
+      page.waitForResponse((r) => /fleet\/settings/.test(r.url()) && r.request().method() === 'PUT'),
+      page.getByRole('button', { name: 'Save settings' }).click(),
+    ]);
+    if (!saved.ok()) throw new Error(`save answered ${saved.status()}`);
     await page.reload();
     await page.waitForSelector('text=Fleet settings');
-    const v = await page.getByLabel('Remind about documents (days before expiry)').inputValue();
+    const field = page.getByLabel('Remind about documents (days before expiry)');
+    let v = await field.inputValue();
+    for (let i = 0; i < 20 && v !== '45'; i++) {
+      await page.waitForTimeout(250); // the form fills in once the settings load
+      v = await field.inputValue();
+    }
     if (v !== '45') throw new Error(v);
   });
 

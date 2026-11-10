@@ -159,6 +159,25 @@ export function Home() {
         ))}
       </div>
 
+      {/* Daily operations, the owner's start of day: yesterday's reconciliation at a glance (Master Spec v3 P1). */}
+      <h2 className="section-title">{t('Yesterday')}</h2>
+      <Link href="/logistics" className="yesterday-card">
+        {data.yesterday.closed === 0 && data.yesterday.toClose === 0 ? (
+          <span className="muted">{t('No trip was closed or handed in yesterday.')}</span>
+        ) : (
+          <>
+            <span>
+              <strong>{t('{n} trip(s) closed', { n: data.yesterday.closed })}</strong>
+              {data.yesterday.closed > 0 && ` · ${t('{pass} pass, {exceptions} with an approved exception', { pass: data.yesterday.pass, exceptions: data.yesterday.approvedException })}`}
+            </span>
+            {Number(data.yesterday.cashShort) > 0 && <span className="yesterday-bad">{t('Cash short {amount}', { amount: money(data.yesterday.cashShort) })}</span>}
+            {Number(data.yesterday.cashOver) > 0 && <span>{t('Cash over {amount}', { amount: money(data.yesterday.cashOver) })}</span>}
+            {data.yesterday.shortDeliveries > 0 && <span>{t('{n} delivery line(s) short', { n: data.yesterday.shortDeliveries })}</span>}
+            {data.yesterday.toClose > 0 && <span className="yesterday-bad">{t('{n} handed in, still to close', { n: data.yesterday.toClose })}</span>}
+          </>
+        )}
+      </Link>
+
       <h2 className="section-title">{t("Today's Operations")}</h2>
       <div className="count-tiles">
         {counts.map((c) => (

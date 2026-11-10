@@ -81,6 +81,7 @@ function client(token) {
     ]);
     const second = await purchase(ramesh, [{ productId: tomato.id, expectedQuantity: 100, indicativePrice: 21 }]);
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: venu.id, pickupIds: [first.pickup.id, second.pickup.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     let stops = await owner.get(`/logistics/trips/${trip.id}/stops`);
     const farmA = stops.find((s) => s.pickupId === first.pickup.id);
     const farmB = stops.find((s) => s.pickupId === second.pickup.id);

@@ -108,6 +108,7 @@ const pct = (amount, percent) => (Math.round(Number(amount) * Number(percent)) /
     const regular = await owner.post('/orders', { customerId: sagar.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 20, unitPrice: 30 }] });
     const first = await owner.post('/orders', { customerId: newcomer.id, deliveryDate: today, creditTermDays: 0, confirm: true, lines: [{ productId: tomato.id, quantity: 5, unitPrice: 30 }] });
     let trip = await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: rajuId, plannedDate: today, pickupIds: [pickup.id], orderIds: [regular.id, first.id] });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const opening = Math.ceil(Number(day.lastOdometerKm ?? 0)) + 10;
     // The owner filled the tank before the trip; the driver fills it again on the road.
     await owner.post('/fleet/fuel', { vehicleId: van.id, filledOn: today, litres: 40, amount: 3700, odometerKm: opening, paidFrom: 'cash_on_hand' });

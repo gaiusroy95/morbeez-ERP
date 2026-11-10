@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import type { BackhaulRecord, TripPlan, TripQuantities, TripsBoard, TripsBoardDay } from '@morbeez/shared-types';
+import type { BackhaulRecord, TripCheck, TripPlan, TripQuantities, TripRecord, TripsBoard, TripsBoardDay } from '@morbeez/shared-types';
 import { apiGet } from '../api/client';
 
 /** The owner's Trips list (redesign V1.1): cards for today, tomorrow or all days, searchable. */
@@ -10,6 +10,16 @@ export function useTripsBoard(day: TripsBoardDay, q: string) {
     queryKey: ['logistics', 'board', day, q],
     queryFn: () => apiGet<TripsBoard>('logistics/trips/board', { day, q: q.trim() || undefined, pageSize: 100 }),
     placeholderData: (previous) => previous,
+  });
+}
+
+/** The owner's Check before Publish (Master Spec v3 §7.4): each check pass, warning or failure. Fresh each time it's opened. */
+export function useTripCheck(tripId: string) {
+  return useQuery({
+    queryKey: ['logistics', 'trip', tripId, 'check'],
+    queryFn: () => apiGet<{ trip: TripRecord; checks: TripCheck[] }>(`logistics/trips/${tripId}/check`),
+    staleTime: 0,
+    gcTime: 0,
   });
 }
 

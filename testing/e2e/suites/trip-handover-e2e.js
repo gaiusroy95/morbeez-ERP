@@ -71,8 +71,10 @@ function client(token) {
 
     // ---- On the road ----
     let trip = await owner.post('/logistics/trips', { vehicleId: vehicle.id, driverEmployeeId, advanceAmount: 1000 });
+    await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version });
     const stop = await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: order.id });
-    trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version });
+    trip = await owner.post(`/logistics/trips/${trip.id}/start`, { version: trip.version, openingKm: 2000 });
+    await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/arrive`, {});
     await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/complete-delivery`, { recipientName: 'Shopkeeper', signatureData: 'data:image/png;base64,iVBORw0KGgo=' });
     const [invoice] = (await owner.get(`/finance/invoices?customerId=${customer.id}`)).items;
     await owner.post(`/logistics/trips/${trip.id}/stops/${stop.id}/collections`, { amount: Number(invoice.amount), method: 'cash' });
@@ -95,6 +97,7 @@ function client(token) {
     check("the driver can't open the owner's review", review0.status === 403, String(review0.status));
 
     // ---- Submit short, the owner returns it ----
+    await owner.post(`/logistics/trips/${trip.id}/closing-km`, { closingKm: 2040 });
     trip = await owner.post(`/logistics/trips/${trip.id}/complete`, { version: trip.version, cashDeclared: Number(expected) - 100, note: '₹100 went on a puncture' });
     check('submitted: completed, awaiting the owner, with the declared cash', trip.status === 'completed' && trip.cashDeclared === money(Number(expected) - 100), trip.status);
     const lateDeposit = await driverApp.raw('POST', `/logistics/trips/${trip.id}/deposits`, { amount: 10, bankAccount: 'SBI', reference: 'LATE-1' });
@@ -120,7 +123,7 @@ function client(token) {
     review = await owner.get(`/logistics/trips/${trip.id}/review`);
     check('resubmitted: every area passes', review.exceptions === 0, review.checklist.filter((c) => c.status === 'exception').map((c) => c.detail).join(' | '));
     const closed = await owner.post(`/logistics/trips/${trip.id}/reconcile`, { version: trip.version, cashReturned: Number(corrected) });
-    check('closed as a pass, balanced, with what was checked', closed.outcome === 'pass' && Number(closed.variance) === 0 && closed.checklist.length === 7, `${closed.outcome} ${closed.variance}`);
+    check('closed as a pass, balanced, every area checked (12 — no backhaul on this trip)', closed.outcome === 'pass' && Number(closed.variance) === 0 && closed.checklist.length === 12, `${closed.outcome} ${closed.variance}`);
     check('the closure records the money in each case', closed.cashCollections === money(invoice.amount) && closed.cashDeposited === '1500.00' && closed.directPayments === '0.00');
     const after = await owner.get(`/logistics/trips/${trip.id}`);
     check('only the owner closes: the trip is closed', after.status === 'reconciled');

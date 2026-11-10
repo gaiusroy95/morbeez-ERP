@@ -7,9 +7,36 @@
 // a review note saying what to fix).
 export type TripStatus = 'planned' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled' | 'reconciled';
 
+/**
+ * Where a trip stands, as the owner and driver say it (Master Spec v3 §7,
+ * DO): built (draft) → published to its driver → on the road → submitted by
+ * the driver → closed by the owner. A planned trip is a draft until the owner
+ * publishes it; only then does its driver see it.
+ */
+export type TripStage = 'draft' | 'published' | 'on_the_road' | 'submitted' | 'on_hold' | 'closed' | 'cancelled';
+
+export function stageOf(status: TripStatus, publishedAt: Date | null): TripStage {
+  switch (status) {
+    case 'planned':
+      return publishedAt ? 'published' : 'draft';
+    case 'in_progress':
+      return 'on_the_road';
+    case 'completed':
+      return 'submitted';
+    case 'reconciled':
+      return 'closed';
+    default:
+      return status;
+  }
+}
+
 export interface TripRecord {
   id: string;
   tenantId: string;
+  stage: TripStage;
+  /** When the owner published it to its driver, and who (null: a draft). */
+  publishedAt: Date | null;
+  publishedBy: string | null;
   /** "T-20261028-001": the day's running number, per business. */
   number: string;
   /** The route it runs, when planned by route. */

@@ -40,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -401,6 +402,9 @@ private fun DashboardTab(
     }
 }
 
+/** The hour the greeting is for: the phone's clock, unless something pins it (the screenshot tests do, so their images don't change with the time of day). */
+val LocalHourOfDay = staticCompositionLocalOf<Int?> { null }
+
 @Composable
 private fun GreetingCard(state: HomeUiState) {
     val name = state.day?.driverName
@@ -415,7 +419,7 @@ private fun GreetingCard(state: HomeUiState) {
             Column(Modifier.weight(1f)) {
                 Text(
                     stringResource(
-                        when (DayLogic.greetingAt(LocalTime.now().hour)) {
+                        when (DayLogic.greetingAt(LocalHourOfDay.current ?: LocalTime.now().hour)) {
                             Greeting.MORNING -> R.string.greeting_morning
                             Greeting.AFTERNOON -> R.string.greeting_afternoon
                             Greeting.EVENING -> R.string.greeting_evening

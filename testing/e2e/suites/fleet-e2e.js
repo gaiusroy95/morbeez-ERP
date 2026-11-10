@@ -50,6 +50,7 @@ const money = (c) => (c / 100).toFixed(2);
   const twoAgo = month(-2);
   const bal = async () => Object.fromEntries(must(await owner.get('/accounting/accounts'), 'accounts').map((a) => [a.code, a.balance]));
   const before = await bal();
+  const reopenShift = {}; // account → cents the reopen below moved, not this suite's postings
 
   // ---- Settings and the fleet ----
   const settings = must(await owner.get('/fleet/settings'), 'settings');
@@ -80,6 +81,30 @@ const money = (c) => (c / 100).toFixed(2);
   const accFuel = await acc.post('/fleet/fuel', { vehicleId: main.vehicleId, filledOn: today, litres: 10, amount: 900, paidFrom: 'bank' });
   check('the accountant does not record running costs', accFuel.status === 403);
 
+  // ---- The books, opened for the catch-up below ----
+  // Running costs dated up to six days ago and a truck capitalised two months
+  // back post into periods the accounting suites closed — in a month's first
+  // days even last week is closed. So the latest close is reopened before
+  // anything backdated is posted (and the books closed again at the end).
+  const truck = must(await owner.post('/vehicles', { registrationNumber: 'MH12XY0001', capacityKg: 3000, fuelType: 'diesel' }), 'truck');
+  const opsCap = await ops.post(`/fleet/vehicles/${truck.id}/capitalize`, { capitalizedOn: twoAgo, cost: 1200000, salvageValue: 120000, method: 'straight_line', usefulLifeMonths: 96, fundedBy: 'owner_capital' });
+  check('the ops manager does not keep the fleet books', opsCap.status === 403);
+  if (periods.lockedThrough) {
+    const closed = await acc.post(`/fleet/vehicles/${truck.id}/capitalize`, { capitalizedOn: periods.lockedThrough, cost: 1200000, salvageValue: 120000, method: 'straight_line', usefulLifeMonths: 96, fundedBy: 'owner_capital' });
+    check('capitalising into a closed period is refused', closed.status === 409 && closed.body.error.code === 'PERIOD_CLOSED', `locked through ${periods.lockedThrough}`);
+    const latest = periods.closes.filter((c) => !c.reopenedAt).sort((a, b) => (a.periodEnd < b.periodEnd ? 1 : -1))[0];
+    // Reopening reverses the close's closing entry, moving earlier suites'
+    // expenses back into their accounts (on the 1st of a month, yesterday's
+    // late bill among them) — measured here so the checks below count only
+    // what this suite posted.
+    const beforeReopen = await bal();
+    must(await owner.post(`/accounting/periods/${latest.id}/reopen`, { reason: 'Fleet register catch-up' }), 'reopen');
+    const afterReopen = await bal();
+    for (const code of new Set([...Object.keys(beforeReopen), ...Object.keys(afterReopen)])) {
+      reopenShift[code] = cents(afterReopen[code] ?? '0') - cents(beforeReopen[code] ?? '0');
+    }
+  }
+
   // ---- Fuel and maintenance ----
   must(await ops.post('/fleet/fuel', { vehicleId: main.vehicleId, filledOn: shift(today, -5), litres: 40, amount: 3600, odometerKm: 20000, station: 'HP Wakad', paidFrom: 'cash_on_hand' }), 'fill 1');
   must(await ops.post('/fleet/fuel', { vehicleId: main.vehicleId, filledOn: shift(today, -1), litres: 50, amount: 4500, odometerKm: 20450, paidFrom: 'bank' }), 'fill 2');
@@ -93,15 +118,6 @@ const money = (c) => (c / 100).toFixed(2);
   check('service due at 20,400 km is overdue at 20,450', detail.maintenanceDue?.overdue === true && detail.lastOdometerKm === 20450 && detail.issues.some((i) => /Maintenance overdue/.test(i)), JSON.stringify(detail.maintenanceDue));
 
   // ---- An owned vehicle on the books: capitalise, depreciate, finance, dispose ----
-  const truck = must(await owner.post('/vehicles', { registrationNumber: 'MH12XY0001', capacityKg: 3000, fuelType: 'diesel' }), 'truck');
-  const opsCap = await ops.post(`/fleet/vehicles/${truck.id}/capitalize`, { capitalizedOn: twoAgo, cost: 1200000, salvageValue: 120000, method: 'straight_line', usefulLifeMonths: 96, fundedBy: 'owner_capital' });
-  check('the ops manager does not keep the fleet books', opsCap.status === 403);
-  if (periods.lockedThrough) {
-    const closed = await acc.post(`/fleet/vehicles/${truck.id}/capitalize`, { capitalizedOn: periods.lockedThrough, cost: 1200000, salvageValue: 120000, method: 'straight_line', usefulLifeMonths: 96, fundedBy: 'owner_capital' });
-    check('capitalising into a closed period is refused', closed.status === 409 && closed.body.error.code === 'PERIOD_CLOSED', `locked through ${periods.lockedThrough}`);
-    const latest = periods.closes.filter((c) => !c.reopenedAt).sort((a, b) => (a.periodEnd < b.periodEnd ? 1 : -1))[0];
-    must(await owner.post(`/accounting/periods/${latest.id}/reopen`, { reason: 'Fleet register catch-up' }), 'reopen');
-  }
   const capitalizedOn = `${twoAgo.slice(0, 8)}16`;
   const cap = must(await acc.post(`/fleet/vehicles/${truck.id}/capitalize`, { capitalizedOn, cost: 1200000, salvageValue: 120000, method: 'straight_line', usefulLifeMonths: 96, fundedBy: 'owner_capital' }), 'capitalize');
   check('capitalised at cost', cap.asset.cost === '1200000.00' && cap.asset.netBookValue === '1200000.00' && cap.netBookValue === '1200000.00');
@@ -147,17 +163,19 @@ const money = (c) => (c / 100).toFixed(2);
 
   // ---- A hired vehicle ----
   const hired = must(await owner.post('/vehicles', { registrationNumber: 'MH14HR7777', capacityKg: 2000, fuelType: 'diesel' }), 'hired');
-  const noContract = await acc.post(`/fleet/vehicles/${hired.id}/hire-contracts`, { ownerName: 'Ravi Transport', rateBasis: 'per_trip', rate: 1800, includesFuel: false, effectiveFrom: thisMonth });
+  // The contract runs from two months back and the bill is for the 1st–15th of
+  // last month: always past, whatever today's date (a bill can't cover the future).
+  const noContract = await acc.post(`/fleet/vehicles/${hired.id}/hire-contracts`, { ownerName: 'Ravi Transport', rateBasis: 'per_trip', rate: 1800, includesFuel: false, effectiveFrom: twoAgo });
   check('a hire rate needs the vehicle marked hired', noContract.status === 409, msg(noContract));
   must(await ops.put(`/fleet/vehicles/${hired.id}/profile`, { version: 0, ownership: 'hired', makeModel: 'Eicher Pro 2049' }), 'mark hired');
   const capHired = await acc.post(`/fleet/vehicles/${hired.id}/capitalize`, { capitalizedOn: today, cost: 100, salvageValue: 0, method: 'straight_line', usefulLifeMonths: 12, fundedBy: 'bank' });
   check('a hired vehicle is not an asset', capHired.status === 409);
-  must(await acc.post(`/fleet/vehicles/${hired.id}/hire-contracts`, { ownerName: 'Ravi Transport', ownerPan: 'ABCPR1234K', rateBasis: 'per_trip', rate: 1800, includesFuel: false, effectiveFrom: thisMonth }), 'contract');
+  must(await acc.post(`/fleet/vehicles/${hired.id}/hire-contracts`, { ownerName: 'Ravi Transport', ownerPan: 'ABCPR1234K', rateBasis: 'per_trip', rate: 1800, includesFuel: false, effectiveFrom: twoAgo }), 'contract');
   const suggestion = must(await acc.get(`/fleet/vehicles/${hired.id}/hire-suggestion?from=${thisMonth}&to=${today}`), 'suggestion');
   check('the bill is counted from its trips', suggestion.rateBasis === 'per_trip' && suggestion.quantity === '0.000' && suggestion.trips === 0, suggestion.basis);
-  const bill = must(await acc.post('/fleet/hire-bills', { vehicleId: hired.id, periodStart: thisMonth, periodEnd: shift(thisMonth, 14), quantity: 5, billReference: 'RT/112' }), 'bill');
+  const bill = must(await acc.post('/fleet/hire-bills', { vehicleId: hired.id, periodStart: lastMonth, periodEnd: shift(lastMonth, 14), quantity: 5, billReference: 'RT/112' }), 'bill');
   check('hire bill at the contract rate', bill.amount === '9000.00' && bill.status === 'unpaid');
-  const overlap = await acc.post('/fleet/hire-bills', { vehicleId: hired.id, periodStart: shift(thisMonth, 10), periodEnd: shift(thisMonth, 20), quantity: 1 });
+  const overlap = await acc.post('/fleet/hire-bills', { vehicleId: hired.id, periodStart: shift(lastMonth, 10), periodEnd: shift(lastMonth, 20), quantity: 1 });
   check('a period is billed once', overlap.status === 409, msg(overlap));
   const backToOwned = await ops.put(`/fleet/vehicles/${hired.id}/profile`, { version: 1, ownership: 'owned' });
   check('a vehicle with hire contracts stays hired', backToOwned.status === 409, msg(backToOwned));
@@ -168,7 +186,7 @@ const money = (c) => (c / 100).toFixed(2);
 
   // ---- The books ----
   const after = await bal();
-  const delta = (code) => money(cents(after[code] ?? '0') - cents(before[code] ?? '0'));
+  const delta = (code) => money(cents(after[code] ?? '0') - cents(before[code] ?? '0') - (reopenShift[code] ?? 0));
   const interest = 600000 + i2;
   check('fuel, maintenance and documents expensed', delta('vehicle_fuel') === '8100.00' && delta('repairs_maintenance') === '2500.00' && delta('vehicle_insurance_taxes') === '24000.00', `${delta('vehicle_fuel')} ${delta('repairs_maintenance')} ${delta('vehicle_insurance_taxes')}`);
   check('the disposed asset left no cost or depreciation behind', after.fixed_assets_vehicles === '0.00' && after.accumulated_depreciation === '0.00', `${after.fixed_assets_vehicles} / ${after.accumulated_depreciation}`);

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { OnTheRoad, PlanOrder, PlanPickup, QuantityRow, TripCard, TripPlan, TripsBoard, TripsBoardDay, VehicleTrips } from '../entities/trip-planning.entity';
+import { stageOf } from '../entities/trip.entity';
 
 // The raw rows of the plan queries (pg returns plain objects).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +59,7 @@ export class TripPlanningRepository {
       day === 'today' ? "m.day = m.today AND m.status <> 'cancelled'" : day === 'tomorrow' ? "m.day = m.today + 1 AND m.status <> 'cancelled'" : 'true';
     const rows = await client.query(
       `${base}
-       SELECT m.id, m.number, m.status, m.day::text AS day,
+       SELECT m.id, m.number, m.status, m.published_at, m.day::text AS day,
               CASE WHEN m.status = 'in_progress' THEN to_char(m.started_at AT TIME ZONE m.timezone, 'HH24:MI')
                    WHEN m.status IN ('completed', 'on_hold', 'reconciled') THEN to_char(m.completed_at AT TIME ZONE m.timezone, 'HH24:MI')
               END AS time,
@@ -100,6 +101,7 @@ export class TripPlanningRepository {
           id: r.id,
           number: r.number,
           status: r.status,
+          stage: stageOf(r.status, r.published_at),
           day: r.day,
           time: r.time,
           routeName: r.route_name,
@@ -397,16 +399,50 @@ export class TripPlanningRepository {
   }
 
   /**
+   * The trip's stops as the owner's Check sees them (Master Spec v3 §7.4):
+   * each delivery's order status, its customer's credit hold and what they
+   * owe now; each pickup's status; every line's quantity and unit.
+   */
+  async checkStopsWithClient(
+    client: PoolClient,
+    tripId: string,
+  ): Promise<{ type: 'pickup' | 'delivery'; name: string; status: string; creditHold: boolean; outstanding: string; lines: { product: string; uom: string; quantity: string }[] }[]> {
+    const r = await client.query<{ type: 'pickup' | 'delivery'; name: string; status: string; credit_hold: boolean; outstanding: string; lines: { product: string; uom: string; quantity: string }[] | null }>(
+      `SELECT s.stop_type AS type,
+              COALESCE(c.name, f.name, '') AS name,
+              COALESCE(o.status, p.status, '') AS status,
+              COALESCE(c.credit_hold, false) AS credit_hold,
+              COALESCE((SELECT SUM(b.outstanding) FROM money.invoice_balance b WHERE b.customer_id = c.id), 0)::numeric(14,2)::text AS outstanding,
+              CASE WHEN s.stop_type = 'delivery'
+                   THEN (SELECT json_agg(json_build_object('product', pr.name, 'uom', pr.base_uom, 'quantity', ol.quantity::text) ORDER BY pr.name)
+                           FROM commerce.customer_order_line ol JOIN trading_partners.product pr ON pr.id = ol.product_id WHERE ol.order_id = o.id)
+                   ELSE (SELECT json_agg(json_build_object('product', pr.name, 'uom', pr.base_uom, 'quantity', pl.expected_quantity::text) ORDER BY pr.name)
+                           FROM commerce.purchase_order_line pl JOIN trading_partners.product pr ON pr.id = pl.product_id WHERE pl.purchase_order_id = p.purchase_order_id)
+              END AS lines
+         FROM fulfilment.trip_stop s
+         LEFT JOIN commerce.customer_order o ON o.id = s.order_id
+         LEFT JOIN trading_partners.customer c ON c.id = o.customer_id
+         LEFT JOIN commerce.pickup p ON p.id = s.pickup_id
+         LEFT JOIN trading_partners.farmer f ON f.id = p.farmer_id
+        WHERE s.trip_id = $1
+        ORDER BY s.sequence_number`,
+      [tripId],
+    );
+    return r.rows.map((x) => ({ type: x.type, name: x.name, status: x.status, creditHold: x.credit_hold, outstanding: x.outstanding, lines: x.lines ?? [] }));
+  }
+
+  /**
    * The driver's trip for the day (driver app V1, D1): the one on the road;
-   * else the latest the owner planned for today or before (one planned for
-   * a later day isn't today's); else the latest one handed in and waiting
-   * for the owner to close.
+   * else the latest the owner planned and published for today or before
+   * (one planned for a later day isn't today's; a draft isn't the driver's
+   * to see); else the latest one handed in and waiting for the owner to close.
    */
   async dayTripOfDriverWithClient(client: PoolClient, employeeId: string, today: string): Promise<string | null> {
     const r = await client.query<{ id: string }>(
       `SELECT id FROM fulfilment.trip
        WHERE driver_employee_id = $1 AND status IN ('in_progress', 'planned', 'completed', 'on_hold')
          AND (status <> 'planned' OR planned_date IS NULL OR planned_date <= $2::date)
+         AND (status <> 'planned' OR published_at IS NOT NULL)
        ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'planned' THEN 1 ELSE 2 END,
                 COALESCE(planned_date, (created_at AT TIME ZONE 'UTC')::date) DESC, created_at DESC
        LIMIT 1`,

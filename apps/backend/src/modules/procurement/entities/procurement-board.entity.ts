@@ -1,4 +1,5 @@
 import { PurchaseOrderStatus } from './purchase-order.entity';
+import { ProcurementLifecycle } from '../procurement-lifecycle';
 
 export type ProcurementBoardDay = 'today' | 'tomorrow' | 'all';
 
@@ -19,6 +20,8 @@ export interface ProcurementCard {
   number: number;
   status: PurchaseOrderStatus;
   stage: ProcurementStage;
+  /** Master Spec v3 §11: draft → confirmed → assigned → pickup → partially picked / picked up → settled. */
+  lifecycle: ProcurementLifecycle;
   /** The pickup date, or the day it was raised. */
   day: string;
   /** HH:MM, local; null when no time was set. */

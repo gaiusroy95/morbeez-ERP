@@ -7,8 +7,9 @@ import type {
   OrderRecord,
   TripCard,
   TripExpenseRecord,
+  TripCheck,
   TripRecord,
-  TripStatus,
+  TripStage,
   TripStopRecord,
   TripsBoardDay,
 } from '@morbeez/shared-types';
@@ -36,7 +37,7 @@ import { useT, type Translate } from '@/lib/i18n';
 import { useOpenOnNew, useOpenParam } from '@/lib/hooks/use-open-on-new';
 import { formatPoNumber } from '@/lib/hooks/use-procurement';
 import { formatOrderNumber, useRouteName } from '@/lib/hooks/use-delivery-orders';
-import { useTripsBoard } from '@/lib/hooks/use-trips';
+import { useTripCheck, useTripsBoard } from '@/lib/hooks/use-trips';
 import { useTripIncentives } from '@/lib/hooks/use-admin';
 import { TripIncentivesView } from '@/components/people/DriverIncentives';
 
@@ -83,9 +84,66 @@ const TRIP_EFFECTS = [KEYS.logistics, KEYS.orders, KEYS.procurement, KEYS.invent
 
 // A submitted trip is done driving but still needs the owner's
 // reconciliation — that's the owner's cue, so it reads as needing attention.
+// A planned trip is a draft until it's published to its driver (Master Spec v3 §7.5).
 function tripBadge(trip: TripRecord) {
+  if (trip.stage === 'draft') return <StatusBadge status="draft" tone="attention" label="Draft — not published" />;
+  if (trip.stage === 'published') return <StatusBadge status="published" tone="active" label="Published" />;
   if (trip.status === 'completed') return <StatusBadge status="completed" tone="attention" label="To reconcile" />;
   return <StatusBadge status={trip.status} />;
+}
+
+const CHECK_TONE: Record<TripCheck['status'], 'done' | 'attention' | 'bad'> = { pass: 'done', warn: 'attention', fail: 'bad' };
+const CHECK_LABEL: Record<TripCheck['check'], string> = {
+  driver: 'Driver',
+  vehicle: 'Vehicle',
+  date: 'Date',
+  stops: 'Stops',
+  quantities: 'Quantities',
+  capacity: 'Capacity',
+  credit: 'Credit',
+  collections: 'Collections',
+};
+
+/**
+ * Check, then publish (Master Spec v3 §7.4–7.5): every check with what it
+ * found; a failure stops publishing, a warning is the owner's to weigh. Once
+ * published, the trip appears on the driver's phone.
+ */
+function PublishDialog({ trip, onClose }: { trip: TripRecord; onClose: () => void }) {
+  const t = useT();
+  const check = useTripCheck(trip.id);
+  const publish = useAction(() => apiSend<TripRecord>('POST', `logistics/trips/${trip.id}/publish`, { version: trip.version }), TRIP_EFFECTS, onClose);
+  const failed = (check.data?.checks ?? []).filter((c) => c.status === 'fail').length;
+  return (
+    <FormDialog
+      title={t('Check and publish {number}', { number: trip.number })}
+      description={<p>{t('Once published, the trip appears on the driver’s phone. A failed check must be fixed first.')}</p>}
+      submitLabel={t('Publish to the driver')}
+      pending={publish.isPending}
+      error={check.error ?? publish.error}
+      submitDisabled={check.isPending || failed > 0}
+      onClose={onClose}
+      onSubmit={() => publish.mutate(undefined)}
+    >
+      {check.isPending ? (
+        <SkeletonLines lines={6} />
+      ) : (
+        <ul className="trip-checks form-wide">
+          {(check.data?.checks ?? []).map((c) => (
+            <li key={c.check} data-status={c.status}>
+              <StatusBadge status={c.status} tone={CHECK_TONE[c.status]} label={t(CHECK_LABEL[c.check])} />
+              <span>{c.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {failed > 0 && (
+        <p className="form-error" role="alert">
+          {t('{n} check(s) failed — fix them, then publish.', { n: failed })}
+        </p>
+      )}
+    </FormDialog>
+  );
 }
 
 // ---- Stops ----
@@ -292,7 +350,7 @@ function ExpenseDialog({ trip, onClose }: { trip: TripRecord; onClose: () => voi
 
 // ---- Detail ----
 
-type Open = 'delivery' | 'pickup' | 'start' | 'complete' | 'cancel' | 'expense';
+type Open = 'delivery' | 'pickup' | 'start' | 'complete' | 'cancel' | 'expense' | 'publish';
 type Tab = 'overview' | 'stops' | 'quantities' | 'expenses' | 'backhaul';
 
 const TABS: { value: Tab; label: string }[] = [
@@ -475,7 +533,12 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
           )}
           {canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && <TripClosure trip={trip} deposits={deposits} />}
           <ActionBar>
-            {canWrite && trip.status === 'planned' && (
+            {canDispatch && trip.stage === 'draft' && (
+              <button type="button" className="button button-primary" onClick={() => setOpen('publish')}>
+                {t('Check & publish')}
+              </button>
+            )}
+            {canWrite && trip.stage === 'published' && (
               <button
                 type="button"
                 className="button button-primary"
@@ -700,6 +763,7 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
       {open === 'delivery' && <AddDeliveryDialog trip={trip} onClose={close} />}
       {open === 'pickup' && <AddPickupDialog trip={trip} onClose={close} />}
       {open === 'expense' && <ExpenseDialog trip={trip} onClose={close} />}
+      {open === 'publish' && <PublishDialog trip={trip} onClose={close} />}
       {open === 'start' &&
         confirmStep('start', 'Start this trip?', <p>{t('Marks the vehicle as on the road with {n} stop(s).', { n: stops.length })}</p>, 'Start trip')}
       {open === 'complete' &&
@@ -722,12 +786,13 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
 
 // ---- The list ----
 
-const STAGE: Record<TripStatus, { label: string; tone: CardTone }> = {
-  planned: { label: 'Planned', tone: 'pending' },
-  in_progress: { label: 'In Progress', tone: 'progress' },
-  completed: { label: 'To close', tone: 'pending' },
+const STAGE: Record<TripStage, { label: string; tone: CardTone }> = {
+  draft: { label: 'Draft', tone: 'pending' },
+  published: { label: 'Published', tone: 'pending' },
+  on_the_road: { label: 'In Progress', tone: 'progress' },
+  submitted: { label: 'To close', tone: 'pending' },
   on_hold: { label: 'On hold', tone: 'bad' },
-  reconciled: { label: 'Completed', tone: 'done' },
+  closed: { label: 'Completed', tone: 'done' },
   cancelled: { label: 'Cancelled', tone: 'muted' },
 };
 
@@ -818,8 +883,8 @@ export default function LogisticsPage() {
                 place={partiesLine(card, t)}
                 detail={`${formatQuantity(String(Number(card.kg)), 'kg')} · ${t('{done} of {all} stops done', { done: card.stopsDone, all: card.stops })}`}
                 time={clock(card.time)}
-                status={STAGE[card.status].label}
-                tone={STAGE[card.status].tone}
+                status={STAGE[card.stage].label}
+                tone={STAGE[card.stage].tone}
                 person={card.driverName}
                 vehicle={card.vehicle}
                 initial={card.routeName ?? 'T'}

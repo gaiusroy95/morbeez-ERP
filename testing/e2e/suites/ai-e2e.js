@@ -113,6 +113,7 @@ const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x
   // A second vehicle, free and with no lapsed papers, for the load suggestion.
   const spare = must(await owner.post('/vehicles', { registrationNumber: 'MH12AI0001', capacityKg: 1000, fuelType: 'diesel' }), 'spare vehicle');
   let t2 = must(await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id }), 'trip 2');
+  must(await owner.post(`/logistics/trips/${t2.id}/publish`, { version: t2.version }), 'publish');
   must(await owner.post(`/logistics/trips/${t2.id}/stops/delivery`, { orderId: orders[3].id }), 'stop 2');
   t2 = must(await owner.post(`/logistics/trips/${t2.id}/start`, { version: t2.version }), 'start 2');
   const s2 = must(await owner.get(`/logistics/trips/${t2.id}/stops`), 'stops 2');
@@ -121,6 +122,7 @@ const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x
   must(await owner.post(`/logistics/trips/${t2.id}/complete`, { version: t2.version }), "complete 2");
   // A planned trip in a zig-zag order: far east, west, east.
   let trip = must(await owner.post('/logistics/trips', { vehicleId: van.id, driverEmployeeId: suresh.id }), 'trip');
+  must(await owner.post(`/logistics/trips/${trip.id}/publish`, { version: trip.version }), 'publish');
   for (const i of [1, 2, 0]) must(await owner.post(`/logistics/trips/${trip.id}/stops/delivery`, { orderId: orders[i].id }), 'stop');
   // One more confirmed order with nowhere to go yet — a load to plan.
   await buy([{ productId: tomato.id, expectedQuantity: 30, indicativePrice: 20 }]);

@@ -1,5 +1,7 @@
 package com.morbeez.driver.ui.screenshots
 
+import com.morbeez.driver.ui.screens.home.LocalHourOfDay
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
@@ -23,7 +25,7 @@ class ChatScreenshots {
 
     private fun draw(device: DeviceConfig = PHONE, content: @Composable () -> Unit) {
         paparazzi.unsafeUpdateConfig(deviceConfig = device)
-        paparazzi.snapshot { MorbeezTheme(darkBars = true) { content() } }
+        paparazzi.snapshot { MorbeezTheme(darkBars = true) { CompositionLocalProvider(LocalHourOfDay provides 10) { content() } } }
     }
 
     private fun chat(state: ChatUiState, tab: String = "all", text: String = "", photo: String? = null, device: DeviceConfig = PHONE) = draw(device) {

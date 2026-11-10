@@ -118,3 +118,57 @@ describe('checklistOf', () => {
     expect(area(ok, 'load').detail).toMatch(/counted: as expected/);
   });
 });
+
+// Master Spec v3 §60 (P1): the areas every trip is checked on besides.
+describe('checklistOf — workforce, workload, vehicle, exceptions, accounting', () => {
+  const full = (over: Partial<TripReviewFacts> = {}) =>
+    facts({
+      workforce: { driver: 'Raju', workRecorded: true, hasPayRate: true, crewCredits: 2 },
+      untimedStops: [],
+      vehicle: { openingKm: '48620', closingKm: '48812', litres: '24.000' },
+      openItems: [],
+      books: { missing: [], unbalanced: 0 },
+      ...over,
+    });
+
+  it('a trip that went to plan passes every area (backhaul is checked only on a trip that had one)', () => {
+    const items = checklistOf(full(), handover(), '1400.00');
+    expect(items.map((i) => i.area)).toEqual([
+      'procurement', 'deliveries', 'load', 'returns', 'collections', 'handover', 'expenses',
+      'workforce', 'workload', 'vehicle', 'exceptions', 'accounting',
+    ]);
+    expect(items.every((i) => i.status === 'pass')).toBe(true);
+    expect(area(items, 'workforce').detail).toBe("Raju's work on this trip is recorded. 2 crew credits for loading.");
+    expect(area(items, 'workload').detail).toBe('Arrival and completion times recorded at all 3 stops.');
+    expect(area(items, 'vehicle').detail).toBe('192 km (48620 → 48812). 24 L of fuel put in (8.0 km/L).');
+  });
+
+  it("the driver's work not recorded is a workforce exception; no pay rate is said, not held against the trip", () => {
+    expect(area(checklistOf(full({ workforce: { driver: 'Raju', workRecorded: false, hasPayRate: true, crewCredits: 0 } }), handover(), '1400.00'), 'workforce')).toEqual({
+      area: 'workforce', status: 'exception', detail: "Raju's work on this trip isn't recorded.",
+    });
+    const noRate = area(checklistOf(full({ workforce: { driver: 'Raju', workRecorded: true, hasPayRate: false, crewCredits: 0 } }), handover(), '1400.00'), 'workforce');
+    expect(noRate.status).toBe('pass');
+    expect(noRate.detail).toMatch(/Raju has no pay rate on file/);
+  });
+
+  it('a completed stop without its arrival time is a workload exception naming it', () => {
+    expect(area(checklistOf(full({ untimedStops: ['Hotel Sagar'] }), handover(), '1400.00'), 'workload')).toEqual({
+      area: 'workload', status: 'exception', detail: 'No arrival or completion time at: Hotel Sagar.',
+    });
+  });
+
+  it('no closing KM, or a day of more than 1,500 km, is a vehicle exception', () => {
+    expect(area(checklistOf(full({ vehicle: { openingKm: '48620', closingKm: null, litres: '0' } }), handover(), '1400.00'), 'vehicle').detail).toBe('No closing KM recorded.');
+    expect(area(checklistOf(full({ vehicle: { openingKm: null, closingKm: null, litres: '0' } }), handover(), '1400.00'), 'vehicle').detail).toBe('No opening KM recorded (nor closing).');
+    const far = area(checklistOf(full({ vehicle: { openingKm: '48620', closingKm: '58620', litres: '0' } }), handover(), '1400.00'), 'vehicle');
+    expect(far.status).toBe('exception');
+    expect(far.detail).toMatch(/^10000 km in a day/);
+  });
+
+  it('an open dispute or request is an exceptions exception; a journal missing or unbalanced an accounting one', () => {
+    expect(area(checklistOf(full({ openItems: ['a dispute from Hotel Sagar'] }), handover(), '1400.00'), 'exceptions').detail).toBe('Still open: a dispute from Hotel Sagar.');
+    const books = area(checklistOf(full({ books: { missing: ['an expense of ₹300.00'], unbalanced: 1 } }), handover(), '1400.00'), 'accounting');
+    expect(books).toEqual({ area: 'accounting', status: 'exception', detail: 'not in the books: an expense of ₹300.00; 1 journal doesn’t balance.' });
+  });
+});
