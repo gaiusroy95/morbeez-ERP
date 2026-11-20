@@ -21,15 +21,16 @@ export interface NavGroup {
 export type BottomTab = (NavItem & { kind: 'link' }) | { kind: 'create' } | { kind: 'more' };
 
 /**
- * The phone tab bar (client design V1.1, docs/redesign): Home · Operations ·
- * (+) · Finance · More. The (+) opens QUICK_CREATE; More opens the side menu.
+ * The phone tab bar — the client, 20 Nov 2026: "Dashboard Procurement
+ * Delivery three button enough". Everything else is in the side menu (☰ at
+ * the top), and each page has its own create button. ('create' — the (+)
+ * sheet of QUICK_CREATE — and 'more' are still understood, should a tab come
+ * back.)
  */
 export const BOTTOM_TABS: BottomTab[] = [
-  { kind: 'link', href: '/dashboard', icon: 'home', label: 'Home', permission: 'dashboard:read' },
-  { kind: 'link', href: '/operations', icon: 'grid', label: 'Operations' },
-  { kind: 'create' },
-  { kind: 'link', href: '/finance', icon: 'wallet', label: 'Finance', permission: 'finance:read' },
-  { kind: 'more' },
+  { kind: 'link', href: '/dashboard', icon: 'home', label: 'Dashboard', permission: 'dashboard:read' },
+  { kind: 'link', href: '/procurement', icon: 'basket', label: 'Procurement', permission: 'procurement:read' },
+  { kind: 'link', href: '/orders', icon: 'receipt', label: 'Delivery', permission: 'orders:read' },
 ];
 
 /** What the (+) button creates. Each opens its page with the new form already open (?new=1). */

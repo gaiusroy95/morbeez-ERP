@@ -8,7 +8,6 @@ import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useCurrency, useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatDateTime, formatRate, formatQuantity } from '@/lib/format';
-import { percentOfMoney, subtractMoney } from '@/lib/decimal';
 import { ErrorState, Panel, SkeletonLines } from '@/components/ui/Panel';
 import { EmptyRow } from '@/components/ui/ListControls';
 import { Field, FormDialog } from '@/components/ui/Form';
@@ -19,8 +18,8 @@ const REFRESH = [KEYS.finance, KEYS.procurement, KEYS.dashboard, KEYS.tax];
 /**
  * Agents' commission (Master Spec §11; Accounting Engine AGT.1–AGT.3):
  * earned on the kg accepted when a lot is graded, at the purchase's
- * commission per kg; settled by payments, with TDS under 194H when the
- * business withholds it.
+ * commission per kg; settled by payments. No TDS — the client confirmed it
+ * doesn't apply to agent commission (10 Nov 2026).
  */
 export function Agents() {
   const { data: session } = useSession();
@@ -62,7 +61,7 @@ export function Agents() {
                     <button type="button" className="link-button" onClick={() => setOpen(open === a.agentId ? null : a.agentId)}>
                       {a.name}
                     </button>
-                    <div className="cell-sub">{a.pan ? `PAN ${a.pan}` : 'No PAN on file'}</div>
+                    {a.pan && <div className="cell-sub">PAN {a.pan}</div>}
                   </td>
                   <td className="num">{formatRate(a.earned, currency)}</td>
                   <td className="num">{formatRate(a.settled, currency)}</td>
@@ -138,9 +137,7 @@ function AgentDetail({ agentId, currency }: { agentId: string; currency: string 
             <tr>
               <th>Paid</th>
               <th>How</th>
-              <th className="num">Settled</th>
-              <th className="num">TDS</th>
-              <th className="num">Paid to the agent</th>
+              <th className="num">Paid</th>
             </tr>
           </thead>
           <tbody>
@@ -152,9 +149,7 @@ function AgentDetail({ agentId, currency }: { agentId: string; currency: string 
                   {METHOD_LABEL[p.method]}
                   {p.reference && <div className="cell-sub">{p.reference}</div>}
                 </td>
-                <td className="num">{formatRate(p.amount, currency)}</td>
-                <td className="num">{p.tdsSection ? `${formatRate(p.tdsAmount, currency)} (${p.tdsSection})` : '—'}</td>
-                <td className="num strong">{formatRate(p.netPaid, currency)}</td>
+                <td className="num strong">{formatRate(p.amount, currency)}</td>
               </tr>
             ))}
           </tbody>
@@ -168,17 +163,14 @@ function PayAgentDialog({ agent, currency, onClose }: { agent: AgentAccount; cur
   const [amount, setAmount] = useState(agent.owed);
   const [method, setMethod] = useState<PaymentMethod>('bank_transfer');
   const [reference, setReference] = useState('');
-  const [tds, setTds] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const pay = useAction(
-    (body: { amount: number; method: PaymentMethod; reference?: string; tdsSectionCode?: string }) => apiSend('POST', `finance/agents/${agent.agentId}/payments`, body),
+    (body: { amount: number; method: PaymentMethod; reference?: string }) => apiSend('POST', `finance/agents/${agent.agentId}/payments`, body),
     REFRESH,
     onClose,
   );
   const value = amount.replace(/,/g, '').trim();
   const valid = /^\d+(\.\d{1,2})?$/.test(value) && Number(value) > 0;
-  // 194H: 2%, or 20% without a PAN (Income-tax Act s.206AA) — the server works it out the same way.
-  const withheld = tds && valid ? percentOfMoney(value, agent.pan ? '2' : '20') : '0.00';
 
   return (
     <FormDialog
@@ -192,7 +184,7 @@ function PayAgentDialog({ agent, currency, onClose }: { agent: AgentAccount; cur
         if (!valid) return setProblem('Enter the commission to settle.');
         if (Number(value) > Number(agent.owed)) return setProblem(`Only ${formatRate(agent.owed, currency)} is owed.`);
         setProblem(null);
-        pay.mutate({ amount: Number(value), method, reference: reference.trim() || undefined, tdsSectionCode: tds ? '194H' : undefined });
+        pay.mutate({ amount: Number(value), method, reference: reference.trim() || undefined });
       }}
     >
       <Field label={`Commission settled (${currency})`}>
@@ -212,27 +204,11 @@ function PayAgentDialog({ agent, currency, onClose }: { agent: AgentAccount; cur
       <Field label="Reference" hint="UTR or cheque number">
         {(p) => <input {...p} value={reference} maxLength={120} onChange={(e) => setReference(e.target.value)} />}
       </Field>
-      <Field
-        label="TDS"
-        wide
-        hint={
-          tds
-            ? `${formatRate(withheld, currency)} withheld under 194H; ${formatRate(valid ? subtractMoney(value, withheld) : '0', currency)} reaches ${agent.name}.`
-            : 'Withhold 194H if your business is liable to tax audit.'
-        }
-      >
-        {(p) => (
-          <select {...p} value={tds ? '194H' : ''} onChange={(e) => setTds(e.target.value === '194H')}>
-            <option value="">No TDS</option>
-            <option value="194H">194H — commission ({agent.pan ? '2%' : '20%, no PAN'})</option>
-          </select>
-        )}
-      </Field>
     </FormDialog>
   );
 }
 
-/** The agent's PAN: 194H withholds 2% with one, 20% without. */
+/** The agent's PAN, kept with their details. */
 function AgentPanDialog({ agent, onClose }: { agent: AgentAccount; onClose: () => void }) {
   const [pan, setPan] = useState(agent.pan ?? '');
   const [problem, setProblem] = useState<string | null>(null);
@@ -240,7 +216,7 @@ function AgentPanDialog({ agent, onClose }: { agent: AgentAccount; onClose: () =
   return (
     <FormDialog
       title={`PAN — ${agent.name}`}
-      description={<p>Used when TDS is withheld on their commission (194H): 2% with a PAN, 20% without.</p>}
+      description={<p>Kept with the agent&apos;s details.</p>}
       submitLabel="Save PAN"
       pending={save.isPending}
       error={problem ?? save.error}

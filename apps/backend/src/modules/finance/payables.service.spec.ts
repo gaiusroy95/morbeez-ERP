@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { PayablesService } from './payables.service';
 import { TaxRulesService } from '../tax-rules/tax-rules.service';
@@ -35,6 +35,9 @@ describe('PayablesService', () => {
             listPaymentsWithClient: jest.fn(),
             lotStatusWithClient: jest.fn(),
             accruedThisYearWithClient: jest.fn().mockResolvedValue({ date: '2026-09-20', prior: '0.00' }),
+            farmerNameWithClient: jest.fn().mockResolvedValue('Ramesh'),
+            openingPayableWithClient: jest.fn().mockResolvedValue(null),
+            insertOpeningPayableWithClient: jest.fn().mockResolvedValue('payable-ob'),
           },
         },
         {
@@ -221,6 +224,72 @@ describe('PayablesService', () => {
           allocations: [{ lotId: 'lot-2', amount: 700 }],
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    // An opening balance has no lot: paid first (it is the oldest), named by its payable, never announced as a lot.
+    const withOpening = [{ id: 'p-ob', lotId: null, outstanding: '5000.00' }, ...open];
+
+    it('pays the opening balance first, and tells listeners only of real lots', async () => {
+      repo.openPayablesForFarmerWithClient.mockResolvedValue(withOpening);
+      const listener = jest.fn().mockResolvedValue(undefined);
+      service.onLotsPaid(listener);
+      await service.recordPayment('tenant-1', 'user-1', { farmerId: 'farmer-1', amount: 6900, method: 'bank_transfer' });
+      expect(repo.insertAllocationsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', [
+        { paymentId: 'fpay-1', payableId: 'p-ob', amount: '5000.00' },
+        { paymentId: 'fpay-1', payableId: 'p-1', amount: '1900.00' },
+      ]);
+      expect(listener).toHaveBeenCalledWith('tenant-1', 'user-1', ['lot-1']);
+    });
+
+    it('a payment can name the opening balance by its payable; a lot and a payable together is refused', async () => {
+      repo.openPayablesForFarmerWithClient.mockResolvedValue(withOpening);
+      await service.recordPayment('tenant-1', 'user-1', { farmerId: 'farmer-1', amount: 1000, method: 'upi', allocations: [{ payableId: 'p-ob', amount: 1000 }] });
+      expect(repo.insertAllocationsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', [{ paymentId: 'fpay-1', payableId: 'p-ob', amount: '1000.00' }]);
+      await expect(
+        service.recordPayment('tenant-1', 'user-1', { farmerId: 'farmer-1', amount: 10, method: 'upi', allocations: [{ lotId: 'lot-1', payableId: 'p-ob', amount: 10 }] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // The client (20 Nov 2026): what was already owed to a farmer, brought onto Morbeez.
+  describe('openingBalanceWithClient', () => {
+    const input = { farmerId: 'farmer-1', amount: '8000.00', accruedAt: new Date('2026-11-19T18:30:00Z'), dueDate: '2026-11-20', note: null };
+
+    it('owes it without a lot, stock or TDS: Dr Opening balances / Cr Payable — farmer', async () => {
+      const out = await service.openingBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input);
+      expect(repo.insertOpeningPayableWithClient).toHaveBeenCalledWith(fakeClient, expect.objectContaining({ farmerId: 'farmer-1', amount: '8000.00', dueDate: '2026-11-20', accruedAt: input.accruedAt }));
+      expect(taxRules.assessFarmerTdsWithClient).not.toHaveBeenCalled();
+      expect(posting()).toMatchObject({
+        entryType: 'opening_balance',
+        sourceId: 'payable-ob',
+        lines: [
+          { account: 'opening_balances', debit: '8000.00' },
+          { account: 'farmer_advance', party: farmer, credit: '0.00' },
+          { account: 'accounts_payable_farmer', party: farmer, credit: '8000.00' },
+        ],
+      });
+      expect(out).toEqual({ payableId: 'payable-ob', amount: '8000.00', fromAdvance: '0.00', outstanding: '8000.00' });
+    });
+
+    it('an advance the farmer already had meets it first (ADV.2)', async () => {
+      repo.unappliedPaymentsForFarmerWithClient.mockResolvedValue([{ id: 'adv-1', unapplied: '3000.00' }]);
+      const out = await service.openingBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input);
+      expect(repo.insertAllocationsWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', [{ paymentId: 'adv-1', payableId: 'payable-ob', amount: '3000.00' }]);
+      expect(posting().lines).toEqual([
+        { account: 'opening_balances', debit: '8000.00' },
+        { account: 'farmer_advance', party: farmer, credit: '3000.00' },
+        { account: 'accounts_payable_farmer', party: farmer, credit: '5000.00' },
+      ]);
+      expect(out.outstanding).toBe('5000.00');
+    });
+
+    it('is entered once, and only for a farmer who exists', async () => {
+      repo.openingPayableWithClient.mockResolvedValueOnce({ id: 'payable-ob', amount: '8000.00' });
+      await expect(service.openingBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input)).rejects.toBeInstanceOf(ConflictException);
+      repo.farmerNameWithClient.mockResolvedValueOnce(null);
+      await expect(service.openingBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input)).rejects.toBeInstanceOf(NotFoundException);
+      expect(repo.insertOpeningPayableWithClient).not.toHaveBeenCalled();
+      expect(ledger.postWithClient).not.toHaveBeenCalled();
     });
   });
 });

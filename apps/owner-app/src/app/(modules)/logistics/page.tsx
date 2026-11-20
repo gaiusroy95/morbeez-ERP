@@ -28,6 +28,7 @@ import { clock, formatDate, formatDateTime, formatMoney, formatQuantity, formatR
 import { sumMoney } from '@/lib/decimal';
 import { optionalText, parseMoney } from '@/lib/parse';
 import { ClosedTrip, TripClosure } from '@/components/logistics/TripClosure';
+import { TripCost } from '@/components/logistics/TripCost';
 import { CreateTripDialog } from '@/components/logistics/CreateTrip';
 import { navigateUrl, TripMap, tripDistance, useTripPoints } from '@/components/logistics/TripMap';
 import { TripQuantitiesView } from '@/components/logistics/TripQuantities';
@@ -444,6 +445,7 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
   const canDispatch = hasPermission(session, 'logistics:dispatch');
   const canWrite = hasPermission(session, 'logistics:write');
   const canReconcile = hasPermission(session, 'logistics:reconcile');
+  const canSeeCosts = hasPermission(session, 'finance:read');
   const [open, setOpen] = useState<Open | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const close = () => setOpen(null);
@@ -636,6 +638,7 @@ function TripDetail({ tripId, onClose }: { tripId: string; onClose: () => void }
             <>
               <h3 className="detail-subhead">{t('Closure')}</h3>
               <ClosedTrip reconciliation={reconciliation} timeZone={timeZone} />
+              {canSeeCosts && <TripCost tripId={trip.id} />}
             </>
           )}
           {!reconciliation && !canReconcile && (trip.status === 'completed' || trip.status === 'on_hold') && (

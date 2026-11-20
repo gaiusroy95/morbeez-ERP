@@ -34,6 +34,7 @@ import { DriverRecordsRepository } from './repositories/driver-records.repositor
 import { DriverRecordsService } from './driver-records.service';
 import { TripIncentivesRepository } from './repositories/trip-incentives.repository';
 import { TripIncentivesService } from './trip-incentives.service';
+import { CostingModule } from '../costing/costing.module';
 
 // Bounded context: Logistics — trip planning (vehicle, driver, route),
 // stop execution (a Procurement pickup or a customer delivery), photos,
@@ -45,7 +46,7 @@ import { TripIncentivesService } from './trip-incentives.service';
 // their public service APIs only (Constitution I.3-I.4). A collection is
 // also recorded as a Finance customer payment, in the same transaction.
 @Module({
-  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule, RoutesModule, CratesModule],
+  imports: [VehiclesModule, WorkforceModule, ProcurementModule, OrdersModule, FinanceModule, AlertsModule, RoutesModule, CratesModule, CostingModule],
   controllers: [LogisticsController, PinsController, DelegationController, BackhaulController],
   providers: [
     LogisticsService,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type {
@@ -30,6 +31,7 @@ import {
   firstError,
   optionalText,
   parseDecimal,
+  parseLocation,
   parseMoney,
   parseWholeNumber,
   type Parsed,
@@ -43,6 +45,15 @@ import { useCustomerProfile, useCustomersBoard, useCustomerStatement, useCustome
 import { CreateBar, DayTabs, SearchFilter, type CardTone } from '@/components/redesign/ListCards';
 import { ContactActions, PartyCard, ProfileHead, StatTiles } from '@/components/redesign/Party';
 import { DeliveryQrDialog } from '@/components/customers/DeliveryQr';
+import { LocationField, mapsLink, ShopPhoto, ShopPhotoField, uploadShopPhoto } from '@/components/customers/Onboarding';
+import {
+  OpeningBalanceDialog,
+  OpeningBalanceField,
+  OpeningBalanceLine,
+  parseOpening,
+  postOpeningBalance,
+  useCanPostOpening,
+} from '@/components/finance/OpeningBalance';
 
 // A customer's details and terms show in orders, finance and the dashboard too.
 const CUSTOMER_EFFECTS = [KEYS.customers, KEYS.lookupCustomers, KEYS.finance, KEYS.dashboard];
@@ -54,32 +65,86 @@ function termsLabel(days: number, t: Translate, billToBill = false) {
 
 // ---- Forms ----
 
-function ContactFields({
-  phone,
-  email,
-  notes,
+/** Who to ask for at the shop, and their phone. */
+function WhoFields({ person, phone, onChange }: { person: string; phone: string; onChange: (patch: { person?: string; phone?: string }) => void }) {
+  return (
+    <>
+      <Field label="Contact person (optional)" hint="Who to ask for at the shop">
+        {(props) => <input {...props} maxLength={120} value={person} onChange={(e) => onChange({ person: e.target.value })} />}
+      </Field>
+      <Field label="Phone (optional)">
+        {(props) => <input {...props} type="tel" maxLength={20} value={phone} onChange={(e) => onChange({ phone: e.target.value })} />}
+      </Field>
+    </>
+  );
+}
+
+/** Finance cost on overdue bills, on or off from the start (the client, 20 Nov 2026) — on only with a rate. */
+function FinanceCostFields({
+  on,
+  rate,
+  grace,
   onChange,
 }: {
-  phone: string;
-  email: string;
-  notes: string;
-  onChange: (patch: { phone?: string; email?: string; notes?: string }) => void;
+  on: boolean;
+  rate: string;
+  grace: string;
+  onChange: (patch: { charge?: boolean; rate?: string; grace?: string }) => void;
 }) {
   const t = useT();
   return (
     <>
-      <Field label={t('Phone (optional)')}>
-        {(props) => (
-          <input {...props} type="tel" maxLength={20} value={phone} onChange={(e) => onChange({ phone: e.target.value })} />
-        )}
+      <label className="check-row" style={{ gridColumn: '1 / -1' }}>
+        <input type="checkbox" checked={on} onChange={(e) => onChange({ charge: e.target.checked })} />
+        <span>{t('Charge finance cost (interest) on overdue bills')}</span>
+      </label>
+      {on && (
+        <>
+          <Field label="Finance charge (% a year)" hint="On what's overdue, per day: amount × rate × days ÷ 365. Up to 60">
+            {(props) => <input {...props} inputMode="decimal" value={rate} onChange={(e) => onChange({ rate: e.target.value })} />}
+          </Field>
+          <Field label="Grace before charging (days)" hint="Days past due before the charge starts">
+            {(props) => <input {...props} inputMode="numeric" value={grace} onChange={(e) => onChange({ grace: e.target.value })} />}
+          </Field>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Where the shop is and what it looks like (the client, 20 Nov 2026): GPS, landmark, front photo. */
+function ShopFields({
+  customer,
+  location,
+  landmark,
+  photo,
+  onChange,
+}: {
+  customer?: CustomerRecord;
+  location: string;
+  landmark: string;
+  photo: File | null;
+  onChange: (patch: { location?: string; landmark?: string; photo?: File | null }) => void;
+}) {
+  return (
+    <>
+      <LocationField value={location} onChange={(text) => onChange({ location: text })} />
+      <Field label="Landmark (optional)" hint="How the driver finds the shop, e.g. opposite the bus stand" wide>
+        {(props) => <input {...props} maxLength={200} value={landmark} onChange={(e) => onChange({ landmark: e.target.value })} />}
       </Field>
-      <Field label={t('Email (optional)')}>
+      <ShopPhotoField customer={customer} file={photo} onChange={(file) => onChange({ photo: file })} />
+    </>
+  );
+}
+
+function EmailNotesFields({ email, notes, onChange }: { email: string; notes: string; onChange: (patch: { email?: string; notes?: string }) => void }) {
+  return (
+    <>
+      <Field label="Email (optional)">
         {(props) => <input {...props} type="email" value={email} onChange={(e) => onChange({ email: e.target.value })} />}
       </Field>
-      <Field label={t('Notes (optional)')} wide>
-        {(props) => (
-          <textarea {...props} maxLength={500} value={notes} onChange={(e) => onChange({ notes: e.target.value })} />
-        )}
+      <Field label="Notes (optional)" wide>
+        {(props) => <textarea {...props} maxLength={500} value={notes} onChange={(e) => onChange({ notes: e.target.value })} />}
       </Field>
     </>
   );
@@ -166,9 +231,14 @@ function checkName(name: string): Parsed<string> {
 function NewCustomerDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (c: CustomerRecord) => void }) {
   const t = useT();
   const currency = useCurrency();
+  const queries = useQueryClient();
   const [form, setForm] = useState({
     name: '',
+    person: '',
     phone: '',
+    location: '',
+    landmark: '',
+    photo: null as File | null,
     email: '',
     notes: '',
     creditLimit: '0',
@@ -177,27 +247,79 @@ function NewCustomerDialog({ onClose, onCreated }: { onClose: () => void; onCrea
     place: '',
     address: '',
     routeId: '',
+    charge: false,
+    rate: '18',
+    grace: '0',
+    opening: '',
   });
+  const canPostOpening = useCanPostOpening();
   const [problem, setProblem] = useState<string | null>(null);
   const [addingRoute, setAddingRoute] = useState<string | null>(null);
+  // Added, but a later step didn't go: the next tap does only what's left — never a second customer.
+  const [added, setAdded] = useState<CustomerRecord | null>(null);
+  const [openingDone, setOpeningDone] = useState(false);
   const create = useAction(
-    (body: CreateCustomerBody) => apiSend<CustomerRecord>('POST', 'customers', body),
+    async ({ body, opening }: { body: CreateCustomerBody; opening?: number }) => {
+      const customer = added ?? (await apiSend<CustomerRecord>('POST', 'customers', body));
+      setAdded(customer);
+      if (opening !== undefined && !openingDone) {
+        try {
+          await postOpeningBalance('customer', customer.id, { amount: opening });
+          setOpeningDone(true);
+        } catch (e) {
+          throw new Error(
+            t('{name} is added, but the opening balance didn’t go: {reason} Try again, or clear it.', {
+              name: customer.name,
+              reason: e instanceof Error ? e.message : String(e),
+            }),
+          );
+        }
+      }
+      if (!form.photo) return customer;
+      try {
+        return await uploadShopPhoto(customer.id, form.photo);
+      } catch (e) {
+        throw new Error(
+          t('{name} is added, but the shop photo didn’t go: {reason} Try again, or remove the photo.', {
+            name: customer.name,
+            reason: e instanceof Error ? e.message : String(e),
+          }),
+        );
+      }
+    },
     CUSTOMER_EFFECTS,
     onCreated,
   );
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
+  const close = () => {
+    if (added) {
+      for (const key of CUSTOMER_EFFECTS) void queries.invalidateQueries({ queryKey: key });
+      onCreated(added);
+    } else onClose();
+  };
 
   const submit = () => {
     const name = checkName(form.name);
     const email = checkEmail(form.email);
+    const location = parseLocation(form.location);
     const limit = parseMoney(form.creditLimit, 'the credit limit');
     const terms = parseWholeNumber(form.terms, 'payment terms', 0, 180);
-    const error = firstError([name, email, limit, terms]);
+    const rate = form.charge ? parseDecimal(form.rate, 'the finance charge rate', { decimals: 2, positive: true, max: 60 }) : ({ ok: true, value: 0 } as const);
+    const grace = form.charge ? parseWholeNumber(form.grace, 'the grace period', 0, 90) : ({ ok: true, value: 0 } as const);
+    const opening = canPostOpening ? parseOpening(form.opening) : ({ ok: true, value: undefined } as const);
+    const error = firstError([name, email, location, limit, terms, rate, grace, opening]);
     if (error) return setProblem(error);
     setProblem(null);
-    create.mutate({
+    const at = (location as { value: { latitude: number; longitude: number } | null }).value;
+    create.mutate({ opening: (opening as { value: number | undefined }).value, body: {
+      ...(form.charge && {
+        financeChargeEnabled: true,
+        financeChargeRateAnnual: (rate as { value: number }).value,
+        financeChargeGraceDays: (grace as { value: number }).value,
+      }),
       name: (name as { value: string }).value,
       contact: {
+        person: optionalText(form.person),
         phone: optionalText(form.phone),
         email: (email as { value: string | undefined }).value,
         notes: optionalText(form.notes),
@@ -208,24 +330,28 @@ function NewCustomerDialog({ onClose, onCreated }: { onClose: () => void; onCrea
       place: optionalText(form.place) ?? null,
       address: optionalText(form.address) ?? null,
       routeId: form.routeId || null,
-    });
+      landmark: optionalText(form.landmark) ?? null,
+      ...(at && { latitude: at.latitude, longitude: at.longitude }),
+    } });
   };
 
   return (
     <>
       <FormDialog
       title={t('New customer')}
-      submitLabel={t('Add customer')}
+      submitLabel={added ? t('Try again') : t('Add customer')}
       pending={create.isPending}
       error={problem ?? create.error}
-      onClose={onClose}
+      onClose={close}
       onSubmit={submit}
     >
       <Field label={t('Name')} wide>
         {(props) => <input {...props} value={form.name} onChange={(e) => set({ name: e.target.value })} />}
       </Field>
-      <ContactFields phone={form.phone} email={form.email} notes={form.notes} onChange={set} />
+      <WhoFields person={form.person} phone={form.phone} onChange={set} />
+      <ShopFields location={form.location} landmark={form.landmark} photo={form.photo} onChange={set} />
       <PlaceFields place={form.place} address={form.address} routeId={form.routeId} onChange={set} onAddRoute={setAddingRoute} />
+      <EmailNotesFields email={form.email} notes={form.notes} onChange={set} />
       <Field label={`Credit limit (${currency})`} hint={t('0 means cash only — no confirmed orders on credit')}>
         {(props) => (
           <input {...props} inputMode="decimal" value={form.creditLimit} onChange={(e) => set({ creditLimit: e.target.value })} />
@@ -234,6 +360,8 @@ function NewCustomerDialog({ onClose, onCreated }: { onClose: () => void; onCrea
       <Field label={t('Payment terms (days)')} hint={t('0 = pays on delivery; up to 180')}>
         {(props) => <input {...props} inputMode="numeric" value={form.terms} onChange={(e) => set({ terms: e.target.value })} />}
       </Field>
+      <FinanceCostFields on={form.charge} rate={form.rate} grace={form.grace} onChange={set} />
+      {canPostOpening && <OpeningBalanceField party="customer" value={form.opening} onChange={(opening) => set({ opening })} />}
       <LanguageField value={form.language} onChange={(language) => set({ language })} />
       </FormDialog>
       {addingRoute !== null && (
@@ -250,11 +378,29 @@ function NewCustomerDialog({ onClose, onCreated }: { onClose: () => void; onCrea
   );
 }
 
-function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; onClose: () => void }) {
+/** The pin as the location field shows it. */
+function locationText(pin: { latitude: string; longitude: string } | null): string {
+  return pin ? `${Number(pin.latitude)}, ${Number(pin.longitude)}` : '';
+}
+
+function EditCustomerDialog({
+  customer,
+  pin,
+  onClose,
+}: {
+  customer: CustomerRecord;
+  pin: { latitude: string; longitude: string } | null;
+  onClose: () => void;
+}) {
   const t = useT();
+  const queries = useQueryClient();
   const [form, setForm] = useState({
     name: customer.name,
+    person: customer.contact.person ?? '',
     phone: customer.contact.phone ?? '',
+    location: locationText(pin),
+    landmark: customer.landmark ?? '',
+    photo: null as File | null,
     email: customer.contact.email ?? '',
     notes: customer.contact.notes ?? '',
     language: (customer.preferredLanguage ?? 'en') as Lang,
@@ -265,23 +411,43 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
   });
   const [problem, setProblem] = useState<string | null>(null);
   const [addingRoute, setAddingRoute] = useState<string | null>(null);
+  // Saved, but the photo didn't go: the next tap sends only the photo (saving again would be a stale version).
+  const [saved, setSaved] = useState<CustomerRecord | null>(null);
   const update = useAction(
-    (body: UpdateCustomerBody) => apiSend<CustomerRecord>('PATCH', `customers/${customer.id}`, body),
+    async (body: UpdateCustomerBody) => {
+      const after = saved ?? (await apiSend<CustomerRecord>('PATCH', `customers/${customer.id}`, body));
+      setSaved(after);
+      if (!form.photo) return after;
+      try {
+        return await uploadShopPhoto(customer.id, form.photo);
+      } catch (e) {
+        throw new Error(t('Saved, but the shop photo didn’t go: {reason} Try again, or remove the photo.', { reason: e instanceof Error ? e.message : String(e) }));
+      }
+    },
     CUSTOMER_EFFECTS,
     onClose,
   );
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
+  const close = () => {
+    if (saved) for (const key of CUSTOMER_EFFECTS) void queries.invalidateQueries({ queryKey: key });
+    onClose();
+  };
 
   const submit = () => {
     const name = checkName(form.name);
     const email = checkEmail(form.email);
-    const error = firstError([name, email]);
+    const location = parseLocation(form.location);
+    const error = firstError([name, email, location]);
     if (error) return setProblem(error);
     setProblem(null);
+    const at = (location as { value: { latitude: number; longitude: number } | null }).value;
+    // The pin only when it changed: moved, or emptied to take it away.
+    const moved = (at ? `${at.latitude}, ${at.longitude}` : '') !== locationText(pin);
     update.mutate({
       version: customer.version,
       name: (name as { value: string }).value,
       contact: {
+        person: optionalText(form.person),
         phone: optionalText(form.phone),
         email: (email as { value: string | undefined }).value,
         notes: optionalText(form.notes),
@@ -291,6 +457,8 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
       address: optionalText(form.address) ?? null,
       routeId: form.routeId || null,
       doNotCall: form.doNotCall,
+      landmark: optionalText(form.landmark) ?? null,
+      ...(moved && (at ? { latitude: at.latitude, longitude: at.longitude } : { latitude: null, longitude: null })),
     });
   };
 
@@ -298,17 +466,19 @@ function EditCustomerDialog({ customer, onClose }: { customer: CustomerRecord; o
     <>
       <FormDialog
       title={t('Edit {name}', { name: customer.name })}
-      submitLabel={t('Save')}
+      submitLabel={saved ? t('Send the photo again') : t('Save')}
       pending={update.isPending}
       error={problem ?? update.error}
-      onClose={onClose}
+      onClose={close}
       onSubmit={submit}
     >
       <Field label={t('Name')} wide>
         {(props) => <input {...props} value={form.name} onChange={(e) => set({ name: e.target.value })} />}
       </Field>
-      <ContactFields phone={form.phone} email={form.email} notes={form.notes} onChange={set} />
+      <WhoFields person={form.person} phone={form.phone} onChange={set} />
+      <ShopFields customer={customer} location={form.location} landmark={form.landmark} photo={form.photo} onChange={set} />
       <PlaceFields place={form.place} address={form.address} routeId={form.routeId} onChange={set} onAddRoute={setAddingRoute} />
+      <EmailNotesFields email={form.email} notes={form.notes} onChange={set} />
       <LanguageField value={form.language} onChange={(language) => set({ language })} />
       <label className="check-row" style={{ gridColumn: '1 / -1' }}>
         <input type="checkbox" checked={form.doNotCall} onChange={(e) => set({ doNotCall: e.target.checked })} />
@@ -479,7 +649,8 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
   const canOrder = hasPermission(session, 'orders:write');
   const profile = useCustomerProfile(id);
   const [tab, setTab] = useState<Tab>('overview');
-  const [open, setOpen] = useState<'edit' | 'credit' | 'archive' | 'payment' | 'qr' | null>(null);
+  const [open, setOpen] = useState<'edit' | 'credit' | 'archive' | 'payment' | 'qr' | 'opening' | null>(null);
+  const canPostOpening = useCanPostOpening();
   const close = () => setOpen(null);
   const customer = profile.data?.customer;
   const archived = customer?.status === 'archived';
@@ -545,15 +716,29 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
             ]}
           />
           <ContactActions phone={c.contact.phone} pin={pin} address={c.address ?? c.place} />
+          <ShopPhoto customer={c} canEdit={canWrite && !archived} />
           <KeyValues
             items={[
+              ['Contact person', c.contact.person ?? '—'],
+              ['Phone', c.contact.phone ?? '—'],
+              [
+                'Location',
+                pin ? (
+                  <a href={mapsLink(pin.latitude, pin.longitude)} target="_blank" rel="noopener noreferrer">
+                    {Number(pin.latitude)}, {Number(pin.longitude)}
+                  </a>
+                ) : (
+                  '—'
+                ),
+              ],
+              ['Landmark', c.landmark ?? '—'],
               ['Address', c.address ?? '—'],
               ['Route', routeName ?? '—'],
-              ['Phone', c.contact.phone ?? '—'],
               ['Email', c.contact.email ?? '—'],
               ['Language', languageName(c.preferredLanguage)],
               ...(c.doNotCall ? ([['AI calls', t('Do not call')]] as [string, string][]) : []),
               ...(money ?([['On-time payments', money.onTimePct === null ? '—' : `${money.onTimePct}%`]] as [string, string][]) : []),
+              ...(money ? ([['Opening balance', <OpeningBalanceLine key="ob" opening={money.openingBalance} currency={currency} />]] as [string, React.ReactNode][]) : []),
             ]}
           />
           {c.contact.notes && <p className="muted">{c.contact.notes}</p>}
@@ -576,6 +761,11 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
             {canSetCredit && !archived && (
               <button type="button" className="button" onClick={() => setOpen('credit')}>
                 {t('Credit terms')}
+              </button>
+            )}
+            {canPostOpening && money && !money.openingBalance && !archived && !c.isWalkIn && (
+              <button type="button" className="button" onClick={() => setOpen('opening')}>
+                {t('Opening balance')}
               </button>
             )}
             {!archived && !c.isWalkIn && (
@@ -676,10 +866,11 @@ function CustomerProfilePanel({ id, onClose }: { id: string; onClose: () => void
           <NoAccess what="finance" />
         ))}
 
-      {open === 'edit' && <EditCustomerDialog customer={c} onClose={close} />}
+      {open === 'edit' && <EditCustomerDialog customer={c} pin={pin} onClose={close} />}
       {open === 'credit' && <CreditTermsDialog customer={c} onClose={close} />}
       {open === 'payment' && <CustomerPaymentDialog customerId={c.id} customerName={c.name} currency={currency} onClose={close} />}
       {open === 'qr' && <DeliveryQrDialog customer={c} canWrite={canWrite} invalidates={[...CUSTOMER_EFFECTS, ['customers', 'profile', id]]} onClose={close} />}
+      {open === 'opening' && <OpeningBalanceDialog party="customer" id={c.id} name={c.name} onClose={close} />}
       {open === 'archive' && (
         <FormDialog
           title={archived ? t('Restore {name}?', { name: c.name }) : t('Archive {name}?', { name: c.name })}

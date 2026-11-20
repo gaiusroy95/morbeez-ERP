@@ -131,6 +131,17 @@ export class AdjustmentsRepository {
     };
   }
 
+  /** Whether the user holds the business's Owner role — the one who may approve a credit note on an invoice they issued (D10). */
+  async isOwnerWithClient(client: PoolClient, userId: string): Promise<boolean> {
+    const r = await client.query<{ owner: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM identity.user_role ur JOIN identity.role r ON r.id = ur.role_id WHERE ur.user_id = $1 AND r.name = 'Owner'
+       ) AS owner`,
+      [userId],
+    );
+    return r.rows[0].owner;
+  }
+
   /** What's under open dispute on the invoice, leaving one dispute out (the one being settled). */
   async openDisputedWithClient(client: PoolClient, invoiceId: string, exceptDisputeId: string | null): Promise<string> {
     const r = await client.query<{ disputed: string }>(

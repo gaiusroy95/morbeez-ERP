@@ -231,6 +231,13 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864000
     await page.locator('.list-card', { hasText: lateTrip.number }).click();
     await page.waitForFunction(() => /Planned/.test(document.querySelector('.detail')?.textContent ?? ''));
     await page.locator('.detail').getByRole('button', { name: 'Add delivery' }).click();
+    // Customer names arrive with the customers lookup; until then an order shows "#<id>".
+    await page
+      .waitForFunction(() => {
+        const first = document.querySelector('dialog[open] optgroup option');
+        return !!first && !/ · #[0-9a-f]{8}/.test(first.textContent ?? '');
+      }, null, { timeout: 15000 })
+      .catch(() => undefined);
     const group = await dialog().locator('optgroup').first().getAttribute('label').catch(() => null);
     const firstOption = (await dialog().getByLabel('Order').locator('option').nth(1).textContent()) ?? '';
     check('the trip planner lists orders planned for that day and driver first, by number', group === 'Planned for this trip' && /D-\d{5} · Hotel Sagar/.test(firstOption), `${group} | ${firstOption}`);

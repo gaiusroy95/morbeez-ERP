@@ -129,11 +129,11 @@
     <string name="or">ಅಥವಾ</string>
     <string name="photo_goods_attached">ಸರಕುಗಳ ಫೋಟೋ ಸೇರಿಸಲಾಗಿದೆ</string>
     <string name="photo_goods">ಡೆಲಿವರಿ ಮಾಡಿದ ಸರಕುಗಳ ಫೋಟೋ ತೆಗೆಯಿರಿ</string>
-    <string name="at_customer">ಗ್ರಾಹಕರ ಬಳಿ (ತೂಗಿದ್ದರೆ)</string>
+    <string name="at_customer">ಕಸ್ಟಮರ್‌ನ ಬಳಿ (ತೂಗಿದ್ದರೆ)</string>
     <string name="photo_scale_attached">ತಕ್ಕಡಿಯ ಫೋಟೋ ಸೇರಿಸಲಾಗಿದೆ</string>
-    <string name="photo_scale">ಗ್ರಾಹಕರ ತಕ್ಕಡಿಯ ಫೋಟೋ ತೆಗೆಯಿರಿ</string>
+    <string name="photo_scale">ಕಸ್ಟಮರ್‌ನ ತಕ್ಕಡಿಯ ಫೋಟೋ ತೆಗೆಯಿರಿ</string>
     <string name="farm_weight">ಫಾರ್ಮ್ ತೂಕ %1$s ಕೆ.ಜಿ</string>
-    <string name="customer_scale">ಗ್ರಾಹಕರ ತಕ್ಕಡಿ, ನಿವ್ವಳ ಕೆ.ಜಿ</string>
+    <string name="customer_scale">ಕಸ್ಟಮರ್‌ನ ತಕ್ಕಡಿ, ನಿವ್ವಳ ಕೆ.ಜಿ</string>
     <string name="shrinkage_less">%1$s ಕೆ.ಜಿ ಕಡಿಮೆ — %2$s%% ತೂಕ ನಷ್ಟ. ಅವರ ತೂಕಕ್ಕೆ ಬಿಲ್ ಮಾಡಲಾಗುತ್ತದೆ.</string>
     <string name="shrinkage_more">ಅವರ ತಕ್ಕಡಿಯಲ್ಲಿ %1$s ಕೆ.ಜಿ ಹೆಚ್ಚು. ಅವರ ತೂಕಕ್ಕೆ ಬಿಲ್ ಮಾಡಲಾಗುತ್ತದೆ.</string>
     <string name="egg_count">%1$s ಮೊಟ್ಟೆಗಳು</string>
@@ -158,7 +158,7 @@
 
     <string name="skip_eyebrow">ಈ ನಿಲುಗಡೆ ಬಿಡಿ</string>
     <string name="report_and_skip">ತಿಳಿಸಿ ಈ ನಿಲುಗಡೆ ಬಿಡಿ</string>
-    <string name="skip_intro">ಏನಾಯಿತು ಎಂದು ಹೇಳಿ ಫೋಟೋ ತೆಗೆಯಿರಿ: ಗ್ರಾಹಕರು ನಿರಾಕರಿಸಿದರು, ಅಂಗಡಿ ಮುಚ್ಚಿತ್ತು, ರೈತರ ಬಳಿ ಏನೂ ಇರಲಿಲ್ಲ. ಮಾಲೀಕರಿಗೆ ತಕ್ಷಣ ತಿಳಿಯುತ್ತದೆ.</string>
+    <string name="skip_intro">ಏನಾಯಿತು ಎಂದು ಹೇಳಿ ಫೋಟೋ ತೆಗೆಯಿರಿ: ಕಸ್ಟಮರ್ ನಿರಾಕರಿಸಿದರು, ಅಂಗಡಿ ಮುಚ್ಚಿತ್ತು, ರೈತರ ಬಳಿ ಏನೂ ಇರಲಿಲ್ಲ. ಮಾಲೀಕರಿಗೆ ತಕ್ಷಣ ತಿಳಿಯುತ್ತದೆ.</string>
     <string name="photo_problem_attached">ಸಮಸ್ಯೆಯ ಫೋಟೋ ಸೇರಿಸಲಾಗಿದೆ</string>
     <string name="photo_problem">ಸಮಸ್ಯೆಯ ಫೋಟೋ ತೆಗೆಯಿರಿ</string>
 
@@ -205,7 +205,7 @@
     <string name="submit_trip">ಟ್ರಿಪ್ ಸಲ್ಲಿಸಿ</string>
 
     <string name="farmer_pickup">ರೈತರ ಪಿಕಪ್</string>
-    <string name="customer_delivery">ಗ್ರಾಹಕ ಡೆಲಿವರಿ</string>
+    <string name="customer_delivery">ಕಸ್ಟಮರ್ ಡೆಲಿವರಿ</string>
     <string name="po_pickup">ಖರೀದಿ ಆರ್ಡರ್ ಪಿಕಪ್</string>
     <string name="no_items">ಸರಕುಗಳಿಲ್ಲ</string>
     <string name="and_n_more">%1$s ಮತ್ತು ಇನ್ನೂ %2$d</string>
@@ -477,12 +477,12 @@
     <string name="start_trip_first">ಮೊದಲು ಡೆಲಿವರಿ ಟ್ರಿಪ್ ಆರಂಭಿಸಿ: ಜಮೀನುಗಳು ಮುಗಿದ ನಂತರ \"ಟ್ರಿಪ್ ಆರಂಭಿಸಿ\" ಒತ್ತಿ.</string>
     <string name="deliver_first">ಮೊದಲು %1$s ಗೆ ಡೆಲಿವರಿ ಮಾಡಿ: ಅಂಗಡಿಗಳಿಗೆ ಕ್ರಮವಾಗಿ ಡೆಲಿವರಿ.</string>
     <string name="arrived_scan_qr">ತಲುಪಿದೆ — QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ</string>
-    <string name="scan_customer_qr">ಗ್ರಾಹಕರ QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ</string>
+    <string name="scan_customer_qr">ಕಸ್ಟಮರ್‌ನ QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ</string>
     <string name="start_navigation">ದಾರಿ ತೋರಿಸಲು ಆರಂಭಿಸಿ</string>
     <string name="scan_qr">QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ</string>
     <string name="scan_prompt">ಅಂಗಡಿಯ QR ಕಡೆ ಕ್ಯಾಮೆರಾ ಹಿಡಿಯಿರಿ</string>
-    <string name="scan_hint">ಗ್ರಾಹಕರನ್ನು ದೃಢಪಡಿಸಲು ಅಂಗಡಿಯ QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ.</string>
-    <string name="customer_verified">ಗ್ರಾಹಕರು ದೃಢಪಟ್ಟರು: %1$s</string>
+    <string name="scan_hint">ಕಸ್ಟಮರ್‌ನ್ನು ದೃಢಪಡಿಸಲು ಅಂಗಡಿಯ QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ.</string>
+    <string name="customer_verified">ಕಸ್ಟಮರ್ ದೃಢಪಟ್ಟರು: %1$s</string>
     <string name="wrong_qr">ಈ QR ಬೇರೆ ಅಂಗಡಿಯದು. %1$s ಅವರ QR ಸ್ಕ್ಯಾನ್ ಮಾಡಿ.</string>
     <string name="not_scanned_because">ಸ್ಕ್ಯಾನ್ ಆಗಿಲ್ಲ: %1$s</string>
     <string name="qr_missing_or_damaged">QR ಇಲ್ಲವೇ ಅಥವಾ ಹಾಳಾಗಿದೆಯೇ?</string>
@@ -497,7 +497,7 @@
     <string name="ordered_amount">ಆರ್ಡರ್ %1$s</string>
     <string name="delivered_label">ಡೆಲಿವರಿ (%1$s)</string>
     <string name="why_short">ಆರ್ಡರ್‌ಗಿಂತ ಕಡಿಮೆ — ಏಕೆ?</string>
-    <string name="short_customer_took_less">ಗ್ರಾಹಕರು ಕಡಿಮೆ ತೆಗೆದುಕೊಂಡರು</string>
+    <string name="short_customer_took_less">ಕಸ್ಟಮರ್ ಕಡಿಮೆ ತೆಗೆದುಕೊಂಡರು</string>
     <string name="short_not_enough">ವಾಹನದಲ್ಲಿ ಸಾಕಷ್ಟು ಇಲ್ಲ</string>
     <string name="all_unloaded_question">ಎಲ್ಲ ವಸ್ತುಗಳನ್ನು ಇಳಿಸಲಾಗಿದೆಯೇ?</string>
     <string name="yes">ಹೌದು</string>
@@ -508,7 +508,7 @@
     <string name="received_by">ಸ್ವೀಕರಿಸಿದವರು</string>
     <string name="received_by_name">%1$s ಸ್ವೀಕರಿಸಿದರು</string>
     <string name="photo_delivery_another">ಇನ್ನೊಂದು ಡೆಲಿವರಿ ಫೋಟೋ ಸೇರಿಸಿ</string>
-    <string name="check_qr">ಗ್ರಾಹಕರ QR</string>
+    <string name="check_qr">ಕಸ್ಟಮರ್‌ನ QR</string>
     <string name="check_quantities">ಪ್ರಮಾಣಗಳು</string>
     <string name="check_unloaded">ಇಳಿಸಲಾಗಿದೆ</string>
     <string name="check_photo">ಡೆಲಿವರಿ ಫೋಟೋ</string>
@@ -535,7 +535,7 @@
     <string name="balance">ಬಾಕಿ ಮೊತ್ತ</string>
     <string name="pending_n">ಬಾಕಿ (%1$d)</string>
     <string name="collected_n">ವಸೂಲಾದವು (%1$d)</string>
-    <string name="nothing_to_collect_yet">ಇನ್ನೂ ವಸೂಲಿ ಮಾಡಲು ಏನೂ ಇಲ್ಲ: ಡೆಲಿವರಿ ಆದ ನಂತರ ಗ್ರಾಹಕರು ಇಲ್ಲಿ ಕಾಣುತ್ತಾರೆ.</string>
+    <string name="nothing_to_collect_yet">ಇನ್ನೂ ವಸೂಲಿ ಮಾಡಲು ಏನೂ ಇಲ್ಲ: ಡೆಲಿವರಿ ಆದ ನಂತರ ಕಸ್ಟಮರ್‌ಗಳು ಇಲ್ಲಿ ಕಾಣುತ್ತಾರೆ.</string>
     <string name="outstanding">ಬಾಕಿ</string>
     <string name="outstanding_balance">ಒಟ್ಟು ಬಾಕಿ</string>
     <string name="after_sync">ಸಿಂಕ್ ನಂತರ</string>
@@ -545,10 +545,10 @@
     <string name="collected_today">ಇಂದು ವಸೂಲಾದದ್ದು</string>
     <string name="total_collected">ಒಟ್ಟು ವಸೂಲಿ</string>
     <plurals name="pending_customers">
-        <item quantity="one">%1$d ಗ್ರಾಹಕರು ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು</item>
-        <item quantity="other">%1$d ಗ್ರಾಹಕರು ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು</item>
+        <item quantity="one">%1$d ಕಸ್ಟಮರ್ ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು</item>
+        <item quantity="other">%1$d ಕಸ್ಟಮರ್‌ಗಳು ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು</item>
     </plurals>
-    <string name="only_delivered_shown">ಈ ಟ್ರಿಪ್‌ನಲ್ಲಿ ಡೆಲಿವರಿ ಆದ ಗ್ರಾಹಕರನ್ನು ಮಾತ್ರ ತೋರಿಸಲಾಗಿದೆ.</string>
+    <string name="only_delivered_shown">ಈ ಟ್ರಿಪ್‌ನಲ್ಲಿ ಡೆಲಿವರಿ ಆದ ಕಸ್ಟಮರ್‌ಗಳನ್ನು ಮಾತ್ರ ತೋರಿಸಲಾಗಿದೆ.</string>
     <string name="hold_to_receive">ಒತ್ತಿ ಹಿಡಿದು ₹%1$s ಸ್ವೀಕರಿಸಿ</string>
     <string name="more_than_owed">ಬಾಕಿಗಿಂತ ಹೆಚ್ಚು: ಗರಿಷ್ಠ ₹%1$s.</string>
     <string name="payment_method">ಪಾವತಿ ವಿಧಾನ</string>
@@ -556,11 +556,11 @@
     <string name="cash_to_hand_over_note">ನಗದು: ಇದನ್ನು ಮಾಲೀಕರಿಗೆ ಒಪ್ಪಿಸಿ.</string>
     <string name="direct_note">ನೇರವಾಗಿ ವ್ಯವಹಾರಕ್ಕೆ: ನೀವು ಒಪ್ಪಿಸುವುದರಲ್ಲಿ ಸೇರುವುದಿಲ್ಲ.</string>
     <string name="paid_by">ಪಾವತಿಸಿದವರು</string>
-    <string name="paid_by_customer">ಗ್ರಾಹಕರು</string>
+    <string name="paid_by_customer">ಕಸ್ಟಮರ್</string>
     <string name="paid_by_someone_else">ಬೇರೊಬ್ಬರು</string>
     <string name="who_paid">ಯಾರು ಪಾವತಿಸಿದರು (ಹೆಸರು)</string>
     <string name="photo_payment_proof">ಪಾವತಿ ಪುರಾವೆಯ ಫೋಟೋ (ಐಚ್ಛಿಕ)</string>
-    <string name="customer_disputes">ಗ್ರಾಹಕರು ಒಂದು ಮೊತ್ತದ ಬಗ್ಗೆ ವಿವಾದಿಸುತ್ತಾರೆಯೇ?</string>
+    <string name="customer_disputes">ಕಸ್ಟಮರ್ ಒಂದು ಮೊತ್ತದ ಬಗ್ಗೆ ವಿವಾದಿಸುತ್ತಾರೆಯೇ?</string>
     <string name="disputed_amount">ವಿವಾದಿತ ಮೊತ್ತ</string>
     <string name="dispute_hint">ಇದು ಮಾಲೀಕರಿಗೆ ಹೋಗುತ್ತದೆ, ಅವರು ಇತ್ಯರ್ಥಪಡಿಸುತ್ತಾರೆ. ನೀವು ಏನನ್ನೂ ಮನ್ನಾ ಮಾಡುವಂತಿಲ್ಲ.</string>
     <string name="what_they_dispute">ಯಾವುದರ ಬಗ್ಗೆ ವಿವಾದ, ಏಕೆ</string>
@@ -569,14 +569,14 @@
     <string name="return_to_base">ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ</string>
     <string name="return_hint">ಬೇಸ್ ತಲುಪಿದಿರಾ? ಅಂತಿಮ ಕಿ.ಮೀ ದಾಖಲಿಸಿ.</string>
     <plurals name="collect_then_return">
-        <item quantity="one">%d ಗ್ರಾಹಕರು ಇನ್ನೂ ಕೊಡಬೇಕು. ವಸೂಲಿ ಮಾಡಿ, ನಂತರ ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ.</item>
-        <item quantity="other">%d ಗ್ರಾಹಕರು ಇನ್ನೂ ಕೊಡಬೇಕು. ವಸೂಲಿ ಮಾಡಿ, ನಂತರ ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ.</item>
+        <item quantity="one">%d ಕಸ್ಟಮರ್ ಇನ್ನೂ ಕೊಡಬೇಕು. ವಸೂಲಿ ಮಾಡಿ, ನಂತರ ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ.</item>
+        <item quantity="other">%d ಕಸ್ಟಮರ್‌ಗಳು ಇನ್ನೂ ಕೊಡಬೇಕು. ವಸೂಲಿ ಮಾಡಿ, ನಂತರ ಬೇಸ್‌ಗೆ ಹಿಂತಿರುಗಿ.</item>
     </plurals>
     <plurals name="n_due">
         <item quantity="one">%d ಬಾಕಿ</item>
         <item quantity="other">%d ಬಾಕಿ</item>
     </plurals>
-    <string name="collect_before_return">%1$d ಗ್ರಾಹಕರು ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು. ಸಾಧ್ಯವಾದರೆ ಹೊರಡುವ ಮೊದಲು ವಸೂಲಿ ಮಾಡಿ.</string>
+    <string name="collect_before_return">%1$d ಕಸ್ಟಮರ್‌ಗಳು ಇನ್ನೂ ₹%2$s ಕೊಡಬೇಕು. ಸಾಧ್ಯವಾದರೆ ಹೊರಡುವ ಮೊದಲು ವಸೂಲಿ ಮಾಡಿ.</string>
     <string name="confirm_km">ಕಿ.ಮೀ ದೃಢಪಡಿಸಿ</string>
     <string name="km_value">%1$s ಕಿ.ಮೀ</string>
     <string name="closing_km">ಅಂತಿಮ ಕಿ.ಮೀ</string>
@@ -825,7 +825,7 @@
     <string name="inc_fixed_pay">ನಿಗದಿತ ವೇತನ</string>
     <string name="inc_fixed_pay_sub">ಕೆಲಸ ಮಾಡಿದ ದಿನಗಳ ದಿನಗೂಲಿ</string>
     <string name="inc_collection">ಸಂಗ್ರಹಣಾ ಪ್ರೋತ್ಸಾಹಧನ</string>
-    <string name="inc_collection_sub">ಗ್ರಾಹಕರಿಂದ ಸಂಗ್ರಹಣೆ</string>
+    <string name="inc_collection_sub">ಕಸ್ಟಮರ್‌ನಿಂದ ಸಂಗ್ರಹಣೆ</string>
     <string name="inc_backhaul">ಬ್ಯಾಕ್‌ಹಾಲ್ ಪ್ರೋತ್ಸಾಹಧನ</string>
     <string name="inc_backhaul_sub">ಪೂರ್ಣಗೊಂಡ ಬ್ಯಾಕ್‌ಹಾಲ್</string>
     <string name="inc_mileage">ಮೈಲೇಜ್ ಪ್ರೋತ್ಸಾಹಧನ</string>
@@ -834,8 +834,8 @@
     <string name="inc_crates_sub">ಮರಳಿ ತಂದ ಕ್ರೇಟ್‌ಗಳು</string>
     <string name="inc_quality">ಗುಣಮಟ್ಟ ಪ್ರೋತ್ಸಾಹಧನ</string>
     <string name="inc_quality_sub">ಯಾವುದೇ ವಿತರಣೆ ಕಡಿಮೆ ಇಲ್ಲ</string>
-    <string name="inc_new_customer">ಹೊಸ ಗ್ರಾಹಕ</string>
-    <string name="inc_new_customer_sub">ಹೊಸ ಗ್ರಾಹಕರಿಗೆ ಮೊದಲ ವಿತರಣೆ</string>
+    <string name="inc_new_customer">ಹೊಸ ಕಸ್ಟಮರ್</string>
+    <string name="inc_new_customer_sub">ಹೊಸ ಕಸ್ಟಮರ್‌ಗೆ ಮೊದಲ ವಿತರಣೆ</string>
     <string name="inc_performance">ಕಾರ್ಯಕ್ಷಮತೆ</string>
     <string name="inc_performance_sub">ಎಲ್ಲಾ ಸ್ಟಾಪ್ ಮುಗಿದಿದೆ</string>
     <string name="inc_night_duty">ರಾತ್ರಿ ಕರ್ತವ್ಯ</string>
@@ -939,15 +939,15 @@
     <string name="exp_paid_fastag">FASTag</string>
     <string name="exp_fastag_hint">ವಾಹನದ FASTag ನಿಂದ — ನಿಮ್ಮ ನಗದಿನಿಂದ ಅಲ್ಲ. ಬಿಲ್ ಬೇಡ: ಇದು ಟ್ಯಾಗ್‌ನ ಸ್ಟೇಟ್‌ಮೆಂಟ್‌ನಲ್ಲಿದೆ.</string>
     <string name="req_title">ಕಚೇರಿಗೆ ಕೇಳಿ</string>
-    <string name="req_eyebrow">ಮುಂಗಡ, ಹೊಸ ಗ್ರಾಹಕ, ಸಾಲ ಮಿತಿ</string>
+    <string name="req_eyebrow">ಮುಂಗಡ, ಹೊಸ ಕಸ್ಟಮರ್, ಸಾಲ ಮಿತಿ</string>
     <string name="req_what">ನಿಮಗೆ ಏನು ಬೇಕು?</string>
     <string name="req_advance">ಮುಂಗಡ</string>
-    <string name="req_new_customer">ಹೊಸ ಗ್ರಾಹಕ</string>
+    <string name="req_new_customer">ಹೊಸ ಕಸ್ಟಮರ್</string>
     <string name="req_credit_limit">ಸಾಲ ಮಿತಿ</string>
     <string name="req_advance_hint">ನಿಮ್ಮ ವೇತನದ ಮುಂಗಡ — ವೇತನ ಇತ್ಯರ್ಥವಾಗುವಾಗ ಹಿಂಪಡೆಯಲಾಗುತ್ತದೆ.</string>
-    <string name="req_limit_hint">ಈ ಪ್ರವಾಸದ ಗ್ರಾಹಕರಿಗೆ ಹೆಚ್ಚಿನ ಸಾಲ ಮಿತಿ.</string>
-    <string name="req_no_customers">ಇಂದಿನ ಪ್ರವಾಸದಲ್ಲಿ ಗ್ರಾಹಕರಿಲ್ಲ — ಸಾಲ ಮಿತಿಯನ್ನು ಅವರಲ್ಲಿ ಒಬ್ಬರಿಗೆ ಕೇಳಲಾಗುತ್ತದೆ.</string>
-    <string name="req_customer">ಗ್ರಾಹಕ</string>
+    <string name="req_limit_hint">ಈ ಪ್ರವಾಸದ ಕಸ್ಟಮರ್‌ಗೆ ಹೆಚ್ಚಿನ ಸಾಲ ಮಿತಿ.</string>
+    <string name="req_no_customers">ಇಂದಿನ ಪ್ರವಾಸದಲ್ಲಿ ಕಸ್ಟಮರ್ ಇಲ್ಲ — ಸಾಲ ಮಿತಿಯನ್ನು ಅವರಲ್ಲಿ ಒಬ್ಬರಿಗೆ ಕೇಳಲಾಗುತ್ತದೆ.</string>
+    <string name="req_customer">ಕಸ್ಟಮರ್</string>
     <string name="req_limit_amount">ಕೇಳುವ ಮಿತಿ</string>
     <string name="req_customer_hint">ದಾರಿಯಲ್ಲಿ ಕಂಡ ಅಂಗಡಿ. ಕಚೇರಿ ಒಪ್ಪಿದರೆ ಸೇರಿಸುತ್ತದೆ.</string>
     <string name="req_shop_name">ಅಂಗಡಿಯ ಹೆಸರು</string>
@@ -971,9 +971,9 @@
     <string name="req_refused">ನಿರಾಕರಿಸಲಾಗಿದೆ — ಸಿಂಕ್ ನೋಡಿ</string>
     <string name="req_approved_note">ಅನುಮೋದಿಸಲಾಗಿದೆ: %1$s</string>
     <string name="req_done_advance">ಅನುಮೋದಿಸಲಾಗಿದೆ — ಮುಂಗಡ ಬರುತ್ತಿದೆ.</string>
-    <string name="req_done_customer">ಅನುಮೋದಿಸಲಾಗಿದೆ — ಗ್ರಾಹಕರನ್ನು ಸೇರಿಸಲಾಗಿದೆ.</string>
+    <string name="req_done_customer">ಅನುಮೋದಿಸಲಾಗಿದೆ — ಕಸ್ಟಮರ್‌ನ್ನು ಸೇರಿಸಲಾಗಿದೆ.</string>
     <string name="req_done_limit">ಅನುಮೋದಿಸಲಾಗಿದೆ — ಮಿತಿ ಬದಲಾಗಿದೆ.</string>
-    <string name="appr_new_customer_title">ಹೊಸ ಗ್ರಾಹಕ: %1$s</string>
+    <string name="appr_new_customer_title">ಹೊಸ ಕಸ್ಟಮರ್: %1$s</string>
     <string name="appr_credit_title">ಸಾಲ ಮಿತಿ: %1$s</string>
     <string name="veh_fastag">FASTag ಬಾಕಿ</string>
     <string name="veh_fastag_low">ಕಡಿಮೆ</string>

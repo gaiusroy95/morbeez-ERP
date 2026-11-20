@@ -1,6 +1,8 @@
 export type CustomerStatus = 'active' | 'archived';
 
 export interface CustomerContact {
+  /** Who to ask for at the shop. */
+  person?: string;
   phone?: string;
   email?: string;
   notes?: string;
@@ -15,6 +17,10 @@ export interface CustomerRecord {
   place: string | null;
   /** Where orders are delivered unless an order says otherwise. */
   address: string | null;
+  /** How a driver finds the shop ("opposite the bus stand"). */
+  landmark: string | null;
+  /** The shop's front, photographed when the customer was taken down — never where it is kept. */
+  shopPhoto: { uploadedAt: Date } | null;
   /** The route the customer is usually delivered on. */
   routeId: string | null;
   /** What statements, reminders and WhatsApp messages go out in; tax invoices stay English. */

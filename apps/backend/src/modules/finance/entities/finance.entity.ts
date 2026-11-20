@@ -48,12 +48,16 @@ export interface PayablesReport {
 }
 
 export interface PayableLot {
-  lotId: string;
-  purchaseOrderId: string;
-  productId: string;
+  /** What a payment's allocation names (a lot's, or the opening balance's). */
+  payableId: string;
+  /** 'opening': owed when the business moved onto Morbeez — no lot. */
+  kind: 'lot' | 'opening';
+  lotId: string | null;
+  purchaseOrderId: string | null;
+  productId: string | null;
   productName: string;
-  acceptedQuantity: string;
-  unitCost: string;
+  acceptedQuantity: string | null;
+  unitCost: string | null;
   amount: string;
   paid: string;
   outstanding: string;

@@ -3,11 +3,10 @@ import { IsIn, IsISO8601, IsNumber, IsOptional, IsString, MaxLength, Min } from 
 import { PaymentMethod } from '../entities/finance-engine.entity';
 import { PAYMENT_METHODS } from './record-customer-payment.dto';
 
-// Commission paid to an agent (AGT.2): no more than they're owed. TDS is
-// withheld only when a section is given — 194H for commission, which only
-// payers liable to tax audit must deduct.
+// Commission paid to an agent (AGT.2): no more than they're owed. No TDS —
+// the client confirmed it doesn't apply to agent commission (10 Nov 2026).
 export class RecordAgentPaymentDto {
-  @ApiProperty({ minimum: 0.01, description: 'Commission settled (₹), before any TDS' })
+  @ApiProperty({ minimum: 0.01, description: 'Commission settled (₹)' })
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount!: number;
@@ -26,10 +25,4 @@ export class RecordAgentPaymentDto {
   @IsOptional()
   @IsISO8601()
   paidAt?: string;
-
-  @ApiPropertyOptional({ example: '194H', description: 'Withhold TDS under this section' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(12)
-  tdsSectionCode?: string;
 }

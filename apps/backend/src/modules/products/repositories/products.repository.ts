@@ -15,6 +15,7 @@ interface ProductRow {
   kind: ProductKind;
   pack_size: number | null;
   loss_tolerance_pct: string | null;
+  unit_weight_kg: string | null;
   status: 'active' | 'archived';
   version: number;
   created_at: Date;
@@ -33,6 +34,7 @@ function toRecord(row: ProductRow): ProductRecord {
     kind: row.kind ?? 'standard',
     packSize: row.pack_size ?? null,
     lossTolerancePct: row.loss_tolerance_pct ?? null,
+    unitWeightKg: row.unit_weight_kg ?? null,
     status: row.status,
     version: row.version,
     createdAt: row.created_at,
@@ -94,12 +96,13 @@ export class ProductsRepository {
       kind: ProductKind;
       packSize: number | null;
       lossTolerancePct: number | null;
+      unitWeightKg: number | null;
     },
   ): Promise<ProductRecord> {
     const result = await client.query<ProductRow>(
       `INSERT INTO trading_partners.product
-         (tenant_id, name, category, base_uom, base_price, created_by, kind, pack_size, loss_tolerance_pct)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (tenant_id, name, category, base_uom, base_price, created_by, kind, pack_size, loss_tolerance_pct, unit_weight_kg)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         tenantId,
@@ -111,6 +114,7 @@ export class ProductsRepository {
         fields.kind,
         fields.packSize,
         fields.lossTolerancePct,
+        fields.unitWeightKg,
       ],
     );
     return toRecord(result.rows[0]);
@@ -127,6 +131,7 @@ export class ProductsRepository {
       basePrice: number | null;
       packSize: number;
       lossTolerancePct: number | null;
+      unitWeightKg: number | null;
     }>,
   ): Promise<ProductRecord> {
     // null clears basePrice / lossTolerancePct; undefined leaves them be.
@@ -138,6 +143,8 @@ export class ProductsRepository {
          base_price = CASE WHEN $7 THEN $6::numeric ELSE base_price END,
          pack_size = COALESCE($8, pack_size),
          loss_tolerance_pct = CASE WHEN $10 THEN $9::numeric ELSE loss_tolerance_pct END,
+         -- A product now sold by weight needs no weight per unit.
+         unit_weight_kg = CASE WHEN COALESCE($5, base_uom) IN ('kg', 'g') THEN NULL WHEN $12 THEN $11::numeric ELSE unit_weight_kg END,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -153,6 +160,8 @@ export class ProductsRepository {
         fields.packSize,
         fields.lossTolerancePct ?? null,
         fields.lossTolerancePct !== undefined,
+        fields.unitWeightKg ?? null,
+        fields.unitWeightKg !== undefined,
       ],
     );
     if (result.rowCount === 0) {

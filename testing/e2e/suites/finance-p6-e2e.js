@@ -4,7 +4,7 @@
 //   F2 a dispute settled with accepted and rejected amounts, the paused charge
 //      caught up once — and resumed after 30 days without action;
 //   F3 a bad debt written off with its provision, the customer held for review;
-//   F4 agent commission at grading, paid with TDS 194H;
+//   F4 agent commission at grading, paid in full (no TDS — the client, 10 Nov 2026);
 //   F5 the finance charge switch and the 18% cost of capital;
 //   F6 credit terms as dated versions; F7 farmer terms, due dates, overdue,
 //   average payment days; F8 customer Bill-to-Bill.
@@ -128,16 +128,21 @@ const addDays = (d, n) => {
     check('F4: a purchase with no agent earns none', (await owner.get(`/finance/agents/${agent.id}`)).earned === '720.00');
     const tooMuch = await accountant.raw('POST', `/finance/agents/${agent.id}/payments`, { amount: 720.01, method: 'bank_transfer' });
     check('F4: paying an agent more than is owed is refused', tooMuch.status === 409, String(tooMuch.status));
-    const paid = await accountant.post(`/finance/agents/${agent.id}/payments`, { amount: 720, method: 'bank_transfer', reference: `UTR${s}`, tdsSectionCode: '194H' });
-    check('F4: paid under 194H — 2% withheld with a PAN, ₹705.60 reaches the agent', paid.tdsSection === '194H' && paid.tdsAmount === '14.40' && paid.netPaid === '705.60', JSON.stringify(paid));
+    const withTds = await accountant.raw('POST', `/finance/agents/${agent.id}/payments`, { amount: 720, method: 'bank_transfer', tdsSectionCode: '194H' });
+    check('F4: no TDS on agent commission — the client confirmed it doesn’t apply', withTds.status === 400, String(withTds.status));
+    const paid = await accountant.post(`/finance/agents/${agent.id}/payments`, { amount: 720, method: 'bank_transfer', reference: `UTR${s}` });
+    check('F4: the commission is paid in full', paid.amount === '720.00' && paid.tdsSection === null && paid.tdsAmount === '0.00' && paid.netPaid === '720.00', JSON.stringify(paid));
+    const payLines = (
+      await db.query(
+        `SELECT l.account_code, l.party_type, l.debit::text, l.credit::text FROM money.ledger_line l JOIN money.ledger_entry e ON e.id = l.entry_id
+          WHERE e.entry_type = 'agent_paid' AND e.source_id = $1 ORDER BY l.debit DESC`,
+        [paid.id],
+      )
+    ).rows.map((r) => `${r.account_code}:${r.party_type ?? '-'}:${r.debit}/${r.credit}`);
+    check('F4: Dr Accounts payable — agents (the agent) / Cr Bank', payLines.join(' ') === 'accounts_payable_agent:agent:720.00/0.00 bank:-:0.00/720.00', payLines.join(' '));
     account = await owner.get(`/finance/agents/${agent.id}`);
     check('F4: …and nothing more is owed', account.owed === '0.00' && account.settled === '720.00', account.owed);
-    const [y, m] = today.split('-').map(Number);
-    const fy = m >= 4 ? `${y}-${String((y + 1) % 100).padStart(2, '0')}` : `${y - 1}-${String(y % 100).padStart(2, '0')}`;
-    const quarter = m >= 4 && m <= 6 ? 1 : m <= 9 && m >= 7 ? 2 : m >= 10 ? 3 : 4;
-    const register = await owner.get(`/tax/tds/register?fy=${fy}&quarter=${quarter}`);
-    const d194h = register.deductions.find((d) => d.sectionCode === '194H' && d.payeeName === agent.name);
-    check('F4: the deduction is in the TDS register under 194H, against the PAN', d194h?.tdsAmount === '14.40' && d194h?.payeePan === 'ABCPR1234K' && d194h?.sourceType === 'agent_payment', JSON.stringify(d194h));
+
 
     // ---- F5 / F6: the finance charge switch, terms as versions, 18% cost of capital ----
     let h = await owner.get(`/customers/${hotel.id}`);
@@ -171,10 +176,18 @@ const addDays = (d, n) => {
     check('sale: 400 kg × ₹50 + 5% GST = ₹21,000, issued by the owner', inv1.amount === '21000.00' && inv1.credited === '0.00' && inv1.writtenOff === '0.00', `${inv1.amount} ${inv1.createdBy}`);
 
     // ---- F1: credit notes ----
-    const own = await owner.raw('POST', '/finance/credit-notes', { invoiceId: inv1.id, amount: 1050, reason: 'Six bags damp on arrival' });
-    check('F1/CN.4: the invoice’s issuer can’t approve a credit note against it', own.status === 403, `${own.status} ${own.body?.error?.message}`);
-    const cn1 = await accountant.post('/finance/credit-notes', { invoiceId: inv1.id, amount: 1050, reason: 'Six bags damp on arrival' });
-    check('F1/CN.1: someone else issues it — CN-…, ₹1,000 value + ₹25 CGST + ₹25 SGST', /^CN-\d{6}$/.test(cn1.creditNoteNumber) && cn1.taxableValue === '1000.00' && cn1.cgst === '25.00' && cn1.sgst === '25.00' && cn1.amount === '1050.00', JSON.stringify(cn1));
+    const cn1 = await owner.post('/finance/credit-notes', { invoiceId: inv1.id, amount: 1050, reason: 'Six bags damp on arrival' });
+    check('F1/CN.1, D10: the owner credits an invoice they issued — CN-…, ₹1,000 value + ₹25 CGST + ₹25 SGST', /^CN-\d{6}$/.test(cn1.creditNoteNumber) && cn1.taxableValue === '1000.00' && cn1.cgst === '25.00' && cn1.sgst === '25.00' && cn1.amount === '1050.00', JSON.stringify(cn1));
+    // CN.4 for anyone else: an invoice the accountant issued (arranged here — invoices come from deliveries).
+    const accInvoice = await sell(hotel, 20);
+    await db.query(`UPDATE money.invoice SET created_by = (SELECT id FROM identity.app_user WHERE email = 'accountant@dev.morbeez.local') WHERE id = $1`, [accInvoice.id]);
+    const accOwn = await accountant.raw('POST', '/finance/credit-notes', { invoiceId: accInvoice.id, amount: 105, reason: 'Two bags soft' });
+    check('F1/CN.4: anyone but the owner who issued an invoice can’t approve a credit note against it', accOwn.status === 403, `${accOwn.status} ${accOwn.body?.error?.message}`);
+    const accDispute = await owner.post('/finance/disputes', { invoiceId: accInvoice.id, amount: 210, reason: 'Four bags soft' });
+    const accAccept = await accountant.raw('POST', `/finance/disputes/${accDispute.id}/close`, { version: accDispute.version, outcome: 'resolved', resolution: 'Half accepted', acceptedAmount: 105 });
+    check('F2/CN.4: …nor accept part of a dispute on it (that is a credit note too)', accAccept.status === 403, String(accAccept.status));
+    const ownerAccept = await owner.post(`/finance/disputes/${accDispute.id}/close`, { version: accDispute.version, outcome: 'resolved', resolution: 'Half accepted', acceptedAmount: 105 });
+    check('F2/D10: the owner can', ownerAccept.acceptedAmount === '105.00' && /^CN-\d{6}$/.test(ownerAccept.creditNoteNumber ?? ''), JSON.stringify({ a: ownerAccept.acceptedAmount, cn: ownerAccept.creditNoteNumber }));
     const after1 = await owner.get(`/finance/invoices/${inv1.id}`);
     check('F1: the invoice is untouched; what’s owed comes down', after1.amount === '21000.00' && after1.credited === '1050.00' && after1.outstanding === '19950.00', `${after1.amount} ${after1.credited} ${after1.outstanding}`);
     const over = await accountant.raw('POST', '/finance/credit-notes', { invoiceId: inv1.id, amount: 19950.01, reason: 'Too much' });
@@ -234,10 +247,8 @@ const addDays = (d, n) => {
     const staleAlert = (await owner.get('/alerts?unread=true')).find((a) => a.kind === 'dispute_stale' && a.title.includes(hotel.name));
     check('F2: …with a critical exception for the owner', staleAlert?.severity === 'critical', staleAlert?.title);
 
-    // The owner issued inv1, so their accepting part of a dispute on it is refused; withdrawing accepts nothing.
+    // While a dispute is open nothing is written off; withdrawing one accepts nothing.
     const d2 = await owner.post('/finance/disputes', { invoiceId: inv1.id, amount: 500, reason: 'Two bags short' });
-    const ownAccept = await owner.raw('POST', `/finance/disputes/${d2.id}/close`, { version: d2.version, outcome: 'resolved', resolution: 'Accepted', acceptedAmount: 100 });
-    check('F2/CN.4: accepting part of a dispute is a credit note — refused to the invoice’s issuer', ownAccept.status === 403, String(ownAccept.status));
     const blockedWo = await accountant.raw('POST', `/finance/invoices/${inv1.id}/write-off`, { reason: 'Gone' });
     check('F3: nothing is written off while a dispute on it is open', blockedWo.status === 409, String(blockedWo.status));
     const withdrawnAccept = await owner.raw('POST', `/finance/disputes/${d2.id}/close`, { version: d2.version, outcome: 'withdrawn', resolution: 'Found the bags', acceptedAmount: 50 });
@@ -370,15 +381,15 @@ const addDays = (d, n) => {
       await page.getByRole('dialog').getByLabel('Customer').selectOption(hotel.id);
       await page.getByRole('dialog').getByLabel('Invoice').selectOption(inv1.id);
       const hint = await page.getByRole('dialog').locator('.field-hint').first().textContent();
-      check('UI: the issuer of the invoice is told someone else must approve its credit note', /someone else has to approve/.test(hint ?? ''), hint);
-      if (shots) await page.screenshot({ path: path.join(shots, 'p6-credit-note-cn4.png') });
+      check('UI: the owner may credit an invoice they issued — no block, just how much is owed', /^Up to/.test(hint ?? ''), hint);
+      if (shots) await page.screenshot({ path: path.join(shots, 'p6-credit-note-dialog.png') });
       await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
 
       await page.goto(`${BASE}/finance#agents`);
       await page.getByRole('button', { name: agent.name }).click();
       await page.locator('table[aria-label="Commission earned"]', { hasText: '480' }).waitFor();
       const ag = (await page.locator('main').textContent()).replace(/\s+/g, ' ');
-      check('UI: Agent commission shows earned, paid, owed and each lot × rate', /PAN ABCPR1234K/.test(ag) && /194H/.test(ag), ag.slice(0, 200));
+      check('UI: Agent commission shows earned, paid, owed and each lot × rate — no TDS', /PAN ABCPR1234K/.test(ag) && /₹1\.50/.test(ag) && !/TDS|194H/.test(ag), ag.slice(0, 200));
       if (shots) await page.screenshot({ path: path.join(shots, 'p6-agent-commission.png'), fullPage: true });
 
       await page.goto(`${BASE}/finance#disputes`);

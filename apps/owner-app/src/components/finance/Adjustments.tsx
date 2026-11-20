@@ -44,7 +44,7 @@ export function Adjustments() {
       >
         <p className="muted panel-note">
           A credit note lowers what a customer owes on one invoice — GST included — and books it to sales returns. It
-          needs someone other than whoever issued the invoice. Accepting a dispute issues one by itself.
+          needs someone other than whoever issued the invoice — or the owner. Accepting a dispute issues one by itself.
         </p>
         {notes.isPending ? (
           <SkeletonLines lines={3} />
@@ -140,7 +140,7 @@ export function Adjustments() {
         )}
       </Panel>
 
-      {issuing && <CreditNoteDialog currency={currency} userId={session?.userId ?? ''} onClose={() => setIssuing(false)} />}
+      {issuing && <CreditNoteDialog currency={currency} userId={session?.userId ?? ''} isOwner={session?.roles.includes('Owner') ?? false} onClose={() => setIssuing(false)} />}
       {writing && <WriteOffDialog currency={currency} onClose={() => setWriting(false)} />}
     </>
   );
@@ -204,14 +204,15 @@ function InvoicePicker({
   );
 }
 
-function CreditNoteDialog({ currency, userId, onClose }: { currency: string; userId: string; onClose: () => void }) {
+function CreditNoteDialog({ currency, userId, isOwner, onClose }: { currency: string; userId: string; isOwner: boolean; onClose: () => void }) {
   const [customerId, setCustomerId] = useState('');
   const [invoice, setInvoice] = useState<InvoiceRecord | null>(null);
   const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const issue = useAction((body: { invoiceId: string; amount: number; reason: string }) => apiSend('POST', 'finance/credit-notes', body), REFRESH, onClose);
-  const ownInvoice = !!invoice && invoice.createdBy === userId;
+  // CN.4: whoever issued the invoice can't approve its credit note — the owner may (the client's decision, 10 Nov 2026).
+  const ownInvoice = !!invoice && invoice.createdBy === userId && !isOwner;
 
   return (
     <FormDialog

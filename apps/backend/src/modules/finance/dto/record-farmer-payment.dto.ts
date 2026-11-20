@@ -16,10 +16,17 @@ import {
 import { PaymentMethod } from '../entities/finance-engine.entity';
 import { PAYMENT_METHODS } from './record-customer-payment.dto';
 
+/** A lot by its id — or, for what's owed without a lot (an opening balance), the payable's id. Exactly one. */
 export class LotAllocationDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  lotId!: string;
+  lotId?: string;
+
+  @ApiPropertyOptional({ description: 'The payable, for an opening balance (no lot)' })
+  @IsOptional()
+  @IsUUID()
+  payableId?: string;
 
   @ApiProperty({ minimum: 0.01 })
   @IsNumber({ maxDecimalPlaces: 2 })

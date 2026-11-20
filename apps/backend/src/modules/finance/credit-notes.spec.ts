@@ -18,10 +18,11 @@ const invoice: AdjustableInvoice = {
   createdBy: 'driver-user',
 };
 
-function build(over: Partial<AdjustableInvoice> = {}, disputed = '0.00') {
+function build(over: Partial<AdjustableInvoice> = {}, disputed = '0.00', owner = false) {
   const postings: LedgerPosting<string>[] = [];
   const repo = {
     invoiceWithClient: jest.fn().mockResolvedValue({ ...invoice, ...over }),
+    isOwnerWithClient: jest.fn().mockResolvedValue(owner),
     openDisputedWithClient: jest.fn().mockResolvedValue(disputed),
     taxedLinesWithClient: jest.fn().mockResolvedValue([
       { invoiceLineId: 'l-1', taxableValue: '1000.00', cgst: '25.00', sgst: '25.00', igst: '0.00', cess: '0.00' },
@@ -76,12 +77,17 @@ describe('credit notes (CN.1–CN.4)', () => {
     );
   });
 
-  it('CN.4: refused to whoever issued the invoice', async () => {
+  it('CN.4: refused to whoever issued the invoice, unless they are the owner', async () => {
     const { service, ledger } = build();
     await expect(service.issueCreditNote('tenant-1', 'driver-user', { invoiceId: 'inv-1', amount: 10, reason: 'Soft' })).rejects.toBeInstanceOf(
       ForbiddenException,
     );
     expect(ledger.postWithClient).not.toHaveBeenCalled();
+    // D10 (the client, 10 Nov 2026): the owner may approve a credit note on an invoice they issued.
+    const owner = build({ createdBy: 'owner-user' }, '0.00', true);
+    await owner.service.issueCreditNote('tenant-1', 'owner-user', { invoiceId: 'inv-1', amount: 10.5, reason: 'Soft' });
+    expect(owner.repo.isOwnerWithClient).toHaveBeenCalledWith(client, 'owner-user');
+    expect(owner.postings).toHaveLength(1);
   });
 
   it('never more than is outstanding, nor what another open dispute still claims', async () => {

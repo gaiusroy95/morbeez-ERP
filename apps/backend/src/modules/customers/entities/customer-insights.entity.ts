@@ -70,5 +70,7 @@ export interface CustomerProfile {
     grossMargin: string;
     grossMarginPct: number | null;
     topProducts: { name: string; uom: string; quantity: string; revenue: string }[];
+    /** What they owed when they came onto Morbeez (OB-…, entered once), and what of it is still owed. */
+    openingBalance: { invoiceNumber: string; amount: string; outstanding: string; asOf: string; dueDate: string } | null;
   } | null;
 }

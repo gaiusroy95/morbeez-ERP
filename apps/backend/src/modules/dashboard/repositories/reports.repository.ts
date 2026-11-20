@@ -163,8 +163,9 @@ export class ReportsRepository {
           WHERE l.received_at >= r.s AND l.received_at < r.e GROUP BY l.farmer_id
        ),
        bought AS (
+         -- What was bought (lots), not a balance brought forward.
          SELECT fp.farmer_id, SUM(fp.amount) AS purchases FROM money.farmer_payable fp CROSS JOIN r
-          WHERE fp.accrued_at >= r.s AND fp.accrued_at < r.e GROUP BY fp.farmer_id
+          WHERE fp.kind = 'lot' AND fp.accrued_at >= r.s AND fp.accrued_at < r.e GROUP BY fp.farmer_id
        ),
        paid AS (
          SELECT fp.farmer_id, SUM(fp.amount) AS paid FROM money.farmer_payment_balance fp CROSS JOIN r

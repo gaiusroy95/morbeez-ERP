@@ -129,11 +129,11 @@
     <string name="or">അല്ലെങ്കിൽ</string>
     <string name="photo_goods_attached">സാധനങ്ങളുടെ ഫോട്ടോ ചേർത്തു</string>
     <string name="photo_goods">ഡെലിവർ ചെയ്ത സാധനങ്ങളുടെ ഫോട്ടോ എടുക്കുക</string>
-    <string name="at_customer">ഉപഭോക്താവിന്റെ അടുത്ത് (തൂക്കിയെങ്കിൽ)</string>
+    <string name="at_customer">കസ്റ്റമറുടെ അടുത്ത് (തൂക്കിയെങ്കിൽ)</string>
     <string name="photo_scale_attached">ത്രാസിന്റെ ഫോട്ടോ ചേർത്തു</string>
-    <string name="photo_scale">ഉപഭോക്താവിന്റെ ത്രാസിന്റെ ഫോട്ടോ എടുക്കുക</string>
+    <string name="photo_scale">കസ്റ്റമറുടെ ത്രാസിന്റെ ഫോട്ടോ എടുക്കുക</string>
     <string name="farm_weight">ഫാം ഭാരം %1$s കി.ഗ്രാം</string>
-    <string name="customer_scale">ഉപഭോക്താവിന്റെ ത്രാസ്, നെറ്റ് കി.ഗ്രാം</string>
+    <string name="customer_scale">കസ്റ്റമറുടെ ത്രാസ്, നെറ്റ് കി.ഗ്രാം</string>
     <string name="shrinkage_less">%1$s കി.ഗ്രാം കുറവ് — %2$s%% ഭാരക്കുറവ്. അവരുടെ ഭാരത്തിനാണ് ബിൽ.</string>
     <string name="shrinkage_more">അവരുടെ ത്രാസിൽ %1$s കി.ഗ്രാം കൂടുതൽ. അവരുടെ ഭാരത്തിനാണ് ബിൽ.</string>
     <string name="egg_count">%1$s മുട്ടകൾ</string>
@@ -158,7 +158,7 @@
 
     <string name="skip_eyebrow">ഈ സ്റ്റോപ്പ് ഒഴിവാക്കുക</string>
     <string name="report_and_skip">അറിയിച്ച് ഈ സ്റ്റോപ്പ് ഒഴിവാക്കുക</string>
-    <string name="skip_intro">എന്ത് സംഭവിച്ചെന്ന് പറഞ്ഞ് ഫോട്ടോ എടുക്കുക: ഉപഭോക്താവ് നിരസിച്ചു, കട അടച്ചിരുന്നു, കർഷകന്റെ കയ്യിൽ ഒന്നുമില്ല. ഉടമ ഉടൻ അറിയും.</string>
+    <string name="skip_intro">എന്ത് സംഭവിച്ചെന്ന് പറഞ്ഞ് ഫോട്ടോ എടുക്കുക: കസ്റ്റമർ നിരസിച്ചു, കട അടച്ചിരുന്നു, കർഷകന്റെ കയ്യിൽ ഒന്നുമില്ല. ഉടമ ഉടൻ അറിയും.</string>
     <string name="photo_problem_attached">പ്രശ്നത്തിന്റെ ഫോട്ടോ ചേർത്തു</string>
     <string name="photo_problem">പ്രശ്നത്തിന്റെ ഫോട്ടോ എടുക്കുക</string>
 
@@ -205,7 +205,7 @@
     <string name="submit_trip">ട്രിപ്പ് സമർപ്പിക്കുക</string>
 
     <string name="farmer_pickup">കർഷക പിക്കപ്പ്</string>
-    <string name="customer_delivery">ഉപഭോക്തൃ ഡെലിവറി</string>
+    <string name="customer_delivery">കസ്റ്റമർ ഡെലിവറി</string>
     <string name="po_pickup">പർച്ചേസ് ഓർഡർ പിക്കപ്പ്</string>
     <string name="no_items">സാധനങ്ങളില്ല</string>
     <string name="and_n_more">%1$s, കൂടാതെ %2$d എണ്ണം കൂടി</string>
@@ -477,12 +477,12 @@
     <string name="start_trip_first">ആദ്യം ഡെലിവറി ട്രിപ്പ് തുടങ്ങുക: ഫാമുകൾ കഴിഞ്ഞാൽ \"ട്രിപ്പ് തുടങ്ങുക\" അമർത്തുക.</string>
     <string name="deliver_first">ആദ്യം %1$s-ൽ ഡെലിവർ ചെയ്യുക: കടകളിൽ ക്രമത്തിലാണ് ഡെലിവറി.</string>
     <string name="arrived_scan_qr">എത്തി — QR സ്കാൻ ചെയ്യുക</string>
-    <string name="scan_customer_qr">ഉപഭോക്താവിന്റെ QR സ്കാൻ ചെയ്യുക</string>
+    <string name="scan_customer_qr">കസ്റ്റമറുടെ QR സ്കാൻ ചെയ്യുക</string>
     <string name="start_navigation">വഴി തുടങ്ങുക</string>
     <string name="scan_qr">QR സ്കാൻ ചെയ്യുക</string>
     <string name="scan_prompt">കടയിലെ QR-ലേക്ക് ക്യാമറ പിടിക്കുക</string>
-    <string name="scan_hint">ഉപഭോക്താവിനെ ഉറപ്പിക്കാൻ കടയിലെ QR സ്കാൻ ചെയ്യുക.</string>
-    <string name="customer_verified">ഉപഭോക്താവിനെ ഉറപ്പിച്ചു: %1$s</string>
+    <string name="scan_hint">കസ്റ്റമറെ ഉറപ്പിക്കാൻ കടയിലെ QR സ്കാൻ ചെയ്യുക.</string>
+    <string name="customer_verified">കസ്റ്റമറെ ഉറപ്പിച്ചു: %1$s</string>
     <string name="wrong_qr">ഈ QR മറ്റൊരു കടയുടേതാണ്. %1$s-ന്റെ QR സ്കാൻ ചെയ്യുക.</string>
     <string name="not_scanned_because">സ്കാൻ ചെയ്തില്ല: %1$s</string>
     <string name="qr_missing_or_damaged">QR ഇല്ലേ, കേടായോ?</string>
@@ -497,7 +497,7 @@
     <string name="ordered_amount">ഓർഡർ %1$s</string>
     <string name="delivered_label">ഡെലിവറി (%1$s)</string>
     <string name="why_short">ഓർഡറിലും കുറവ് — എന്തുകൊണ്ട്?</string>
-    <string name="short_customer_took_less">ഉപഭോക്താവ് കുറച്ച് എടുത്തു</string>
+    <string name="short_customer_took_less">കസ്റ്റമർ കുറച്ച് എടുത്തു</string>
     <string name="short_not_enough">വാഹനത്തിൽ ആവശ്യത്തിന് ഇല്ല</string>
     <string name="all_unloaded_question">എല്ലാ സാധനങ്ങളും ഇറക്കിയോ?</string>
     <string name="yes">അതെ</string>
@@ -508,7 +508,7 @@
     <string name="received_by">സ്വീകരിച്ചത്</string>
     <string name="received_by_name">%1$s സ്വീകരിച്ചു</string>
     <string name="photo_delivery_another">മറ്റൊരു ഡെലിവറി ഫോട്ടോ ചേർക്കുക</string>
-    <string name="check_qr">ഉപഭോക്താവിന്റെ QR</string>
+    <string name="check_qr">കസ്റ്റമറുടെ QR</string>
     <string name="check_quantities">അളവുകൾ</string>
     <string name="check_unloaded">ഇറക്കി</string>
     <string name="check_photo">ഡെലിവറി ഫോട്ടോ</string>
@@ -535,7 +535,7 @@
     <string name="balance">ബാക്കി തുക</string>
     <string name="pending_n">ബാക്കി (%1$d)</string>
     <string name="collected_n">പിരിച്ചത് (%1$d)</string>
-    <string name="nothing_to_collect_yet">ഇതുവരെ പിരിക്കാൻ ഒന്നുമില്ല: ഡെലിവർ ചെയ്താൽ ഉപഭോക്താക്കൾ ഇവിടെ വരും.</string>
+    <string name="nothing_to_collect_yet">ഇതുവരെ പിരിക്കാൻ ഒന്നുമില്ല: ഡെലിവർ ചെയ്താൽ കസ്റ്റമേഴ്സ് ഇവിടെ വരും.</string>
     <string name="outstanding">ബാക്കി</string>
     <string name="outstanding_balance">ആകെ ബാക്കി</string>
     <string name="after_sync">സിങ്കിന് ശേഷം</string>
@@ -545,10 +545,10 @@
     <string name="collected_today">ഇന്ന് പിരിച്ചത്</string>
     <string name="total_collected">ആകെ പിരിച്ചത്</string>
     <plurals name="pending_customers">
-        <item quantity="one">%1$d ഉപഭോക്താവ് ഇനിയും ₹%2$s തരാനുണ്ട്</item>
-        <item quantity="other">%1$d ഉപഭോക്താക്കൾ ഇനിയും ₹%2$s തരാനുണ്ട്</item>
+        <item quantity="one">%1$d കസ്റ്റമർ ഇനിയും ₹%2$s തരാനുണ്ട്</item>
+        <item quantity="other">%1$d കസ്റ്റമേഴ്സ് ഇനിയും ₹%2$s തരാനുണ്ട്</item>
     </plurals>
-    <string name="only_delivered_shown">ഈ ട്രിപ്പിൽ ഡെലിവർ ചെയ്ത ഉപഭോക്താക്കളെ മാത്രമേ കാണിക്കൂ.</string>
+    <string name="only_delivered_shown">ഈ ട്രിപ്പിൽ ഡെലിവർ ചെയ്ത കസ്റ്റമേഴ്സിനെ മാത്രമേ കാണിക്കൂ.</string>
     <string name="hold_to_receive">അമർത്തിപ്പിടിച്ച് ₹%1$s സ്വീകരിക്കുക</string>
     <string name="more_than_owed">തരാനുള്ളതിലും കൂടുതൽ: പരമാവധി ₹%1$s.</string>
     <string name="payment_method">പണമടയ്ക്കൽ രീതി</string>
@@ -556,11 +556,11 @@
     <string name="cash_to_hand_over_note">പണം: ഇത് ഉടമയെ ഏൽപ്പിക്കണം.</string>
     <string name="direct_note">നേരിട്ട് ബിസിനസിലേക്ക്: നിങ്ങൾ ഏൽപ്പിക്കുന്നതിൽ ഉൾപ്പെടില്ല.</string>
     <string name="paid_by">പണം നൽകിയത്</string>
-    <string name="paid_by_customer">ഉപഭോക്താവ്</string>
+    <string name="paid_by_customer">കസ്റ്റമർ</string>
     <string name="paid_by_someone_else">മറ്റൊരാൾ</string>
     <string name="who_paid">ആരാണ് നൽകിയത് (പേര്)</string>
     <string name="photo_payment_proof">പണമടച്ചതിന്റെ തെളിവിന്റെ ഫോട്ടോ (ഐച്ഛികം)</string>
-    <string name="customer_disputes">ഉപഭോക്താവ് ഒരു തുകയിൽ തർക്കിക്കുന്നോ?</string>
+    <string name="customer_disputes">കസ്റ്റമർ ഒരു തുകയിൽ തർക്കിക്കുന്നോ?</string>
     <string name="disputed_amount">തർക്കമുള്ള തുക</string>
     <string name="dispute_hint">ഇത് ഉടമയ്ക്ക് പോകും, ഉടമ തീർപ്പാക്കും. നിങ്ങൾക്ക് ഒന്നും എഴുതിത്തള്ളാനാവില്ല.</string>
     <string name="what_they_dispute">എന്തിൽ തർക്കം, എന്തുകൊണ്ട്</string>
@@ -569,14 +569,14 @@
     <string name="return_to_base">ബേസിലേക്ക് മടങ്ങുക</string>
     <string name="return_hint">ബേസിൽ എത്തിയോ? അവസാന കി.മീ രേഖപ്പെടുത്തുക.</string>
     <plurals name="collect_then_return">
-        <item quantity="one">%d ഉപഭോക്താവ് ഇനിയും തരാനുണ്ട്. പിരിച്ചിട്ട് ബേസിലേക്ക് മടങ്ങുക.</item>
-        <item quantity="other">%d ഉപഭോക്താക്കൾ ഇനിയും തരാനുണ്ട്. പിരിച്ചിട്ട് ബേസിലേക്ക് മടങ്ങുക.</item>
+        <item quantity="one">%d കസ്റ്റമർ ഇനിയും തരാനുണ്ട്. പിരിച്ചിട്ട് ബേസിലേക്ക് മടങ്ങുക.</item>
+        <item quantity="other">%d കസ്റ്റമേഴ്സ് ഇനിയും തരാനുണ്ട്. പിരിച്ചിട്ട് ബേസിലേക്ക് മടങ്ങുക.</item>
     </plurals>
     <plurals name="n_due">
         <item quantity="one">%d ബാക്കി</item>
         <item quantity="other">%d ബാക്കി</item>
     </plurals>
-    <string name="collect_before_return">%1$d ഉപഭോക്താക്കൾ ഇനിയും ₹%2$s തരാനുണ്ട്. കഴിയുമെങ്കിൽ പോകുന്നതിന് മുമ്പ് പിരിക്കുക.</string>
+    <string name="collect_before_return">%1$d കസ്റ്റമേഴ്സ് ഇനിയും ₹%2$s തരാനുണ്ട്. കഴിയുമെങ്കിൽ പോകുന്നതിന് മുമ്പ് പിരിക്കുക.</string>
     <string name="confirm_km">കി.മീ ഉറപ്പിക്കുക</string>
     <string name="km_value">%1$s കി.മീ</string>
     <string name="closing_km">അവസാന കി.മീ</string>
@@ -825,7 +825,7 @@
     <string name="inc_fixed_pay">നിശ്ചിത വേതനം</string>
     <string name="inc_fixed_pay_sub">ജോലി ചെയ്ത ദിവസങ്ങളിലെ ദിവസക്കൂലി</string>
     <string name="inc_collection">കളക്ഷൻ ഇൻസെന്റീവ്</string>
-    <string name="inc_collection_sub">ഉപഭോക്താക്കളിൽ നിന്നുള്ള കളക്ഷൻ</string>
+    <string name="inc_collection_sub">കസ്റ്റമേഴ്സിൽ നിന്നുള്ള കളക്ഷൻ</string>
     <string name="inc_backhaul">ബാക്ക്‌ഹോൾ ഇൻസെന്റീവ്</string>
     <string name="inc_backhaul_sub">പൂർത്തിയാക്കിയ ബാക്ക്‌ഹോൾ</string>
     <string name="inc_mileage">മൈലേജ് ഇൻസെന്റീവ്</string>
@@ -834,8 +834,8 @@
     <string name="inc_crates_sub">തിരികെ കൊണ്ടുവന്ന ക്രേറ്റുകൾ</string>
     <string name="inc_quality">ഗുണനിലവാര ഇൻസെന്റീവ്</string>
     <string name="inc_quality_sub">ഒരു ഡെലിവറിയും കുറവില്ല</string>
-    <string name="inc_new_customer">പുതിയ ഉപഭോക്താവ്</string>
-    <string name="inc_new_customer_sub">പുതിയ ഉപഭോക്താവിനുള്ള ആദ്യ ഡെലിവറി</string>
+    <string name="inc_new_customer">പുതിയ കസ്റ്റമർ</string>
+    <string name="inc_new_customer_sub">പുതിയ കസ്റ്റമർക്കുള്ള ആദ്യ ഡെലിവറി</string>
     <string name="inc_performance">പ്രകടനം</string>
     <string name="inc_performance_sub">എല്ലാ സ്റ്റോപ്പും പൂർത്തിയാക്കി</string>
     <string name="inc_night_duty">രാത്രി ഡ്യൂട്ടി</string>
@@ -939,15 +939,15 @@
     <string name="exp_paid_fastag">FASTag</string>
     <string name="exp_fastag_hint">വാഹനത്തിന്റെ FASTag-ൽ നിന്ന് — നിങ്ങളുടെ പണത്തിൽ നിന്നല്ല. ബിൽ വേണ്ട: ഇത് ടാഗിന്റെ സ്റ്റേറ്റ്മെന്റിലുണ്ട്.</string>
     <string name="req_title">ഓഫീസിനോട് ചോദിക്കുക</string>
-    <string name="req_eyebrow">അഡ്വാൻസ്, പുതിയ ഉപഭോക്താവ്, ക്രെഡിറ്റ് പരിധി</string>
+    <string name="req_eyebrow">അഡ്വാൻസ്, പുതിയ കസ്റ്റമർ, ക്രെഡിറ്റ് പരിധി</string>
     <string name="req_what">നിങ്ങൾക്ക് എന്താണ് വേണ്ടത്?</string>
     <string name="req_advance">അഡ്വാൻസ്</string>
-    <string name="req_new_customer">പുതിയ ഉപഭോക്താവ്</string>
+    <string name="req_new_customer">പുതിയ കസ്റ്റമർ</string>
     <string name="req_credit_limit">ക്രെഡിറ്റ് പരിധി</string>
     <string name="req_advance_hint">ശമ്പളത്തിൽ നിന്നുള്ള അഡ്വാൻസ് — ശമ്പളം തീർക്കുമ്പോൾ തിരിച്ചുപിടിക്കും.</string>
-    <string name="req_limit_hint">ഈ ട്രിപ്പിലെ ഒരു ഉപഭോക്താവിന് ഉയർന്ന ക്രെഡിറ്റ് പരിധി.</string>
-    <string name="req_no_customers">ഇന്നത്തെ ട്രിപ്പിൽ ഉപഭോക്താക്കളില്ല — ക്രെഡിറ്റ് പരിധി അവരിലൊരാൾക്കാണ് ചോദിക്കുന്നത്.</string>
-    <string name="req_customer">ഉപഭോക്താവ്</string>
+    <string name="req_limit_hint">ഈ ട്രിപ്പിലെ ഒരു കസ്റ്റമർക്ക് ഉയർന്ന ക്രെഡിറ്റ് പരിധി.</string>
+    <string name="req_no_customers">ഇന്നത്തെ ട്രിപ്പിൽ കസ്റ്റമേഴ്സില്ല — ക്രെഡിറ്റ് പരിധി അവരിലൊരാൾക്കാണ് ചോദിക്കുന്നത്.</string>
+    <string name="req_customer">കസ്റ്റമർ</string>
     <string name="req_limit_amount">ചോദിക്കുന്ന പരിധി</string>
     <string name="req_customer_hint">വഴിയിൽ കണ്ട ഒരു കട. ഓഫീസ് സമ്മതിച്ചാൽ ചേർക്കും.</string>
     <string name="req_shop_name">കടയുടെ പേര്</string>
@@ -971,9 +971,9 @@
     <string name="req_refused">നിരസിച്ചു — സിങ്ക് കാണുക</string>
     <string name="req_approved_note">അംഗീകരിച്ചു: %1$s</string>
     <string name="req_done_advance">അംഗീകരിച്ചു — അഡ്വാൻസ് വരുന്നു.</string>
-    <string name="req_done_customer">അംഗീകരിച്ചു — ഉപഭോക്താവിനെ ചേർത്തു.</string>
+    <string name="req_done_customer">അംഗീകരിച്ചു — കസ്റ്റമറെ ചേർത്തു.</string>
     <string name="req_done_limit">അംഗീകരിച്ചു — പരിധി മാറ്റി.</string>
-    <string name="appr_new_customer_title">പുതിയ ഉപഭോക്താവ്: %1$s</string>
+    <string name="appr_new_customer_title">പുതിയ കസ്റ്റമർ: %1$s</string>
     <string name="appr_credit_title">ക്രെഡിറ്റ് പരിധി: %1$s</string>
     <string name="veh_fastag">FASTag ബാലൻസ്</string>
     <string name="veh_fastag_low">കുറവ്</string>

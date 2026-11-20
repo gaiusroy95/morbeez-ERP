@@ -59,5 +59,7 @@ export interface FarmerProfile {
     overdue: string;
     /** Average days from a lot's grading to its last payment, over lots fully paid; null before any. */
     avgPaymentDays: string | null;
+    /** What was already owed to them when they came onto Morbeez (entered once), and what of it is still owed. */
+    openingBalance: { amount: string; outstanding: string; asOf: string; dueDate: string } | null;
   } | null;
 }

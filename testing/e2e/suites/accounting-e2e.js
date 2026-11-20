@@ -78,7 +78,7 @@ const addDays = (date, n) => {
 
   const accounts = await owner.get('/accounting/accounts');
   const bal = (code) => accounts.body.find((a) => a.code === code)?.balance;
-  check('chart of accounts: 54 accounts installed (incl. GST, TDS, payroll, fleet, crates, backhaul, FASTag, agent commission)', accounts.body.length === 54, `${accounts.body.length}`);
+  check('chart of accounts: 55 accounts installed (incl. GST, TDS, payroll, fleet, crates, backhaul, FASTag, agent commission, opening balances)', accounts.body.length === 55, `${accounts.body.length}`);
   check('trip float cleared after reconciliation', eq(bal('cash_with_drivers'), '0'), bal('cash_with_drivers'));
   check('trip fuel expense posted', eq(bal('trip_expense_fuel'), '400'), bal('trip_expense_fuel'));
   check('trip cash shortage posted', eq(bal('cash_shortage'), '50'), bal('cash_shortage'));

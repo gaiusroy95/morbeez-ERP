@@ -12,6 +12,10 @@ interface CustomerRow {
   contact: Record<string, unknown>;
   place: string | null;
   address: string | null;
+  landmark: string | null;
+  shop_photo_key: string | null;
+  shop_photo_type: string | null;
+  shop_photo_at: Date | null;
   route_id: string | null;
   preferred_language: string;
   credit_limit: string;
@@ -45,6 +49,9 @@ function toRecord(row: CustomerRow): CustomerRecord {
     contact: row.contact ?? {},
     place: row.place ?? null,
     address: row.address ?? null,
+    landmark: row.landmark ?? null,
+    // Whether there is a photo and when — never where it is kept.
+    shopPhoto: row.shop_photo_at ? { uploadedAt: row.shop_photo_at } : null,
     routeId: row.route_id ?? null,
     preferredLanguage: row.preferred_language ?? 'en',
     creditLimit: row.credit_limit,
@@ -121,12 +128,18 @@ export class CustomersRepository {
       preferredLanguage?: string;
       place?: string | null;
       address?: string | null;
+      landmark?: string | null;
+      financeChargeEnabled?: boolean;
+      financeChargeRateAnnual?: number;
+      financeChargeRateMonthly?: number;
+      financeChargeGraceDays?: number;
     },
   ): Promise<CustomerRecord> {
     const result = await client.query<{ id: string }>(
       `INSERT INTO trading_partners.customer
-         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by, preferred_language, place, address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         (tenant_id, name, contact, credit_limit, payment_terms_days, created_by, preferred_language, place, address, landmark,
+          finance_charge_enabled, finance_charge_rate_annual, finance_charge_rate_monthly, finance_charge_grace_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id`,
       [
         tenantId,
@@ -138,6 +151,11 @@ export class CustomersRepository {
         fields.preferredLanguage ?? 'en',
         fields.place ?? null,
         fields.address ?? null,
+        fields.landmark ?? null,
+        fields.financeChargeEnabled ?? false,
+        fields.financeChargeRateAnnual ?? 0,
+        fields.financeChargeRateMonthly ?? 0,
+        fields.financeChargeGraceDays ?? 0,
       ],
     );
     return (await this.findByIdWithClient(client, result.rows[0].id))!;
@@ -160,6 +178,7 @@ export class CustomersRepository {
       // A key that is present (even as null) is written; one left out is kept.
       place: string | null;
       address: string | null;
+      landmark: string | null;
       doNotCall: boolean;
     }>,
   ): Promise<CustomerRecord> {
@@ -171,6 +190,7 @@ export class CustomersRepository {
          place = CASE WHEN $6::boolean THEN $7 ELSE place END,
          address = CASE WHEN $8::boolean THEN $9 ELSE address END,
          do_not_call = COALESCE($10, do_not_call),
+         landmark = CASE WHEN $11::boolean THEN $12 ELSE landmark END,
          version = version + 1,
          updated_at = now()
        WHERE id = $1 AND version = $2
@@ -186,12 +206,37 @@ export class CustomersRepository {
         'address' in fields,
         fields.address ?? null,
         fields.doNotCall ?? null,
+        'landmark' in fields,
+        fields.landmark ?? null,
       ],
     );
     if (result.rowCount === 0) {
       throw new OptimisticLockException('Customer', id);
     }
     return (await this.findByIdWithClient(client, id))!;
+  }
+
+  /**
+   * The shop's front photo, replacing any earlier one. Not a change of the
+   * customer's details, so no version step: a details form open meanwhile
+   * still saves.
+   */
+  async setShopPhotoWithClient(client: PoolClient, id: string, key: string, contentType: string): Promise<CustomerRecord | null> {
+    const r = await client.query(
+      `UPDATE trading_partners.customer SET shop_photo_key = $2, shop_photo_type = $3, shop_photo_at = now(), updated_at = now() WHERE id = $1`,
+      [id, key, contentType],
+    );
+    return r.rowCount ? this.findByIdWithClient(client, id) : null;
+  }
+
+  /** Where the shop's photo is kept, for serving it. */
+  async shopPhotoWithClient(client: PoolClient, id: string): Promise<{ key: string; contentType: string } | null> {
+    const r = await client.query<{ shop_photo_key: string | null; shop_photo_type: string | null }>(
+      'SELECT shop_photo_key, shop_photo_type FROM trading_partners.customer WHERE id = $1',
+      [id],
+    );
+    const row = r.rows[0];
+    return row?.shop_photo_key && row.shop_photo_type ? { key: row.shop_photo_key, contentType: row.shop_photo_type } : null;
   }
 
   /**

@@ -68,6 +68,7 @@ import { DisputesService, InvoiceDispute } from '../finance/disputes.service';
 import { BackhaulsRepository } from './repositories/backhauls.repository';
 import { handoverHoldOf, returnHoldOf } from './backhaul';
 import { TripIncentivesService } from './trip-incentives.service';
+import { CostingService } from '../costing/costing.service';
 import { RoutesService } from '../routes/routes.service';
 import { TripPlanningRepository } from './repositories/trip-planning.repository';
 import {
@@ -135,6 +136,7 @@ export class LogisticsService {
     private readonly disputes: DisputesService,
     private readonly backhauls: BackhaulsRepository,
     private readonly incentives: TripIncentivesService,
+    private readonly costing: CostingService,
   ) {}
 
   // ---- The owner's Trips list and planning (redesign Phase 4) ----
@@ -1965,6 +1967,8 @@ export class LogisticsService {
       const after = await this.trips.markReconciledWithClient(client, tripId, dto.version);
       // The driver's incentives (D7), worked out from the trip now it's closed — and kept.
       await this.incentives.recordAtCloseWithClient(client, tenantId, actorUserId, tripId, reconciliation.outcome);
+      // Its cost, worked out once and shared out to what it delivered and picked up (Master Spec v3 P5).
+      await this.costing.allocateTripWithClient(client, tenantId, actorUserId, tripId);
       await this.audit.record(client, {
         tenantId,
         actorUserId,

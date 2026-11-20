@@ -29,11 +29,12 @@ export class ProductsService {
     return product;
   }
 
-  create(tenantId: string, actorUserId: string, dto: CreateProductDto): Promise<ProductRecord> {
+  async create(tenantId: string, actorUserId: string, dto: CreateProductDto): Promise<ProductRecord> {
     const kind = (dto.kind ?? 'standard') as ProductKind;
     // Live birds are weighed (kg); eggs are counted (pieces, by the tray or one by one).
     const baseUom = kind === 'live_bird' ? 'kg' : kind === 'egg' ? 'piece' : dto.baseUom;
     if (kind !== 'egg' && dto.packSize !== undefined) throw new BadRequestException('Only eggs come in trays');
+    if ((baseUom === 'kg' || baseUom === 'g') && dto.unitWeightKg != null) throw new BadRequestException('A product sold by weight needs no weight per unit');
     return this.db.withTenant(tenantId, async (client) => {
       const product = await this.products.createWithClient(client, tenantId, actorUserId, {
         name: dto.name,
@@ -43,6 +44,7 @@ export class ProductsService {
         kind,
         packSize: kind === 'egg' ? dto.packSize ?? DEFAULT_TRAY : null,
         lossTolerancePct: dto.lossTolerancePct ?? null,
+        unitWeightKg: dto.unitWeightKg ?? null,
       });
       await this.audit.record(client, {
         tenantId,
@@ -70,6 +72,8 @@ export class ProductsService {
         throw new BadRequestException(before.kind === 'egg' ? 'Eggs are counted in pieces' : 'Live birds are sold by kg');
       }
       if (dto.packSize !== undefined && before.kind !== 'egg') throw new BadRequestException('Only eggs come in trays');
+      const uom = dto.baseUom ?? before.baseUom;
+      if ((uom === 'kg' || uom === 'g') && dto.unitWeightKg != null) throw new BadRequestException('A product sold by weight needs no weight per unit');
       const after = await this.products.updateWithClient(client, id, dto.version, {
         name: dto.name,
         category: dto.category,
@@ -77,6 +81,7 @@ export class ProductsService {
         basePrice: dto.basePrice,
         packSize: dto.packSize,
         lossTolerancePct: dto.lossTolerancePct,
+        unitWeightKg: dto.unitWeightKg,
       });
 
       await this.audit.record(client, {

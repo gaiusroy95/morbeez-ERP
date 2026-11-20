@@ -164,6 +164,22 @@ export class CustomerInsightsRepository {
     return { ...summary.rows[0], recent: recent.rows };
   }
 
+  /** What they owed when they came onto Morbeez (OB-…), and what of it is still owed. */
+  async openingBalanceWithClient(
+    client: PoolClient,
+    customerId: string,
+  ): Promise<{ invoiceNumber: string; amount: string; outstanding: string; asOf: string; dueDate: string } | null> {
+    const r = await client.query<{ invoice_number: string; amount: string; outstanding: string; as_of: string; due_date: string }>(
+      `SELECT b.invoice_number, b.amount::text AS amount, b.outstanding::text AS outstanding,
+              (b.issued_at AT TIME ZONE t.timezone)::date::text AS as_of, b.due_date::text AS due_date
+         FROM money.invoice_balance b JOIN tenant.tenant t ON t.id = b.tenant_id
+        WHERE b.customer_id = $1 AND b.kind = 'opening'`,
+      [customerId],
+    );
+    const row = r.rows[0];
+    return row ? { invoiceNumber: row.invoice_number, amount: row.amount, outstanding: row.outstanding, asOf: row.as_of, dueDate: row.due_date } : null;
+  }
+
   /** Their map pin (Logistics), if one is set. */
   async pinWithClient(client: PoolClient, kind: 'customer' | 'farmer', id: string): Promise<{ latitude: string; longitude: string } | null> {
     const r = await client.query<{ latitude: string; longitude: string }>(

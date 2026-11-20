@@ -174,6 +174,7 @@ export function CustomerPaymentDialog({
                       {invoice.invoiceNumber}
                       {invoice.kind === 'finance_charge' && <div className="cell-sub">{t('Finance charge')}</div>}
                       {invoice.kind === 'crate_charge' && <div className="cell-sub">{t('Lost crates')}</div>}
+                      {invoice.kind === 'opening' && <div className="cell-sub">{t('Opening balance')}</div>}
                     </td>
                     <td data-tone={invoice.state === 'overdue' ? 'bad' : undefined}>{formatDate(invoice.dueDate)}</td>
                     <td className="align-right">{formatMoney(invoice.outstanding, currency)}</td>
@@ -226,15 +227,21 @@ export function FarmerPaymentDialog({
     onClose,
   );
 
-  const describe = (id: string) => lots.data?.find((l) => l.lotId === id)?.productName ?? 'a lot';
+  // Rows are keyed by payable: a lot's, or the opening balance's (which has no lot).
+  const rowOf = (payableId: string) => lots.data?.find((l) => l.payableId === payableId);
+  const describe = (payableId: string) => {
+    const row = rowOf(payableId);
+    return row?.kind === 'opening' ? 'the opening balance' : row?.productName ?? 'a lot';
+  };
 
   const submit = () => {
     const parsedAmount = parseMoney(amount, 'the amount paid', true);
     const parsedFee = parseOptionalMoney(fee, 'the fee');
-    const allocations = parseAllocations(Object.entries(apply), 'lotId', describe);
+    const allocations = parseAllocations(Object.entries(apply), 'payableId', describe);
     const error = firstError([parsedAmount, parsedFee, allocations]);
     if (error) return setProblem(error);
     setProblem(null);
+    const chosen = (allocations as { value: { payableId: string; amount: number }[] | undefined }).value;
     record.mutate({
       farmerId,
       amount: (parsedAmount as { value: number }).value,
@@ -243,7 +250,10 @@ export function FarmerPaymentDialog({
       reference: optionalText(reference),
       notes: optionalText(notes),
       paidAt: localDateTimeToIso(paidAt),
-      allocations: (allocations as { value: { lotId: string; amount: number }[] | undefined }).value,
+      allocations: chosen?.map((a) => {
+        const lotId = rowOf(a.payableId)?.lotId;
+        return lotId ? { lotId, amount: a.amount } : { payableId: a.payableId, amount: a.amount };
+      }),
     });
   };
 
@@ -300,19 +310,19 @@ export function FarmerPaymentDialog({
               </thead>
               <tbody>
                 {unpaid.map((lot) => (
-                  <tr key={lot.lotId}>
+                  <tr key={lot.payableId}>
                     <td>{formatDay(lot.accruedAt, timeZone)}</td>
-                    <td>{lot.productName}</td>
-                    <td className="align-right">{formatQuantity(lot.acceptedQuantity)}</td>
+                    <td>{lot.kind === 'opening' ? t('Opening balance') : lot.productName}</td>
+                    <td className="align-right">{lot.acceptedQuantity === null ? '—' : formatQuantity(lot.acceptedQuantity)}</td>
                     <td className="align-right">{formatMoney(lot.outstanding, currency)}</td>
                     <td className="align-right">
                       <input
                         className="cell-input"
-                        aria-label={`Amount to apply to ${lot.productName} lot`}
+                        aria-label={lot.kind === 'opening' ? t('Amount to apply to the opening balance') : `Amount to apply to ${lot.productName} lot`}
                         inputMode="decimal"
                         placeholder="—"
-                        value={apply[lot.lotId] ?? ''}
-                        onChange={(e) => setApply({ ...apply, [lot.lotId]: e.target.value })}
+                        value={apply[lot.payableId] ?? ''}
+                        onChange={(e) => setApply({ ...apply, [lot.payableId]: e.target.value })}
                       />
                     </td>
                   </tr>

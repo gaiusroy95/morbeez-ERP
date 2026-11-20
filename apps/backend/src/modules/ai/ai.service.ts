@@ -410,7 +410,7 @@ export class AiService {
         currency: books.currency,
         targetMarginPct: settings.targetMarginPct,
         deliveryPerKg: perKg,
-        deliveryWindow: { from, to: books.today, cost: delivery.cost, kg: delivery.kg },
+        deliveryWindow: { from, to: books.today, cost: delivery.cost, kg: delivery.kg, source: delivery.source },
         rows,
       };
     });

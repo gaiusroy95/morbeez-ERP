@@ -19,7 +19,8 @@ interface FarmerPaymentRow {
 
 export interface OpenPayable {
   id: string;
-  lotId: string;
+  /** Null for a balance brought forward. */
+  lotId: string | null;
   outstanding: string;
 }
 
@@ -76,7 +77,7 @@ export class PayablesRepository {
        )
        SELECT fy.day::text AS date,
               COALESCE((SELECT SUM(p.amount) FROM money.farmer_payable p
-                        WHERE p.farmer_id = $1 AND p.id <> $3
+                        WHERE p.farmer_id = $1 AND p.id <> $3 AND p.kind = 'lot'
                           AND p.accrued_at >= (fy.fy_start::timestamp AT TIME ZONE fy.timezone)
                           AND p.accrued_at <= $2), 0)::text AS prior
        FROM fy`,
@@ -113,12 +114,40 @@ export class PayablesRepository {
     return result.rows[0].id;
   }
 
+  /** What was already owed when the business moved onto Morbeez: no lot, due when the owner says. */
+  async insertOpeningPayableWithClient(
+    client: PoolClient,
+    fields: { tenantId: string; farmerId: string; amount: string; accruedAt: Date; dueDate: string; createdBy: string },
+  ): Promise<string> {
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO money.farmer_payable (tenant_id, kind, lot_id, farmer_id, amount, accrued_at, created_by, due_date, bill_to_bill)
+       VALUES ($1, 'opening', NULL, $2, $3, $4, $5, $6::date, false)
+       RETURNING id`,
+      [fields.tenantId, fields.farmerId, fields.amount, fields.accruedAt, fields.createdBy, fields.dueDate],
+    );
+    return result.rows[0].id;
+  }
+
+  /** The farmer's opening balance, if one was entered. */
+  async openingPayableWithClient(client: PoolClient, farmerId: string): Promise<{ id: string; amount: string } | null> {
+    const r = await client.query<{ id: string; amount: string }>(
+      `SELECT id, amount::text AS amount FROM money.farmer_payable WHERE farmer_id = $1 AND kind = 'opening'`,
+      [farmerId],
+    );
+    return r.rows[0] ?? null;
+  }
+
+  async farmerNameWithClient(client: PoolClient, farmerId: string): Promise<string | null> {
+    const r = await client.query<{ name: string }>('SELECT name FROM trading_partners.farmer WHERE id = $1', [farmerId]);
+    return r.rows[0]?.name ?? null;
+  }
+
   /** Oldest accrued first — the order payments are applied in. */
   async openPayablesForFarmerWithClient(client: PoolClient, farmerId: string): Promise<OpenPayable[]> {
-    const result = await client.query<{ payable_id: string; lot_id: string; outstanding: string }>(
+    const result = await client.query<{ payable_id: string; lot_id: string | null; outstanding: string }>(
       `SELECT payable_id, lot_id, outstanding::text AS outstanding FROM money.farmer_payable_balance
        WHERE farmer_id = $1 AND outstanding > 0
-       ORDER BY accrued_at, lot_id`,
+       ORDER BY accrued_at, lot_id NULLS FIRST`,
       [farmerId],
     );
     return result.rows.map((r) => ({ id: r.payable_id, lotId: r.lot_id, outstanding: r.outstanding }));

@@ -233,6 +233,15 @@ export class ReceivablesRepository {
     return result.rows[0].today;
   }
 
+  /** The customer's opening balance, if one was entered (one per customer). */
+  async openingInvoiceWithClient(client: PoolClient, customerId: string): Promise<{ id: string; invoiceNumber: string } | null> {
+    const r = await client.query<{ id: string; invoice_number: string }>(
+      `SELECT id, invoice_number FROM money.invoice WHERE customer_id = $1 AND kind = 'opening'`,
+      [customerId],
+    );
+    return r.rows[0] ? { id: r.rows[0].id, invoiceNumber: r.rows[0].invoice_number } : null;
+  }
+
   /** Gap-free per tenant and kind: the counter row's lock serialises concurrent issuers. */
   async nextInvoiceNumberWithClient(client: PoolClient, tenantId: string, kind: InvoiceKind): Promise<string> {
     const result = await client.query<{ last_number: number }>(
@@ -241,7 +250,7 @@ export class ReceivablesRepository {
        RETURNING last_number`,
       [tenantId, kind],
     );
-    const prefix = { sale: 'INV', finance_charge: 'FC', crate_charge: 'CRT', spot_sale: 'SPT' }[kind];
+    const prefix = { sale: 'INV', finance_charge: 'FC', crate_charge: 'CRT', spot_sale: 'SPT', opening: 'OB' }[kind];
     return `${prefix}-${String(result.rows[0].last_number).padStart(6, '0')}`;
   }
 

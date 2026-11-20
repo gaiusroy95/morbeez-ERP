@@ -8,6 +8,7 @@ import { useProfitInsights, type Range } from '@/lib/hooks/use-money-stock';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
 import { formatMoney } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { Contribution } from '@/components/profit/Contribution';
 
 function Change({ percent }: { percent: string | null }) {
   const t = useT();
@@ -99,6 +100,7 @@ export default function ProfitPage() {
             </ul>
           )}
           <p className="footnote">{t('Profit by product is sales before GST less what the kilos sold cost; the margin is that profit on the sales.')}</p>
+          {hasPermission(session, 'finance:read') && <Contribution from={data.range.from} to={data.range.to} currency={data.range.currency} />}
         </>
       )}
     </div>

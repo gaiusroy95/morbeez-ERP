@@ -150,7 +150,8 @@ export interface PricingBoard {
   targetMarginPct: string;
   /** Delivering a kilo over the last 30 days — trip expenses and fuel over kilos delivered. */
   deliveryPerKg: string | null;
-  deliveryWindow: { from: string; to: string; cost: string; kg: string };
+  /** Where delivery per KG came from: closed trips' cost allocation (Master Spec v3 P5), or the estimate before any trip closed. */
+  deliveryWindow: { from: string; to: string; cost: string; kg: string; source: 'allocated' | 'estimated' };
   rows: PricingRow[];
 }
 

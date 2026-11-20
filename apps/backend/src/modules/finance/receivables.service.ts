@@ -636,6 +636,68 @@ export class ReceivablesService {
     return { invoiceId, invoiceNumber, amount: tax.total, taxAmount: subtractMoney(tax.total, tax.taxableValue), entryId };
   }
 
+  // ---- Opening balance (the client, 20 Nov 2026) ----
+
+  /**
+   * What a customer already owed when the business moved onto Morbeez: its
+   * own invoice ('opening', OB-000001) — one per customer, no lines of goods,
+   * no GST — so statements, aging, collections and the credit limit carry it
+   * like any other bill, and no sales figure or tax return ever counts it:
+   *   Dr Accounts receivable / Cr Opening balances
+   */
+  async issueOpeningBalanceWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    input: { customerId: string; amount: string; issuedAt: Date; dueDate: string; note: string | null },
+  ): Promise<{ invoiceId: string; invoiceNumber: string; amount: string; dueDate: string }> {
+    await this.receivables.lockCustomerWithClient(client, input.customerId);
+    const customer = await this.customers.getByIdWithClient(client, input.customerId);
+    if (customer.isWalkIn) throw new BadRequestException('The walk-in customer never carries a balance');
+    if (await this.receivables.openingInvoiceWithClient(client, customer.id)) {
+      throw new ConflictException(`${customer.name} already has an opening balance — it's entered once; correct it with a credit note`);
+    }
+    const invoiceNumber = await this.receivables.nextInvoiceNumberWithClient(client, tenantId, 'opening');
+    const description = `Opening balance brought forward${input.note ? ` — ${input.note}` : ''}`;
+    const { invoiceId } = await this.receivables.insertInvoiceWithClient(client, {
+      tenantId,
+      invoiceNumber,
+      kind: 'opening',
+      customerId: customer.id,
+      orderId: null,
+      sourceInvoiceId: null,
+      issuedAt: input.issuedAt,
+      dueDate: input.dueDate,
+      amount: input.amount,
+      createdBy: actorUserId,
+      lines: [{ orderLineId: null, productId: null, description, quantity: '1', unitPrice: input.amount, amount: input.amount }],
+    });
+    await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'opening_balance',
+      sourceType: 'invoice',
+      sourceId: invoiceId,
+      occurredAt: input.issuedAt,
+      memo: `${invoiceNumber}: opening balance owed by ${customer.name}${input.note ? ` — ${input.note}` : ''}`,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'accounts_receivable', party: { type: 'customer', id: customer.id }, debit: input.amount },
+        { account: 'opening_balances', credit: input.amount },
+      ],
+    });
+    // Anything they'd already paid ahead goes against it, as against any bill.
+    await this.applyHeldCreditWithClient(client, tenantId, customer.id);
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'create',
+      entityType: INVOICE_ENTITY,
+      entityId: invoiceId,
+      after: { invoiceNumber, kind: 'opening', customerId: customer.id, amount: input.amount, dueDate: input.dueDate, note: input.note },
+    });
+    return { invoiceId, invoiceNumber, amount: input.amount, dueDate: input.dueDate };
+  }
+
   // ---- Spot sales (called by Spot sales, inside its transaction) ----
 
   /**

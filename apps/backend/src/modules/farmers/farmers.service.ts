@@ -103,6 +103,7 @@ export class FarmersService {
               lastPaidAt: row.last_paid_at,
               payments: await this.insights.paymentsWithClient(client, id),
               ...(await this.insights.paymentTimingWithClient(client, id)),
+              openingBalance: await this.insights.openingBalanceWithClient(client, id),
             }
           : null;
       return { farmer, routeName: row?.route_name ?? null, pin, purchases, money };

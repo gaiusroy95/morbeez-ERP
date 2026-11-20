@@ -2816,3 +2816,154 @@ dl.request-facts dd {
   grid-column: 1 / -1;
   margin: 0;
 }
+
+/* ---- Master Spec v3 P5: true cost and contribution ---- */
+.contribution {
+  display: grid;
+  /* One column that may shrink below its content: the level tabs and the
+     table scroll inside their own boxes instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.contribution-table td,
+.contribution-table th {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.contribution-table .num {
+  white-space: nowrap;
+}
+
+.contribution-table tbody td:first-child,
+.contribution-table tfoot td:first-child {
+  min-width: 120px;
+}
+
+.contribution-table tfoot td {
+  border-top: 2px solid var(--border-strong);
+}
+
+.contribution-parts td {
+  background: var(--bg);
+}
+
+.contribution-part-list {
+  max-width: 380px;
+}
+
+.contribution-part-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 0;
+  font-size: 13px;
+}
+
+.contribution-part-list li.strong {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 6px;
+  font-weight: 650;
+}
+
+.contribution-part-list [data-tone='bad'] {
+  color: var(--bad);
+}
+
+.contribution-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.trip-cost {
+  display: grid;
+  gap: 6px;
+}
+
+.trip-cost-variance {
+  font-weight: 650;
+}
+
+.trip-cost-variance[data-tone='bad'] {
+  color: var(--bad);
+}
+
+.trip-cost-variance[data-tone='good'] {
+  color: var(--good);
+}
+
+/* ---- Customer onboarding (the client, 20 Nov 2026): GPS, landmark, shop photo ---- */
+.location-field,
+.shop-photo-field,
+.shop-photo-block {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The coordinates need ~190px to show whole; on a narrow phone the button drops below them. */
+.location-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.location-input input {
+  flex: 1 1 210px;
+  min-width: 0;
+}
+
+.location-input .button,
+.shop-photo-actions .button,
+.shop-photo-block .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.field-note[data-tone='bad'] {
+  color: var(--bad);
+}
+
+.field-note[data-tone='attention'] {
+  color: var(--warning);
+}
+
+.shop-photo {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  max-height: 240px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.shop-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shop-photo-block {
+  justify-items: start;
+  margin: 4px 0 8px;
+}
+
+.shop-photo-empty {
+  margin: 0;
+  font-size: 13px;
+}

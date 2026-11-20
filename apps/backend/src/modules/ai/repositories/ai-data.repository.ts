@@ -253,18 +253,32 @@ export class AiDataRepository {
          , period WHERE s.stop_type = 'delivery' AND s.status = 'completed' AND (s.completed_at AT TIME ZONE $1)::date BETWEEN d0 AND d1
          GROUP BY s.trip_id, s.id, o.customer_id
        ),
+       -- Master Spec v3 P5 (rule C7): a closed trip's share is what the cost allocation gave each
+       -- customer; a trip not closed yet is estimated as before — its expenses and fuel, by KG.
        trip_cost AS (
          SELECT t.id AS trip_id,
-                COALESCE((SELECT SUM(amount) FROM fulfilment.trip_expense WHERE trip_id = t.id), 0)
+                COALESCE((SELECT SUM(amount) FROM fulfilment.trip_expense WHERE trip_id = t.id AND decision IS DISTINCT FROM 'rejected'), 0)
                 + COALESCE((SELECT SUM(amount) FROM fleet.fuel_log WHERE trip_id = t.id), 0) AS cost
-         FROM fulfilment.trip t WHERE t.id IN (SELECT trip_id FROM stop_kg)
+         FROM fulfilment.trip t
+         WHERE t.id IN (SELECT trip_id FROM stop_kg) AND NOT EXISTS (SELECT 1 FROM money.trip_cost c WHERE c.trip_id = t.id)
        ),
-       delivery AS (
+       allocated AS (
+         SELECT a.customer_id, SUM(a.amount) AS cost
+           FROM money.trip_cost_allocation a
+           JOIN fulfilment.trip_stop s ON s.id = a.trip_stop_id
+           , period
+          WHERE a.order_line_id IS NOT NULL AND (s.completed_at AT TIME ZONE $1)::date BETWEEN d0 AND d1
+          GROUP BY a.customer_id
+       ),
+       estimated AS (
          SELECT k.customer_id,
                 SUM(tc.cost * CASE WHEN tot.kg > 0 THEN k.kg / tot.kg ELSE 1.0 / tot.n END) AS cost
          FROM stop_kg k JOIN trip_cost tc ON tc.trip_id = k.trip_id
          JOIN (SELECT trip_id, SUM(kg) AS kg, count(*) AS n FROM stop_kg GROUP BY trip_id) tot ON tot.trip_id = k.trip_id
          GROUP BY k.customer_id
+       ),
+       delivery AS (
+         SELECT customer_id, SUM(cost) AS cost FROM (SELECT * FROM allocated UNION ALL SELECT * FROM estimated) d GROUP BY customer_id
        ),
        fc AS (
          SELECT i.customer_id, SUM(i.amount) AS amount FROM money.invoice i, period
@@ -445,7 +459,20 @@ export class AiDataRepository {
    * owner rejected — the driver's to settle) and fuel, over the kilos their
    * completed deliveries carried.
    */
-  async deliveryCost(client: PoolClient, tz: string, from: string, to: string): Promise<{ cost: string; kg: string }> {
+  async deliveryCost(client: PoolClient, tz: string, from: string, to: string): Promise<{ cost: string; kg: string; source: 'allocated' | 'estimated' }> {
+    // Master Spec v3 P5 (rule C7): the trips closed in the window, as the cost allocation shared
+    // them out — the same standard each closed trip is held to. Until a trip has closed, the estimate.
+    const allocated = await client.query<{ cost: string; kg: string; trips: number }>(
+      `SELECT COALESCE(SUM(c.delivery_cost), 0)::numeric(14,2)::text AS cost, COALESCE(SUM(c.delivered_kg), 0)::numeric(14,3)::text AS kg, count(*)::int AS trips
+         FROM money.trip_cost c JOIN fulfilment.trip_reconciliation r ON r.trip_id = c.trip_id
+        WHERE c.delivered_kg > 0 AND (r.reconciled_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date`,
+      [tz, from, to],
+    );
+    if (allocated.rows[0].trips > 0) return { cost: allocated.rows[0].cost, kg: allocated.rows[0].kg, source: 'allocated' };
+    return { ...(await this.estimatedDeliveryCost(client, tz, from, to)), source: 'estimated' };
+  }
+
+  private async estimatedDeliveryCost(client: PoolClient, tz: string, from: string, to: string): Promise<{ cost: string; kg: string }> {
     const r = await client.query(
       `WITH stops AS (
          SELECT s.trip_id, s.order_id FROM fulfilment.trip_stop s

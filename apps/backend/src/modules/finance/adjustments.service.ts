@@ -20,6 +20,8 @@ import { splitCreditNote } from './finance-math';
 export function creditNoteAccount(kind: InvoiceKind): LedgerAccount {
   if (kind === 'finance_charge') return 'finance_charge_income';
   if (kind === 'crate_charge') return 'crate_recoveries';
+  // A balance brought forward was never income: correcting it reverses the opening balance.
+  if (kind === 'opening') return 'opening_balances';
   return 'sales_returns';
 }
 
@@ -60,9 +62,11 @@ export class AdjustmentsService {
    *   Dr Sales returns and allowances   the value credited       (CN.2)
    *   Dr Output CGST / SGST / IGST / cess  the GST it carried  (GST Act s.34)
    *   Cr Accounts receivable            the whole note (the customer)
-   * CN.4: approved by someone other than whoever issued the invoice. No more
-   * than is outstanding and not under another open dispute — a refund of
-   * money already paid isn't a credit note.
+   * CN.4: approved by someone other than whoever issued the invoice — except
+   * the owner, who may approve their own (the client's decision D10, 10 Nov
+   * 2026: in a business one person runs, the owner both delivers and credits).
+   * No more than is outstanding and not under another open dispute — a refund
+   * of money already paid isn't a credit note.
    */
   async issueCreditNoteWithClient(
     client: PoolClient,
@@ -71,9 +75,9 @@ export class AdjustmentsService {
     input: { invoiceId: string; amount: string; reason: string; disputeId: string | null },
   ): Promise<CreditNoteRecord> {
     const invoice = await this.lockedInvoice(client, input.invoiceId);
-    if (invoice.createdBy === actorUserId) {
+    if (invoice.createdBy === actorUserId && !(await this.repo.isOwnerWithClient(client, actorUserId))) {
       throw new ForbiddenException(
-        `You issued ${invoice.invoiceNumber} — a credit note against it needs someone else's approval (segregation of duties)`,
+        `You issued ${invoice.invoiceNumber} — a credit note against it needs the owner's or someone else's approval (segregation of duties)`,
       );
     }
     if (!isPositiveMoney(input.amount)) throw new BadRequestException('A credit note must be for more than ₹0');

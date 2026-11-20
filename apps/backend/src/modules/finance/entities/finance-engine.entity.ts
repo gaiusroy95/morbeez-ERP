@@ -3,7 +3,8 @@
 // throughout (Constitution III.2). Mirrored in packages/shared-types/src/finance.
 
 export type PaymentMethod = 'cash' | 'upi' | 'bank_transfer' | 'cheque';
-export type InvoiceKind = 'sale' | 'finance_charge' | 'crate_charge' | 'spot_sale';
+/** 'opening': what a customer already owed when the business moved onto Morbeez (OB-000001). */
+export type InvoiceKind = 'sale' | 'finance_charge' | 'crate_charge' | 'spot_sale' | 'opening';
 export type InvoiceState = 'open' | 'overdue' | 'paid';
 
 export interface InvoiceLineRecord {

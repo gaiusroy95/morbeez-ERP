@@ -4,6 +4,8 @@
 import type { IsoDate, IsoDateTime } from '../common';
 
 export interface ContactDetails {
+  /** Who to ask for (a customer's shop). */
+  person?: string;
   phone?: string;
   email?: string;
   notes?: string;
@@ -17,6 +19,10 @@ export interface CustomerRecord {
   place: string | null;
   /** Default delivery address. */
   address: string | null;
+  /** How a driver finds the shop ("opposite the bus stand"). */
+  landmark?: string | null;
+  /** The shop's front, photographed when the customer was taken down: GET /customers/:id/shop-photo. */
+  shopPhoto?: { uploadedAt: IsoDateTime } | null;
   /** The route they are usually delivered on. */
   routeId: string | null;
   creditLimit: string;
@@ -98,6 +104,8 @@ export interface ProductRecord {
   packSize: number | null;
   /** Shrinkage (live birds) or breakage (eggs) accepted, %; null = the business default. */
   lossTolerancePct: string | null;
+  /** What one unit weighs (kg), for a product not sold by weight — its KG share of trip costs (Master Spec v3 P5). */
+  unitWeightKg?: string | null;
   status: 'active' | 'archived';
   version: number;
 }
@@ -136,6 +144,14 @@ export interface CreateCustomerBody {
   place?: string | null;
   address?: string | null;
   routeId?: string | null;
+  landmark?: string | null;
+  /** Finance charge on what's overdue — off unless switched on, and only with an annual rate. */
+  financeChargeEnabled?: boolean;
+  financeChargeRateAnnual?: number;
+  financeChargeGraceDays?: number;
+  /** Where the shop is (GPS) — both or neither; it becomes the customer's map pin. */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface UpdateCustomerBody {
@@ -148,6 +164,10 @@ export interface UpdateCustomerBody {
   routeId?: string | null;
   /** Never called by the AI voice agent. */
   doNotCall?: boolean;
+  landmark?: string | null;
+  /** Both move the shop's map pin; both null take it away; left out, it stays. */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface UpdateCreditTermsBody {
@@ -228,6 +248,8 @@ export interface CustomerProfile {
     grossMargin: string;
     grossMarginPct: number | null;
     topProducts: { name: string; uom: string; quantity: string; revenue: string }[];
+    /** What they owed when they came onto Morbeez (OB-…, entered once), and what of it is still owed. */
+    openingBalance?: { invoiceNumber: string; amount: string; outstanding: string; asOf: IsoDate; dueDate: IsoDate } | null;
   } | null;
 }
 
@@ -303,5 +325,7 @@ export interface FarmerProfile {
     overdue: string;
     /** Average days from a lot's grading to its last payment, over lots fully paid. */
     avgPaymentDays: string | null;
+    /** What was owed to them when they came onto Morbeez (entered once), and what of it is still owed. */
+    openingBalance?: { amount: string; outstanding: string; asOf: IsoDate; dueDate: IsoDate } | null;
   } | null;
 }

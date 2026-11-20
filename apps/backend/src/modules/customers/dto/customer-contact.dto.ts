@@ -2,6 +2,12 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CustomerContactDto {
+  @ApiPropertyOptional({ description: 'Who to ask for at the shop' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  person?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

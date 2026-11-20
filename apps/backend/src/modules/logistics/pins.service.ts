@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
+import { PinKind, upsertPlacePinWithClient } from '../../common/place-pins';
 
-export type PinKind = 'customer' | 'farmer' | 'depot';
+export type { PinKind };
 
 export interface PlacePin {
   kind: PinKind;
@@ -54,17 +55,7 @@ export class PinsService {
       const found = await client.query(`SELECT 1 FROM ${table} WHERE id = $1`, [refId]);
       if (!found.rowCount) throw new NotFoundException(`${kind === 'customer' ? 'Customer' : 'Farmer'} not found`);
     }
-    const updated = await client.query(
-      `UPDATE fulfilment.place_pin SET latitude = $3, longitude = $4, updated_by = $5, updated_at = now()
-       WHERE kind = $1 AND ref_id IS NOT DISTINCT FROM $2::uuid`,
-      [kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
-    );
-    if (!updated.rowCount) {
-      await client.query(
-        'INSERT INTO fulfilment.place_pin (tenant_id, kind, ref_id, latitude, longitude, updated_by) VALUES ($1, $2, $3, $4, $5, $6)',
-        [tenantId, kind, refId, latitude.toFixed(6), longitude.toFixed(6), userId],
-      );
-    }
+    await upsertPlacePinWithClient(client, tenantId, userId, kind, refId, latitude, longitude);
     await this.audit.record(client, { tenantId, actorUserId: userId, action: 'update', entityType: 'place_pin', entityId: refId ?? tenantId, after: { kind, latitude, longitude } });
   }
 

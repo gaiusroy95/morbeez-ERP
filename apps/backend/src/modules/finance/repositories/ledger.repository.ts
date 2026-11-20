@@ -56,7 +56,8 @@ export type LedgerAccount =
   | 'bad_debt_expense'
   | 'allowance_doubtful_accounts'
   | 'agent_commission'
-  | 'accounts_payable_agent';
+  | 'accounts_payable_agent'
+  | 'opening_balances';
 
 export type LedgerEntryType =
   | 'invoice_issued'
@@ -94,6 +95,7 @@ export type LedgerEntryType =
   | 'vehicle_hire_paid'
   | 'crate_charge_invoiced'
   | 'crate_charge_deducted'
+  | 'opening_balance'
   | 'crates_purchased'
   | 'backhaul_income_received'
   | 'fastag_recharged'

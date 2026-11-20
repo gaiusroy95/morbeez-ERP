@@ -21,6 +21,9 @@ import { AdjustmentsService } from './adjustments.service';
 import { AgentsFinanceService } from './agents-finance.service';
 import { AdjustmentsRepository } from './repositories/adjustments.repository';
 import { AgentsFinanceRepository } from './repositories/agents-finance.repository';
+import { OpeningBalancesController } from './opening-balances.controller';
+import { OpeningBalancesService } from './opening-balances.service';
+import { OpeningBalancesRepository } from './repositories/opening-balances.repository';
 
 // Bounded context: Finance — the append-only double-entry ledger, invoices,
 // collections, payables and payments to farmers, finance charges, and
@@ -36,7 +39,7 @@ import { AgentsFinanceRepository } from './repositories/agents-finance.repositor
 // reverse, so there is no cycle.
 @Module({
   imports: [CustomersModule, FarmersModule, TaxRulesModule],
-  controllers: [FinanceController, DisputesController, AdjustmentsController],
+  controllers: [FinanceController, DisputesController, AdjustmentsController, OpeningBalancesController],
   providers: [
     AdjustmentsService,
     AgentsFinanceService,
@@ -54,6 +57,8 @@ import { AgentsFinanceRepository } from './repositories/agents-finance.repositor
     PayablesRepository,
     FinanceCostsRepository,
     CollectionsRepository,
+    OpeningBalancesService,
+    OpeningBalancesRepository,
   ],
   exports: [ReceivablesService, PayablesService, LedgerService, DisputesService, AgentsFinanceService],
 })

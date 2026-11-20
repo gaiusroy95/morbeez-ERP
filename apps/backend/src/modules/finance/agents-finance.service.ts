@@ -3,11 +3,7 @@ import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
-import { compareMoney, isPositiveMoney, moneyFromNumber, percentOfMoney, subtractMoney } from '../../common/money';
-import { deducteeTypeFromPan } from '../../common/india';
-import { TaxRulesService } from '../tax-rules/tax-rules.service';
-import { TaxRulesRepository } from '../tax-rules/repositories/tax-rules.repository';
-import { DeducteeType } from '../tax-rules/entities/tax-rules.entity';
+import { compareMoney, isPositiveMoney, moneyFromNumber } from '../../common/money';
 import { LedgerRepository } from './repositories/ledger.repository';
 import { AgentsFinanceRepository } from './repositories/agents-finance.repository';
 import { AgentAccount, AgentPaymentRecord, PaymentMethod } from './entities/finance-engine.entity';
@@ -31,9 +27,8 @@ export interface LotCommissionInput {
  * Agents' commission (Master Spec §11; Accounting Engine AGT.1–AGT.3): earned
  * on the kg accepted when a lot is graded — not when the agent is engaged —
  * into its own payable sub-ledger, separate from farmers and customers, each
- * entry traceable to the lot and the rate. Settled by payments, with TDS
- * withheld when the business chooses a section (194H for commission —
- * required only of payers liable to tax audit, so it's the business's call).
+ * entry traceable to the lot and the rate. Settled by payments — without TDS,
+ * which the client confirmed doesn't apply to agent commission (10 Nov 2026).
  */
 @Injectable()
 export class AgentsFinanceService {
@@ -41,8 +36,6 @@ export class AgentsFinanceService {
     private readonly db: DatabaseService,
     private readonly repo: AgentsFinanceRepository,
     private readonly ledger: LedgerRepository,
-    private readonly taxRules: TaxRulesService,
-    private readonly taxRulesRepo: TaxRulesRepository,
     private readonly audit: AuditService,
   ) {}
 
@@ -112,17 +105,15 @@ export class AgentsFinanceService {
   }
 
   /**
-   * Settles commission owed (AGT.2):
-   *   Dr Accounts payable — agents (the agent)  amount
-   *   Cr Bank / Cash on hand                    amount − TDS
-   *   Cr TDS payable                            TDS, when a section is chosen
-   * The deduction lands in the TDS register for the quarter's return.
+   * Settles commission owed (AGT.2), never more than is owed:
+   *   Dr Accounts payable — agents (the agent) / Cr Bank or Cash on hand.
+   * No TDS: the client confirmed it doesn't apply to agent commission (10 Nov 2026).
    */
-  recordPayment(
+  async recordPayment(
     tenantId: string,
     actorUserId: string,
     agentId: string,
-    dto: { amount: number; method: PaymentMethod; reference?: string; paidAt?: string; tdsSectionCode?: string },
+    dto: { amount: number; method: PaymentMethod; reference?: string; paidAt?: string },
   ): Promise<AgentPaymentRecord> {
     const paidAt = dto.paidAt ? new Date(dto.paidAt) : new Date();
     if (paidAt.getTime() > Date.now() + FUTURE_TOLERANCE_MS) throw new BadRequestException('paidAt cannot be in the future');
@@ -136,21 +127,6 @@ export class AgentsFinanceService {
       if (compareMoney(amount, account.owed) > 0) {
         throw new ConflictException(`Only ₹${account.owed} of commission is owed to ${account.name}`);
       }
-      const paidOn = await this.repo.localDateWithClient(client, paidAt);
-
-      let tds = '0.00';
-      let section: Awaited<ReturnType<TaxRulesRepository['tdsSection']>> = null;
-      let deducteeType: DeducteeType = 'no_pan';
-      let rate = '0';
-      if (dto.tdsSectionCode?.trim()) {
-        section = await this.taxRulesRepo.tdsSection(client, dto.tdsSectionCode.trim(), paidOn);
-        if (!section) throw new BadRequestException(`There is no TDS section ${dto.tdsSectionCode.trim()} in force on ${paidOn}`);
-        deducteeType = account.pan ? deducteeTypeFromPan(account.pan) : 'no_pan';
-        rate = deducteeType === 'no_pan' ? section.rateNoPan : deducteeType === 'individual_huf' ? section.rateIndividual : section.rateOther;
-        tds = percentOfMoney(amount, rate);
-        if (!isPositiveMoney(tds)) throw new BadRequestException(`At ${rate}% there is no tax to withhold on ₹${amount}`);
-      }
-      const net = subtractMoney(amount, tds);
       const id = randomUUID();
       const reference = dto.reference?.trim() || null;
       const entryId = await this.ledger.postWithClient(client, {
@@ -159,12 +135,11 @@ export class AgentsFinanceService {
         sourceType: 'agent_payment',
         sourceId: id,
         occurredAt: paidAt,
-        memo: `Commission paid to ${account.name} (${dto.method}${reference ? `, ${reference}` : ''})${section ? ` — TDS ${tds} under ${section.code}` : ''}`,
+        memo: `Commission paid to ${account.name} (${dto.method}${reference ? `, ${reference}` : ''})`,
         createdBy: actorUserId,
         lines: [
           { account: 'accounts_payable_agent', party: { type: 'agent', id: agentId }, debit: amount },
-          { account: receivingAccount(dto.method), credit: net },
-          { account: 'tds_payable', credit: tds },
+          { account: receivingAccount(dto.method), credit: amount },
         ],
       });
       await this.repo.insertPaymentWithClient(client, {
@@ -172,42 +147,21 @@ export class AgentsFinanceService {
         tenantId,
         agentId,
         amount,
-        tdsSection: section?.code ?? null,
-        tdsAmount: tds,
+        tdsSection: null,
+        tdsAmount: '0.00',
         method: dto.method,
         reference,
         paidAt,
         entryId,
         createdBy: actorUserId,
       });
-      if (section) {
-        await this.taxRules.recordDeductionWithClient(client, {
-          tenantId,
-          sectionId: section.id,
-          sectionCode: section.code,
-          farmerId: null,
-          payeeName: account.name,
-          payeePan: account.pan,
-          deducteeType,
-          baseAmount: amount,
-          grossAmount: amount,
-          rate,
-          tdsAmount: tds,
-          deductedOn: paidOn,
-          payableId: null,
-          sourceType: 'agent_payment',
-          sourceId: id,
-          ledgerEntryId: entryId,
-          createdBy: actorUserId,
-        });
-      }
       await this.audit.record(client, {
         tenantId,
         actorUserId,
         action: 'create',
         entityType: 'agent_payment',
         entityId: id,
-        after: { agentId, amount, tds, net, method: dto.method, section: section?.code ?? null },
+        after: { agentId, amount, method: dto.method, reference },
       });
       return (await this.repo.findPaymentWithClient(client, id)) as AgentPaymentRecord;
     });

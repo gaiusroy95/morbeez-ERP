@@ -1,7 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../../infra/database/database.service';
 import { AuditService } from '../../infra/audit/audit.service';
+import { ObjectStorageService } from '../../infra/storage/object-storage.service';
+import { placePinWithClient, removePlacePinWithClient, upsertPlacePinWithClient } from '../../common/place-pins';
+import { CustomerContactDto } from './dto/customer-contact.dto';
 import { CustomersRepository } from './repositories/customers.repository';
 import { CustomerRecord, CustomerTermsVersion } from './entities/customer.entity';
 import { PaginatedResult } from '../../common/persistence/pagination';
@@ -16,6 +20,46 @@ import { subtractMoney, sumMoney } from '../../common/money';
 
 const ENTITY_TYPE = 'customer';
 
+export const SHOP_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+export interface ShopPhotoFile {
+  buffer: Buffer;
+  mimetype: string;
+}
+
+/** The file is the picture it says it is (its first bytes), not just named one. */
+export function isImage(buffer: Buffer, type: string): boolean {
+  if (type === 'image/jpeg') return buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  if (type === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (type === 'image/webp') return buffer.subarray(0, 4).toString('latin1') === 'RIFF' && buffer.subarray(8, 12).toString('latin1') === 'WEBP';
+  return false;
+}
+
+/**
+ * Where the shop is, as sent: both coordinates (the pin), both null (take the
+ * pin away), or neither (leave it). One without the other, or 0, 0 — what a
+ * phone reports when it has no fix — is refused.
+ */
+export function locationOf(dto: { latitude?: number | null; longitude?: number | null }): { latitude: number; longitude: number } | null | undefined {
+  const { latitude, longitude } = dto;
+  if (latitude === undefined && longitude === undefined) return undefined;
+  if (latitude === null && longitude === null) return null;
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+    throw new BadRequestException('Give both the latitude and the longitude of the shop');
+  }
+  if (latitude === 0 && longitude === 0) throw new BadRequestException("0, 0 isn't the shop — use the phone's location or enter the shop's");
+  return { latitude, longitude };
+}
+
+/** The contact details as kept: trimmed, blanks left out. */
+function contactOf(contact: CustomerContactDto | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(contact ?? {})) {
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim();
+  }
+  return out;
+}
+
 @Injectable()
 export class CustomersService {
   constructor(
@@ -24,6 +68,7 @@ export class CustomersService {
     private readonly audit: AuditService,
     private readonly routes: RoutesService,
     private readonly insights: CustomerInsightsRepository,
+    private readonly storage: ObjectStorageService,
   ) {}
 
   // ---- The owner's Customers list and Customer Profile (redesign Phase 5) ----
@@ -111,6 +156,7 @@ export class CustomersService {
           grossMargin: gross,
           grossMarginPct: Number(margin.revenue) > 0 ? Math.round((1000 * Number(gross)) / Number(margin.revenue)) / 10 : null,
           topProducts: margin.topProducts,
+          openingBalance: await this.insights.openingBalanceWithClient(client, id),
         };
       }
       return {
@@ -156,18 +202,31 @@ export class CustomersService {
 
   /** In the caller's transaction: a customer a driver met on the road, approved (D10). Routes are checked by the caller. */
   async createWithClient(client: PoolClient, tenantId: string, actorUserId: string, dto: CreateCustomerDto): Promise<CustomerRecord> {
+    const location = locationOf(dto);
+    // Finance cost on or off from the start (the client, 20 Nov 2026) — on only with a rate (MS §30).
+    if (dto.financeChargeEnabled && !((dto.financeChargeRateAnnual ?? 0) > 0)) {
+      throw new BadRequestException('Set an annual rate to switch the finance charge on');
+    }
+    const annual = dto.financeChargeRateAnnual;
     const created = await this.customers.createWithClient(client, tenantId, actorUserId, {
+      financeChargeEnabled: dto.financeChargeEnabled ?? false,
+      financeChargeRateAnnual: annual ?? 0,
+      financeChargeRateMonthly: annual === undefined ? 0 : Math.round((annual * 30 * 100) / 365) / 100,
+      financeChargeGraceDays: dto.financeChargeGraceDays ?? 0,
       name: dto.name,
-      contact: { ...dto.contact },
+      contact: contactOf(dto.contact),
       creditLimit: dto.creditLimit ?? 0,
       paymentTermsDays: dto.paymentTermsDays ?? 0,
       preferredLanguage: dto.preferredLanguage,
       place: dto.place?.trim() || null,
       address: dto.address?.trim() || null,
+      landmark: dto.landmark?.trim() || null,
     });
     await this.customers.recordTermsVersionWithClient(client, created.id, 'created', actorUserId);
     // Their usual route: a stop at the end of it (Routes).
     if (dto.routeId) await this.routes.placeWithClient(client, tenantId, 'customer', created.id, dto.routeId);
+    // Where the shop is: the customer's map pin, which route planning and the driver's stop read.
+    if (location) await upsertPlacePinWithClient(client, tenantId, actorUserId, 'customer', created.id, location.latitude, location.longitude);
     const customer = dto.routeId ? ((await this.customers.findByIdWithClient(client, created.id)) ?? created) : created;
     await this.audit.record(client, {
       tenantId,
@@ -175,7 +234,7 @@ export class CustomersService {
       action: 'create',
       entityType: ENTITY_TYPE,
       entityId: customer.id,
-      after: customer as unknown as Record<string, unknown>,
+      after: { ...customer, location: location ?? null } as unknown as Record<string, unknown>,
     });
     return customer;
   }
@@ -187,23 +246,29 @@ export class CustomersService {
     dto: UpdateCustomerDto,
   ): Promise<CustomerRecord> {
     if (dto.routeId) await this.routes.assertUsable(tenantId, dto.routeId);
+    const location = locationOf(dto);
     return this.db.withTenant(tenantId, async (client) => {
       const before = await this.customers.findByIdWithClient(client, id);
       if (!before) throw new NotFoundException('Customer not found');
+      const pinBefore = location === undefined ? undefined : await placePinWithClient(client, 'customer', id);
 
       // Left out: kept. Sent as null or blank: cleared.
       let after = await this.customers.updateWithClient(client, id, dto.version, {
         name: dto.name,
-        contact: dto.contact && { ...dto.contact },
+        contact: dto.contact && contactOf(dto.contact),
         preferredLanguage: dto.preferredLanguage,
         ...(dto.place !== undefined && { place: dto.place?.trim() || null }),
         ...(dto.address !== undefined && { address: dto.address?.trim() || null }),
+        ...(dto.landmark !== undefined && { landmark: dto.landmark?.trim() || null }),
         ...(dto.doNotCall !== undefined && { doNotCall: dto.doNotCall }),
       });
       if (dto.routeId !== undefined && dto.routeId !== before.routeId) {
         await this.routes.placeWithClient(client, tenantId, 'customer', id, dto.routeId);
         after = (await this.customers.findByIdWithClient(client, id)) ?? after;
       }
+      // Both coordinates move the shop's pin; both null take it away.
+      if (location) await upsertPlacePinWithClient(client, tenantId, actorUserId, 'customer', id, location.latitude, location.longitude);
+      else if (location === null) await removePlacePinWithClient(client, 'customer', id);
 
       await this.audit.record(client, {
         tenantId,
@@ -211,11 +276,44 @@ export class CustomersService {
         action: 'update',
         entityType: ENTITY_TYPE,
         entityId: id,
-        before: before as unknown as Record<string, unknown>,
-        after: after as unknown as Record<string, unknown>,
+        before: { ...before, ...(pinBefore !== undefined && { location: pinBefore }) } as unknown as Record<string, unknown>,
+        after: { ...after, ...(location !== undefined && { location }) } as unknown as Record<string, unknown>,
       });
       return after;
     });
+  }
+
+  // ---- The shop's front photo (customer onboarding) ----
+
+  /** The photo of the shop's front, taken when the customer was taken down; a new one replaces it. */
+  async setShopPhoto(tenantId: string, actorUserId: string, id: string, file: ShopPhotoFile): Promise<CustomerRecord> {
+    if (!SHOP_PHOTO_TYPES.includes(file.mimetype) || !isImage(file.buffer, file.mimetype)) {
+      throw new BadRequestException('The shop photo must be a JPEG, PNG or WebP picture');
+    }
+    await this.getById(tenantId, id);
+    const extension = file.mimetype === 'image/png' ? 'png' : file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+    const key = `${tenantId}/customers/${id}/shop-${randomUUID()}.${extension}`;
+    await this.storage.put(key, file.buffer, file.mimetype);
+    return this.db.withTenant(tenantId, async (client) => {
+      const after = await this.customers.setShopPhotoWithClient(client, id, key, file.mimetype);
+      if (!after) throw new NotFoundException('Customer not found');
+      await this.audit.record(client, {
+        tenantId,
+        actorUserId,
+        action: 'update',
+        entityType: ENTITY_TYPE,
+        entityId: id,
+        after: { shopPhoto: after.shopPhoto, bytes: file.buffer.length, type: file.mimetype },
+      });
+      return after;
+    });
+  }
+
+  async shopPhoto(tenantId: string, id: string): Promise<{ body: Buffer; contentType: string }> {
+    const where = await this.db.withTenant(tenantId, (client) => this.customers.shopPhotoWithClient(client, id));
+    const body = where ? await this.storage.get(where.key) : null;
+    if (!where || !body) throw new NotFoundException('No shop photo yet');
+    return { body, contentType: where.contentType };
   }
 
   updateCreditTerms(

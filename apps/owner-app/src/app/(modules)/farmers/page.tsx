@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import type { FarmerCard, FarmerRecord, FarmersFilter } from '@morbeez/shared-types';
 import { ErrorState, SkeletonLines } from '@/components/ui/Panel';
@@ -10,6 +11,7 @@ import { DetailPanel, KeyValues } from '@/components/ui/DetailPanel';
 import { ActionBar, Field, FormDialog } from '@/components/ui/Form';
 import { FarmerPaymentDialog, METHOD_LABEL } from '@/components/forms/PaymentDialogs';
 import { apiSend } from '@/lib/api/client';
+import { OpeningBalanceDialog, OpeningBalanceField, OpeningBalanceLine, parseOpening, postOpeningBalance, useCanPostOpening } from '@/components/finance/OpeningBalance';
 import { KEYS, useAction } from '@/lib/hooks/use-action';
 import { useCurrency, useTenantProfile } from '@/lib/hooks/use-lookups';
 import { hasPermission, useSession } from '@/lib/hooks/use-tenant';
@@ -64,8 +66,9 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
   const canPay = hasPermission(session, 'finance:pay');
   const profile = useFarmerProfile(id);
   const [tab, setTab] = useState<Tab>('overview');
-  const [open, setOpen] = useState<'edit' | 'pay' | 'archive' | null>(null);
+  const [open, setOpen] = useState<'edit' | 'pay' | 'archive' | 'opening' | null>(null);
   const close = () => setOpen(null);
+  const canPostOpening = useCanPostOpening();
   const archived = profile.data?.farmer.status === 'archived';
   const toggle = useAction(() => apiSend<FarmerRecord>('POST', `farmers/${id}/${archived ? 'restore' : 'archive'}`), REFRESH, close);
 
@@ -108,6 +111,7 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
               ['Phone', f.contact?.phone ?? '—'],
               ['Main product', main ?? '—'],
               ...(purchases ? ([['Last pickup', formatDateTime(purchases.lastPickupAt, timeZone)]] as [string, string][]) : []),
+              ...(money ? ([['Opening balance', <OpeningBalanceLine key="ob" opening={money.openingBalance} currency={currency} />]] as [string, React.ReactNode][]) : []),
             ]}
           />
           {f.contact?.notes && <p className="muted">{f.contact.notes}</p>}
@@ -125,6 +129,11 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
             {canWrite && !archived && (
               <button type="button" className="button" onClick={() => setOpen('edit')}>
                 {t('Edit')}
+              </button>
+            )}
+            {canPostOpening && money && !money.openingBalance && !archived && (
+              <button type="button" className="button" onClick={() => setOpen('opening')}>
+                {t('Opening balance')}
               </button>
             )}
             {canWrite && (
@@ -245,6 +254,7 @@ function FarmerProfilePanel({ id, onClose }: { id: string; onClose: () => void }
         ))}
 
       {open === 'edit' && <FarmerDialog farmer={f} onClose={close} />}
+      {open === 'opening' && <OpeningBalanceDialog party="farmer" id={f.id} name={f.name} onClose={close} />}
       {open === 'pay' && <FarmerPaymentDialog farmerId={f.id} farmerName={f.name} currency={currency} onClose={close} />}
       {open === 'archive' && (
         <FormDialog
@@ -368,18 +378,42 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
     ifsc: '',
     terms: !farmer || farmer.paymentTerms === 'immediate' ? 'immediate' : farmer.paymentTerms === 'net' ? `net:${farmer.paymentTermsDays}` : farmer.paymentTerms,
     days: farmer?.paymentTermsDays && farmer.paymentTerms !== 'net' ? String(farmer.paymentTermsDays) : '',
+    opening: '',
   });
+  const canPostOpening = useCanPostOpening() && !farmer;
   const [problem, setProblem] = useState<string | null>(null);
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
+  // Added, but the opening balance didn't go: the next tap sends only that — never a second farmer.
+  const [added, setAdded] = useState<FarmerRecord | null>(null);
   const save = useAction(
-    (body: Record<string, unknown>) =>
-      farmer ? apiSend<FarmerRecord>('PATCH', `farmers/${farmer.id}`, body) : apiSend<FarmerRecord>('POST', 'farmers', body),
+    async ({ body, opening }: { body: Record<string, unknown>; opening?: number }) => {
+      if (farmer) return apiSend<FarmerRecord>('PATCH', `farmers/${farmer.id}`, body);
+      const created = added ?? (await apiSend<FarmerRecord>('POST', 'farmers', body));
+      setAdded(created);
+      if (opening === undefined) return created;
+      try {
+        await postOpeningBalance('farmer', created.id, { amount: opening });
+      } catch (e) {
+        throw new Error(
+          t('{name} is added, but the opening balance didn’t go: {reason} Try again, or clear it.', { name: created.name, reason: e instanceof Error ? e.message : String(e) }),
+        );
+      }
+      return created;
+    },
     REFRESH,
     (saved: FarmerRecord) => {
       onSaved?.(saved);
       onClose();
     },
   );
+  const queries = useQueryClient();
+  const close = () => {
+    if (added) {
+      for (const key of REFRESH) void queries.invalidateQueries({ queryKey: key });
+      onSaved?.(added);
+    }
+    onClose();
+  };
 
   const submit = () => {
     if (form.name.trim().length < 2) return setProblem(t("Enter the farmer's name (at least 2 characters)."));
@@ -396,6 +430,8 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
     const needsDays = form.terms === 'bill_to_bill' || form.terms === 'custom';
     const days = Number(form.days);
     if (needsDays && !(Number.isInteger(days) && days >= 1 && days <= 180)) return setProblem(t('Enter the days — a whole number from 1 to 180.'));
+    const opening = canPostOpening ? parseOpening(form.opening) : ({ ok: true, value: undefined } as const);
+    if (!opening.ok) return setProblem(opening.error);
     const [paymentTerms, netDays] = form.terms.startsWith('net:') ? ['net', Number(form.terms.slice(4))] : [form.terms, needsDays ? days : undefined];
     setProblem(null);
     const body: Record<string, unknown> = {
@@ -406,16 +442,16 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
       contact: { phone: optionalText(form.phone), notes: optionalText(form.notes) },
       ...(anyBank ? { bankDetails: { accountHolderName: holder, accountNumber: account, ifscCode: ifsc } } : {}),
     };
-    save.mutate(farmer ? { version: farmer.version, ...body } : body);
+    save.mutate(farmer ? { body: { version: farmer.version, ...body } } : { body, opening: opening.value });
   };
 
   return (
     <FormDialog
       title={farmer ? t('Edit {name}', { name: farmer.name }) : t('Add a farmer')}
-      submitLabel={farmer ? t('Save') : t('Add farmer')}
+      submitLabel={farmer ? t('Save') : added ? t('Try again') : t('Add farmer')}
       pending={save.isPending}
       error={problem ?? save.error}
-      onClose={onClose}
+      onClose={close}
       onSubmit={submit}
     >
       <Field label={t('Name')} wide>
@@ -449,6 +485,7 @@ function FarmerDialog({ farmer, onClose, onSaved }: { farmer: FarmerRecord | nul
       <Field label={t('Notes (optional)')}>
         {(p) => <input {...p} maxLength={500} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />}
       </Field>
+      {canPostOpening && <OpeningBalanceField party="farmer" value={form.opening} onChange={(opening) => set({ opening })} />}
       <Field
         label={t('Bank account holder (optional)')}
         hint={farmer ? t('Blank keeps the bank details already saved') : t('For paying the farmer by bank; can be added later')}

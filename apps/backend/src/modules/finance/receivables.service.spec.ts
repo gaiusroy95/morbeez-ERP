@@ -20,6 +20,8 @@ const customer: CustomerRecord = {
   contact: {},
   place: null,
   address: null,
+  landmark: null,
+  shopPhoto: null,
   routeId: null,
   preferredLanguage: 'en',
   creditLimit: '50000.00',
@@ -100,6 +102,7 @@ describe('ReceivablesService', () => {
             insertCatchUpsWithClient: jest.fn(),
             insertFinanceChargeWithClient: jest.fn().mockResolvedValue('fc-1'),
             findChargesWithClient: jest.fn().mockResolvedValue([]),
+            openingInvoiceWithClient: jest.fn().mockResolvedValue(null),
           },
         },
         { provide: LedgerRepository, useValue: { postWithClient: jest.fn().mockResolvedValue('entry-1'), findEntryWithClient: jest.fn() } },
@@ -126,6 +129,58 @@ describe('ReceivablesService', () => {
   });
 
   const postings = () => ledger.postWithClient.mock.calls.map((c) => c[1]);
+
+  // The client (20 Nov 2026): what an old customer already owed, brought onto Morbeez.
+  describe('issueOpeningBalanceWithClient', () => {
+    const input = { customerId: 'cust-1', amount: '12500.00', issuedAt: new Date('2026-11-19T18:30:00Z'), dueDate: '2026-11-20', note: 'Old ledger, page 14' };
+
+    it('is its own invoice (OB-…), no goods and no GST: Dr Receivable / Cr Opening balances', async () => {
+      repo.nextInvoiceNumberWithClient.mockResolvedValueOnce('OB-000001');
+      const out = await service.issueOpeningBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input);
+      expect(repo.nextInvoiceNumberWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'opening');
+      expect(repo.insertInvoiceWithClient).toHaveBeenCalledWith(
+        fakeClient,
+        expect.objectContaining({
+          kind: 'opening',
+          orderId: null,
+          sourceInvoiceId: null,
+          amount: '12500.00',
+          dueDate: '2026-11-20',
+          issuedAt: input.issuedAt,
+          lines: [expect.objectContaining({ orderLineId: null, productId: null, quantity: '1', unitPrice: '12500.00', amount: '12500.00', description: 'Opening balance brought forward — Old ledger, page 14' })],
+        }),
+      );
+      expect(taxRules.computeInvoiceTaxWithClient).not.toHaveBeenCalled();
+      expect(taxRules.recordInvoiceTaxWithClient).not.toHaveBeenCalled();
+      expect(postings()).toEqual([
+        expect.objectContaining({
+          entryType: 'opening_balance',
+          sourceType: 'invoice',
+          sourceId: 'inv-new',
+          occurredAt: input.issuedAt,
+          lines: [
+            { account: 'accounts_receivable', party: { type: 'customer', id: 'cust-1' }, debit: '12500.00' },
+            { account: 'opening_balances', credit: '12500.00' },
+          ],
+        }),
+      ]);
+      expect(out).toEqual({ invoiceId: 'inv-new', invoiceNumber: 'OB-000001', amount: '12500.00', dueDate: '2026-11-20' });
+    });
+
+    it('is entered once — a second is refused before anything is written', async () => {
+      repo.openingInvoiceWithClient.mockResolvedValueOnce({ id: 'inv-ob', invoiceNumber: 'OB-000001' });
+      await expect(service.issueOpeningBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input)).rejects.toBeInstanceOf(ConflictException);
+      expect(repo.insertInvoiceWithClient).not.toHaveBeenCalled();
+      expect(ledger.postWithClient).not.toHaveBeenCalled();
+    });
+
+    it('never for the walk-in customer, who never owes', async () => {
+      const customers = (service as unknown as { customers: { getByIdWithClient: jest.Mock } }).customers;
+      customers.getByIdWithClient.mockResolvedValueOnce({ ...customer, isWalkIn: true });
+      await expect(service.issueOpeningBalanceWithClient(fakeClient, 'tenant-1', 'user-1', input)).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.insertInvoiceWithClient).not.toHaveBeenCalled();
+    });
+  });
 
   describe('issueSaleInvoiceWithClient', () => {
     const input = {

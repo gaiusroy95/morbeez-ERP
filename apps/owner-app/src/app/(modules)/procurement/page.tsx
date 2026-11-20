@@ -319,7 +319,7 @@ function NewPurchaseOrderDialog({
   );
 }
 
-/** A new agent from inside the form: name, phone, usual commission, PAN (for TDS on commission). */
+/** A new agent from inside the form: name, phone, usual commission, PAN. */
 function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string; onClose: () => void; onAdded: (a: AgentRecord) => void }) {
   const t = useT();
   const [name, setName] = useState(initialName);
@@ -362,7 +362,7 @@ function QuickAddAgent({ initialName, onClose, onAdded }: { initialName: string;
       <Field label={t('Usual commission (₹/kg)')}>
         {(p) => <input {...p} inputMode="decimal" value={commission} onChange={(e) => setCommission(e.target.value)} />}
       </Field>
-      <Field label={t('PAN (optional)')} hint={t('For TDS on commission (194H)')}>
+      <Field label={t('PAN (optional)')}>
         {(p) => <input {...p} autoComplete="off" maxLength={10} value={pan} onChange={(e) => setPan(e.target.value)} />}
       </Field>
     </FormDialog>

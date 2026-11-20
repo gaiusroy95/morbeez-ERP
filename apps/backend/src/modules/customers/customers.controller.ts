@@ -1,12 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthContext } from '../../common/types/auth-context';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { CustomersService } from './customers.service';
+import { CustomersService, ShopPhotoFile } from './customers.service';
+
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { UpdateCreditTermsDto } from './dto/update-credit-terms.dto';
@@ -111,5 +115,30 @@ export class CustomersController {
   @RequirePermissions('customers:write')
   restore(@CurrentUser() user: AuthContext, @Param('id') id: string): Promise<CustomerRecord> {
     return this.customersService.restore(user.tenantId, user.userId, id);
+  }
+
+  /** The photo of the shop's front (customer onboarding); a new one replaces it. */
+  @Post(':id/shop-photo')
+  @RequirePermissions('customers:write')
+  @ApiConsumes('multipart/form-data')
+  // No `storage`/`dest`: multer keeps the upload in memory (file.buffer).
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PHOTO_BYTES } }))
+  setShopPhoto(
+    @CurrentUser() user: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file?: ShopPhotoFile,
+  ): Promise<CustomerRecord> {
+    if (!file) throw new BadRequestException('No file uploaded');
+    return this.customersService.setShopPhoto(user.tenantId, user.userId, id, file);
+  }
+
+  /** The shop's photo itself. */
+  @Get(':id/shop-photo')
+  @RequirePermissions('customers:read')
+  async shopPhoto(@CurrentUser() user: AuthContext, @Param('id', ParseUUIDPipe) id: string, @Res() res: Response): Promise<void> {
+    const photo = await this.customersService.shopPhoto(user.tenantId, id);
+    res.setHeader('content-type', photo.contentType);
+    res.setHeader('cache-control', 'private, max-age=300');
+    res.send(photo.body);
   }
 }

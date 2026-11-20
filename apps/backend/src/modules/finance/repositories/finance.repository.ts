@@ -43,12 +43,14 @@ export interface PayableRow {
 }
 
 export interface PayableLotRow {
-  lot_id: string;
-  purchase_order_id: string;
-  product_id: string;
+  payable_id: string;
+  kind: 'lot' | 'opening';
+  lot_id: string | null;
+  purchase_order_id: string | null;
+  product_id: string | null;
   product_name: string;
-  accepted_quantity: string;
-  unit_cost: string;
+  accepted_quantity: string | null;
+  unit_cost: string | null;
   amount: string;
   paid: string;
   outstanding: string;
@@ -299,12 +301,14 @@ export class FinanceRepository {
 
   async payableLotsForFarmer(client: PoolClient, farmerId: string): Promise<PayableLotRow[]> {
     const result = await client.query<PayableLotRow>(
-      `SELECT b.lot_id, l.purchase_order_id, l.product_id, p.name AS product_name,
+      // A balance brought forward has no lot: it shows as the opening balance, oldest first.
+      `SELECT b.payable_id, CASE WHEN b.lot_id IS NULL THEN 'opening' ELSE 'lot' END AS kind,
+              b.lot_id, l.purchase_order_id, l.product_id, COALESCE(p.name, 'Opening balance') AS product_name,
               l.accepted_quantity::text AS accepted_quantity, l.unit_cost::text AS unit_cost,
               b.amount::text AS amount, b.paid::text AS paid, b.outstanding::text AS outstanding, b.accrued_at
        FROM money.farmer_payable_balance b
-       JOIN commerce.lot l ON l.id = b.lot_id
-       JOIN trading_partners.product p ON p.id = l.product_id
+       LEFT JOIN commerce.lot l ON l.id = b.lot_id
+       LEFT JOIN trading_partners.product p ON p.id = l.product_id
        WHERE b.farmer_id = $1 AND b.outstanding > 0
        ORDER BY b.accrued_at`,
       [farmerId],
@@ -433,11 +437,16 @@ export class FinanceRepository {
     endAt: Date,
   ): Promise<{ opening: string; lines: StatementRow[] }> {
     const events = `
-      SELECT i.issued_at AS at, CASE WHEN i.kind = 'sale' THEN 'invoice' ELSE 'finance_charge' END AS kind,
+      SELECT i.issued_at AS at, CASE WHEN i.kind = 'finance_charge' THEN 'finance_charge' ELSE 'invoice' END AS kind,
              i.invoice_number AS reference,
              -- The due date in force (a Bill-to-Bill bill falls due at the next one), not only the stored backstop.
-             CASE WHEN i.kind = 'sale' THEN 'Invoice, due ' || to_char(b.due_date, 'DD Mon YYYY')
-                  ELSE 'Finance charge on ' || si.invoice_number END AS description,
+             CASE i.kind
+               WHEN 'sale' THEN 'Invoice, due ' || to_char(b.due_date, 'DD Mon YYYY')
+               WHEN 'finance_charge' THEN 'Finance charge on ' || si.invoice_number
+               WHEN 'crate_charge' THEN 'Lost crates, due ' || to_char(b.due_date, 'DD Mon YYYY')
+               WHEN 'spot_sale' THEN 'Spot sale'
+               WHEN 'opening' THEN 'Opening balance brought forward, due ' || to_char(b.due_date, 'DD Mon YYYY')
+             END AS description,
              i.amount AS debit, 0::numeric AS credit
         FROM money.invoice i
         JOIN money.invoice_balance b ON b.invoice_id = i.id

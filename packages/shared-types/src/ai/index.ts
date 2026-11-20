@@ -136,7 +136,8 @@ export interface PricingBoard {
   currency: string;
   targetMarginPct: string;
   deliveryPerKg: string | null;
-  deliveryWindow: { from: IsoDate; to: IsoDate; cost: string; kg: string };
+  /** Where delivery per KG came from: closed trips' cost allocation (Master Spec v3 P5), or the estimate before any trip closed. */
+  deliveryWindow: { from: IsoDate; to: IsoDate; cost: string; kg: string; source: 'allocated' | 'estimated' };
   rows: PricingRow[];
 }
 

@@ -57,9 +57,10 @@ async function get(token, path) {
     await page.waitForURL((u) => !/\/login/.test(u.toString()));
     await page.goto(`${BASE}/dashboard`);
     await page.waitForSelector('.net-card', { timeout: 20000 });
+    // The client, 20 Nov 2026: "Dashboard Procurement Delivery three button enough".
     const tabs = await page.locator('.bottom-nav').getByRole('link').allInnerTexts();
-    check('tab bar: Home · Operations · Finance (+ the create and More buttons)', tabs.join('|') === 'Home|Operations|Finance', tabs.join('|'));
-    check('tab bar has the (+) and More', (await page.getByRole('button', { name: 'Create', exact: true }).count()) === 1 && (await page.getByRole('button', { name: 'More' }).count()) === 1);
+    check('tab bar: Dashboard · Procurement · Delivery — three buttons', tabs.map((x) => x.trim()).join('|') === 'Dashboard|Procurement|Delivery', tabs.join('|'));
+    check('…and nothing else in it — no (+), no More', (await page.locator('.bottom-nav button').count()) === 0);
 
     const shown = await page.locator('.money-tile-value').allInnerTexts();
     check('Home shows four money tiles', shown.length === 4, shown.join(' | '));
@@ -75,8 +76,18 @@ async function get(token, path) {
     const tab = await page.locator('.segmented button[aria-pressed="true"]').first().innerText();
     check('Receivables tile opens Finance on the Receivables tab', /Receivables/.test(tab), tab);
 
-    // Operations hub.
-    await page.locator('.bottom-nav').getByRole('link', { name: 'Operations' }).click();
+    // The tabs.
+    await page.locator('.bottom-nav').getByRole('link', { name: 'Procurement' }).click();
+    await page.waitForURL(/\/procurement$/);
+    await page.locator('.bottom-nav').getByRole('link', { name: 'Delivery' }).click();
+    await page.waitForURL(/\/orders$/);
+    check('Procurement and Delivery open their screens', true);
+    await page.locator('.bottom-nav').getByRole('link', { name: 'Dashboard' }).click();
+    await page.waitForURL(/\/dashboard$/);
+
+    // Operations hub, from the side menu (☰).
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
+    await page.locator('.sidebar').getByRole('link', { name: 'Operations', exact: true }).click();
     await page.waitForSelector('.op-tile');
     check('Operations hub shows eight tiles', (await page.locator('.op-tile').count()) === 8);
     await page.fill('.search-box input', 'farm');
@@ -87,19 +98,18 @@ async function get(token, path) {
     await page.waitForURL(/\/logistics/);
     check('a hub tile opens its screen', true);
 
-    // (+): each item opens its page with the form already open.
-    for (const [label, url] of [
-      ['Create Procurement', /\/procurement$/],
-      ['Create Delivery Order', /\/orders$/],
-      ['Create Trip', /\/logistics$/],
-      ['Add Customer', /\/customers$/],
-      ['Add Farmer', /\/farmers$/],
+    // A create link (?new=1 — Home's tiles, a profile's "New Order") opens its page with the form already open.
+    for (const [label, path, url] of [
+      ['Create Procurement', '/procurement?new=1', /\/procurement$/],
+      ['Create Delivery Order', '/orders?new=1', /\/orders$/],
+      ['Create Trip', '/logistics?new=1', /\/logistics$/],
+      ['Add Customer', '/customers?new=1', /\/customers$/],
+      ['Add Farmer', '/farmers?new=1', /\/farmers$/],
     ]) {
-      await page.getByRole('button', { name: 'Create', exact: true }).click();
-      await page.getByRole('link', { name: label }).click();
+      await page.goto(`${BASE}${path}`);
       await page.waitForURL(url, { timeout: 15000 });
       const open = await page.waitForSelector('dialog[open]', { timeout: 15000 }).then(() => true).catch(() => false);
-      check(`(+) → ${label} opens the form`, open, page.url());
+      check(`${label} (?new=1) opens the form`, open, page.url());
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
       await page.reload();
@@ -107,10 +117,10 @@ async function get(token, path) {
       check(`…and a reload doesn't open it again (${label})`, (await page.locator('dialog[open]').count()) === 0);
     }
 
-    // More opens the side menu.
-    await page.getByRole('button', { name: 'More' }).click();
+    // ☰ opens the side menu.
+    await page.getByRole('button', { name: 'Menu', exact: true }).click();
     const drawer = await page.locator('.sidebar[data-open="true"]').isVisible();
-    check('More opens the side menu', drawer);
+    check('☰ opens the side menu', drawer);
     await page.locator('.sidebar').getByRole('link', { name: 'Vehicles' }).click();
     await page.waitForURL(/\/vehicles/);
     check('a side menu link goes to its screen and closes the menu', (await page.locator('.sidebar[data-open="true"]').count()) === 0);

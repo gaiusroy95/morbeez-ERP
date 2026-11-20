@@ -29,7 +29,8 @@ export class FarmerInsightsRepository {
   async figuresWithClient(client: PoolClient, farmerId: string | null = null): Promise<FarmerFiguresRow[]> {
     const r = await client.query<FarmerFiguresRow>(
       `WITH payable AS (
-         SELECT farmer_id, SUM(amount) AS purchases, SUM(outstanding) AS owed,
+         -- Purchases are lots; what's owed includes a balance brought forward.
+         SELECT farmer_id, SUM(amount) FILTER (WHERE lot_id IS NOT NULL) AS purchases, SUM(outstanding) AS owed,
                 MIN(accrued_at) FILTER (WHERE outstanding > 0) AS oldest_unpaid_at
          FROM money.farmer_payable_balance WHERE $1::uuid IS NULL OR farmer_id = $1
          GROUP BY farmer_id
@@ -147,13 +148,29 @@ export class FarmerInsightsRepository {
       `WITH tz AS (SELECT timezone FROM tenant.tenant WHERE id = current_tenant_id())
        SELECT COALESCE(SUM(b.outstanding) FILTER (WHERE b.outstanding > 0 AND b.due_date < (now() AT TIME ZONE tz.timezone)::date), 0)::numeric(12,2)::text AS overdue,
               ROUND(AVG(((COALESCE(a.settled_at, b.accrued_at) AT TIME ZONE tz.timezone)::date - (b.accrued_at AT TIME ZONE tz.timezone)::date))
-                    FILTER (WHERE b.outstanding <= 0), 1)::text AS avg_days
+                    FILTER (WHERE b.outstanding <= 0 AND b.lot_id IS NOT NULL), 1)::text AS avg_days
          FROM money.farmer_payable_balance b CROSS JOIN tz
          LEFT JOIN LATERAL (SELECT MAX(x.allocated_at) AS settled_at FROM money.farmer_payment_allocation x WHERE x.payable_id = b.payable_id) a ON true
         WHERE b.farmer_id = $1`,
       [farmerId],
     );
     return { overdue: r.rows[0].overdue, avgPaymentDays: r.rows[0].avg_days };
+  }
+
+  /** What was owed to them when they came onto Morbeez, and what of it is still owed. */
+  async openingBalanceWithClient(
+    client: PoolClient,
+    farmerId: string,
+  ): Promise<{ amount: string; outstanding: string; asOf: string; dueDate: string } | null> {
+    const r = await client.query<{ amount: string; outstanding: string; as_of: string; due_date: string }>(
+      `SELECT b.amount::text AS amount, b.outstanding::text AS outstanding,
+              (b.accrued_at AT TIME ZONE t.timezone)::date::text AS as_of, b.due_date::text AS due_date
+         FROM money.farmer_payable_balance b JOIN tenant.tenant t ON t.id = b.tenant_id
+        WHERE b.farmer_id = $1 AND b.lot_id IS NULL`,
+      [farmerId],
+    );
+    const row = r.rows[0];
+    return row ? { amount: row.amount, outstanding: row.outstanding, asOf: row.as_of, dueDate: row.due_date } : null;
   }
 
   async pinWithClient(client: PoolClient, farmerId: string): Promise<{ latitude: string; longitude: string } | null> {

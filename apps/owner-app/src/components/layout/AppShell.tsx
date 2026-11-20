@@ -193,7 +193,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      {/* Phones only (CSS): Home · Operations · (+) · Finance · More. */}
+      {/* Phones only (CSS): Dashboard · Procurement · Delivery (nav.ts BOTTOM_TABS). */}
       <nav className="bottom-nav" aria-label={t('Quick links')}>
         {BOTTOM_TABS.map((tab) => {
           if (tab.kind === 'create') {

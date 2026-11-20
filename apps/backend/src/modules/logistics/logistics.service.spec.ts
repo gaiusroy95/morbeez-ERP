@@ -3,6 +3,7 @@ import { ObjectStorageService } from '../../infra/storage/object-storage.service
 import { PoolClient } from 'pg';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { closingStockOf, LogisticsService, mondayOf, quantitiesOf } from './logistics.service';
+import { CostingService } from '../costing/costing.service';
 import { TripsRepository } from './repositories/trips.repository';
 import { TripStopsRepository } from './repositories/trip-stops.repository';
 import { TripExpensesRepository } from './repositories/trip-expenses.repository';
@@ -178,6 +179,7 @@ function makeStop(overrides: Partial<TripStopRecord>): TripStopRecord {
 
 describe('LogisticsService', () => {
   let service: LogisticsService;
+  let costing: { allocateTripWithClient: jest.Mock };
   let delegation: { assertCan: jest.Mock; authorityOnTrip: jest.Mock };
   let measures: { lineFactsWithClient: jest.Mock; insertWithClient: jest.Mock };
   let alertsRepo: { raiseWithClient: jest.Mock };
@@ -301,6 +303,7 @@ describe('LogisticsService', () => {
           },
         },
         { provide: DisputesService, useValue: { raise: jest.fn().mockResolvedValue({ id: 'dispute-1' }), list: jest.fn().mockResolvedValue([]) } },
+        { provide: CostingService, useValue: { allocateTripWithClient: jest.fn() } },
         {
           provide: TripIncentivesService,
           useValue: {
@@ -396,6 +399,7 @@ describe('LogisticsService', () => {
     }).compile();
 
     service = module.get(LogisticsService);
+    costing = module.get(CostingService);
     trips = module.get(TripsRepository);
     stops = module.get(TripStopsRepository);
     expenses = module.get(TripExpensesRepository);
@@ -1402,6 +1406,8 @@ describe('LogisticsService', () => {
       'user-1',
       expect.objectContaining({ advanceAmount: '500', cashIn: '1200.00', totalExpenses: '300', cashDeposited: '0.00', cashReturned: '1400' }),
     );
+    // Master Spec v3 P5: costed in the same transaction, once the incentives are recorded.
+    expect(costing.allocateTripWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', 'trip-1');
   });
 
   it("reconcileTrip counts the vehicle against what's on it and brings the stock back, short kilos written off", async () => {

@@ -65,6 +65,34 @@ export function localDateTimeToIso(value: string): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+/**
+ * Where a place is, as someone enters it: "12.3108, 76.6402" (a comma or a
+ * space between), or a Google Maps link pasted from the share button
+ * (…/@12.3108,76.6402,17z, …?q=12.3108,76.6402, …!3d12.3108!4d76.6402).
+ * Blank is no location (null). Kept to 6 decimals — about 10 cm.
+ */
+export function parseLocation(text: string): Parsed<{ latitude: number; longitude: number } | null> {
+  const value = text.trim();
+  if (!value) return ok(null);
+  const n = String.raw`(-?\d{1,3}(?:\.\d+)?)`;
+  const patterns = [
+    new RegExp(String.raw`!3d${n}!4d${n}`),
+    new RegExp(String.raw`@${n},${n}`),
+    new RegExp(String.raw`[?&](?:q|query|ll|destination)=${n}(?:,|%2C)\s*${n}`, 'i'),
+    new RegExp(String.raw`^${n}\s*[,\s]\s*${n}$`),
+  ];
+  for (const pattern of patterns) {
+    const m = value.match(pattern);
+    if (!m) continue;
+    const latitude = Number(m[1]);
+    const longitude = Number(m[2]);
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) break;
+    if (latitude === 0 && longitude === 0) break;
+    return ok({ latitude: Math.round(latitude * 1e6) / 1e6, longitude: Math.round(longitude * 1e6) / 1e6 });
+  }
+  return fail('Enter the location as latitude, longitude (e.g. 12.3108, 76.6402), paste a Google Maps link, or use this phone’s location.');
+}
+
 /** Collects the first error from a set of parsed fields, or their values. */
 export function firstError(results: Parsed<unknown>[]): string | null {
   for (const result of results) if (!result.ok) return result.error;

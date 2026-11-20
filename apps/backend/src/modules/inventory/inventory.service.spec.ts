@@ -42,6 +42,7 @@ const baseProduct: ProductRecord = {
   kind: 'standard',
   packSize: null,
   lossTolerancePct: null,
+  unitWeightKg: null,
   status: 'active',
   version: 1,
   createdAt: new Date(),

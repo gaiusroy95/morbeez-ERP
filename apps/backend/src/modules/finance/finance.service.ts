@@ -123,6 +123,8 @@ export class FinanceService {
     return this.db.withTenant(tenantId, async (client) => {
       const rows = await this.finance.payableLotsForFarmer(client, farmerId);
       return rows.map((row) => ({
+        payableId: row.payable_id,
+        kind: row.kind,
         lotId: row.lot_id,
         purchaseOrderId: row.purchase_order_id,
         productId: row.product_id,

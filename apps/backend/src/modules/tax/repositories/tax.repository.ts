@@ -323,7 +323,7 @@ export class TaxRepository {
       `SELECT f.id AS farmer_id, f.name, f.status, ft.pan, ft.deductee_type, COALESCE(ft.tds_exempt, false) AS tds_exempt,
               ft.exempt_reason, COALESCE(ft.version, 0) AS version,
               COALESCE((SELECT SUM(p.amount) FROM money.farmer_payable p
-                        WHERE p.farmer_id = f.id AND p.accrued_at >= ($2::date::timestamp AT TIME ZONE $1)), 0)::text AS purchases,
+                        WHERE p.farmer_id = f.id AND p.kind = 'lot' AND p.accrued_at >= ($2::date::timestamp AT TIME ZONE $1)), 0)::text AS purchases,
               COALESCE((SELECT SUM(d.tds_amount) FROM tax.tds_deduction d
                         WHERE d.farmer_id = f.id AND d.deducted_on >= $2::date), 0)::text AS tds
        FROM trading_partners.farmer f LEFT JOIN tax.farmer_tax ft ON ft.farmer_id = f.id

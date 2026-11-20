@@ -169,6 +169,7 @@ function FarmerLots({
   currency: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const { data, error, isPending, refetch } = usePayableLots(farmerId);
   const timeZone = useTimeZone();
   const { data: session } = useSession();
@@ -213,11 +214,11 @@ function FarmerLots({
             <tbody>
               {unpaid.length === 0 && <EmptyRow colSpan={6}>Nothing unpaid.</EmptyRow>}
               {unpaid.map((lot) => (
-                <tr key={lot.lotId}>
+                <tr key={lot.payableId}>
                   <td>{formatDateTime(lot.accruedAt, timeZone)}</td>
-                  <td>{lot.productName}</td>
-                  <td className="align-right">{formatQuantity(lot.acceptedQuantity)}</td>
-                  <td className="align-right">{formatMoney(lot.unitCost, currency)}</td>
+                  <td>{lot.kind === 'opening' ? t('Opening balance') : lot.productName}</td>
+                  <td className="align-right">{lot.acceptedQuantity === null ? '—' : formatQuantity(lot.acceptedQuantity)}</td>
+                  <td className="align-right">{lot.unitCost === null ? '—' : formatMoney(lot.unitCost, currency)}</td>
                   <td className="align-right">{formatMoney(lot.amount, currency)}</td>
                   <td className="align-right strong">{formatMoney(lot.outstanding, currency)}</td>
                 </tr>

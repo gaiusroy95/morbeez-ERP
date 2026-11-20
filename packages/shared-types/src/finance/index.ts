@@ -50,12 +50,16 @@ export interface PayablesReport {
 }
 
 export interface PayableLot {
-  lotId: string;
-  purchaseOrderId: string;
-  productId: string;
+  /** What a payment allocation names for a row with no lot (the opening balance). */
+  payableId: string;
+  /** 'opening': owed when the farmer came onto Morbeez — no lot, product or quantity. */
+  kind: 'lot' | 'opening';
+  lotId: string | null;
+  purchaseOrderId: string | null;
+  productId: string | null;
   productName: string;
-  acceptedQuantity: string;
-  unitCost: string;
+  acceptedQuantity: string | null;
+  unitCost: string | null;
   amount: string;
   paid: string;
   outstanding: string;
@@ -118,7 +122,18 @@ export interface TripCashReport {
 // ---- Write-side records ----
 
 export type PaymentMethod = 'cash' | 'upi' | 'bank_transfer' | 'cheque';
-export type InvoiceKind = 'sale' | 'finance_charge' | 'crate_charge' | 'spot_sale';
+/** 'opening': what a customer already owed when they came onto Morbeez (OB-000001). */
+export type InvoiceKind = 'sale' | 'finance_charge' | 'crate_charge' | 'spot_sale' | 'opening';
+
+/** POST finance/customers/:id/opening-balance and finance/farmers/:id/opening-balance (accounting:post). */
+export interface OpeningBalanceBody {
+  amount: number;
+  /** YYYY-MM-DD, today if left out; not in a closed period. */
+  asOf?: IsoDate;
+  /** YYYY-MM-DD, the as-of day if left out. */
+  dueDate?: IsoDate;
+  note?: string;
+}
 export type InvoiceState = 'open' | 'overdue' | 'paid';
 
 export interface InvoiceLineRecord {
@@ -187,7 +202,8 @@ export interface FarmerPaymentRecord {
   paidAt: IsoDateTime;
   applied: string;
   unapplied: string; // an advance, drawn down by the farmer's next graded lots
-  allocations?: { lotId: string; amount: string; allocatedAt: IsoDateTime }[];
+  /** lotId null: the opening balance. */
+  allocations?: { lotId: string | null; amount: string; allocatedAt: IsoDateTime }[];
 }
 
 /** GET /procurement/purchase-orders/:id/settlements — what each lot of a PO owes and has been paid. */
@@ -239,7 +255,8 @@ export interface RecordFarmerPaymentBody {
   reference?: string;
   notes?: string;
   paidAt?: IsoDateTime;
-  allocations?: { lotId: string; amount: number }[];
+  /** A lot by its id, or the opening balance by its payableId — one of the two. */
+  allocations?: ({ lotId: string; amount: number } | { payableId: string; amount: number })[];
 }
 
 /** An invoice dispute (client Q&A, finance): finance charges pause on its amount while it's open. */

@@ -42,4 +42,11 @@ export class CreateProductDto {
   @Min(0)
   @Max(100)
   lossTolerancePct?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'What one unit weighs (kg), for a product not sold by weight — an egg ≈ 0.06; its KG share of trip costs (Master Spec v3 P5)' })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Min(0.0001)
+  @Max(1000)
+  unitWeightKg?: number | null;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstError, optionalText, parseDecimal, parseMoney, parseOptionalMoney, parseQuantity, parseWholeNumber } from './parse';
+import { firstError, optionalText, parseDecimal, parseLocation, parseMoney, parseOptionalMoney, parseQuantity, parseWholeNumber } from './parse';
 
 // What an owner types becomes what the API is sent — a wrong conversion here
 // is a wrong price or quantity on a real invoice (Testing Strategy UT.4).
@@ -51,5 +51,28 @@ describe('optional and whole-number fields', () => {
   it('firstError reports the first problem among several fields', () => {
     expect(firstError([parseMoney('5', 'a'), parseMoney('', 'the price'), parseMoney('x', 'b')])).toBe('Enter the price.');
     expect(firstError([parseMoney('5', 'a')])).toBeNull();
+  });
+});
+
+// A new customer's shop, taken down by the owner (client, 20 Nov 2026): typed, or pasted from Google Maps.
+describe('parseLocation', () => {
+  const at = (latitude: number, longitude: number) => ({ ok: true, value: { latitude, longitude } });
+  it('typed: a comma or a space between, any spacing, rounded to 6 places', () => {
+    expect(parseLocation('12.3108, 76.6402')).toEqual(at(12.3108, 76.6402));
+    expect(parseLocation(' 12.3108 76.6402 ')).toEqual(at(12.3108, 76.6402));
+    expect(parseLocation('12.31081234,76.64019876')).toEqual(at(12.310812, 76.640199));
+    expect(parseLocation('-33.8688, 151.2093')).toEqual(at(-33.8688, 151.2093));
+  });
+  it('pasted from Google Maps: the pin, the place link or a search', () => {
+    expect(parseLocation('https://www.google.com/maps/place/Hotel/@12.3051,76.6551,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d12.305123!4d76.655456')).toEqual(at(12.305123, 76.655456));
+    expect(parseLocation('https://www.google.com/maps/@12.3051,76.6551,17z')).toEqual(at(12.3051, 76.6551));
+    expect(parseLocation('https://maps.google.com/?q=12.3051,76.6551')).toEqual(at(12.3051, 76.6551));
+    expect(parseLocation('https://www.google.com/maps/search/?api=1&query=12.3051%2C76.6551')).toEqual(at(12.3051, 76.6551));
+  });
+  it('blank is no location; nonsense, out of range or 0, 0 asks again', () => {
+    expect(parseLocation('  ')).toEqual({ ok: true, value: null });
+    for (const bad of ['near the bus stand', '95.1, 76.6', '12.3, 190', '0, 0', '12.3', 'https://maps.app.goo.gl/AbCd123']) {
+      expect(parseLocation(bad).ok, bad).toBe(false);
+    }
   });
 });

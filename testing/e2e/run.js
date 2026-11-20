@@ -80,9 +80,17 @@ const CHAINS = {
     'tenant-isolation-e2e.js',
   ],
   // Master Spec v3 P6: credit notes, dispute settlement and catch-up, bad debts,
-  // agent commission with TDS, terms versions, farmer terms, Bill-to-Bill — and
+  // agent commission (no TDS), terms versions, farmer terms, Bill-to-Bill — and
   // the books even. A GST-registered business of its own; makes its own data.
   p6: ['finance-p6-e2e.js'],
+  // Master Spec v3 P5: trip costs shared out as each trip closes (two pools),
+  // the standard and variance, true cost and contribution at every level,
+  // finance cost, backfill and AI Pricing. Makes its own data, on the seed.
+  p5: ['costing-p5-e2e.js'],
+  // Customer onboarding (the client, 20 Nov 2026): contact person, GPS
+  // location as the map pin, landmark, shop front photo — API and the owner
+  // app on a phone at the shop. Makes its own data, on the seed.
+  onboarding: ['customer-onboarding-e2e.js', 'opening-balances-e2e.js'],
   // WhatsApp orders, Sarvam AI reading them, AI calls by Sarvam's voice agent —
   // against local stand-ins for Meta and Sarvam (CHAIN_ENV); makes its own data.
   integrations: ['integrations-e2e.js'],

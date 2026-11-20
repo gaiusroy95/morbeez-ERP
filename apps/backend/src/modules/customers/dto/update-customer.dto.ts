@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { CustomerContactDto } from './customer-contact.dto';
 import { LANGUAGES } from '../../../common/languages';
 
@@ -54,4 +54,24 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsBoolean()
   doNotCall?: boolean;
+
+  @ApiPropertyOptional({ description: 'How a driver finds the shop; null or blank clears it', nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  landmark?: string | null;
+
+  @ApiPropertyOptional({ description: "Where the shop is (GPS), with longitude — the customer's map pin. Both null take the pin away", nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number | null;
+
+  @ApiPropertyOptional({ description: 'With latitude', nullable: true })
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number | null;
 }

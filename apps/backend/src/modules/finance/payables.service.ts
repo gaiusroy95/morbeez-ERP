@@ -95,20 +95,7 @@ export class PayablesService {
     });
     const withheld = tds?.tdsAmount ?? '0.00';
 
-    // Draw down advances, oldest first.
-    let remaining = subtractMoney(amount, withheld);
-    const advances = await this.payables.unappliedPaymentsForFarmerWithClient(client, input.farmerId);
-    const drawn: { paymentId: string; payableId: string; amount: string }[] = [];
-    for (const advance of advances) {
-      if (!isPositiveMoney(remaining)) break;
-      const { allocations } = allocateInOrder(advance.unapplied, [{ id: payableId, outstanding: remaining }]);
-      for (const a of allocations) {
-        drawn.push({ paymentId: advance.id, payableId, amount: a.amount });
-        remaining = subtractMoney(remaining, a.amount);
-      }
-    }
-    await this.payables.insertAllocationsWithClient(client, tenantId, drawn);
-    const fromAdvance = sumMoney(drawn.map((d) => d.amount));
+    const { fromAdvance, remaining } = await this.drawDownAdvancesWithClient(client, tenantId, input.farmerId, payableId, subtractMoney(amount, withheld));
 
     const entryId = await this.ledger.postWithClient(client, {
       tenantId,
@@ -157,6 +144,87 @@ export class PayablesService {
       after: { lotId: input.lotId, farmerId: input.farmerId, amount, fromAdvance, tdsWithheld: withheld },
     });
     return { lotId: input.lotId, payable: amount, paid: sumMoney([fromAdvance, withheld]), outstanding: remaining };
+  }
+
+  /** What the farmer was paid ahead (ADV.2) meets a new payable, oldest advance first. */
+  private async drawDownAdvancesWithClient(
+    client: PoolClient,
+    tenantId: string,
+    farmerId: string,
+    payableId: string,
+    owed: string,
+  ): Promise<{ fromAdvance: string; remaining: string }> {
+    let remaining = owed;
+    const advances = await this.payables.unappliedPaymentsForFarmerWithClient(client, farmerId);
+    const drawn: { paymentId: string; payableId: string; amount: string }[] = [];
+    for (const advance of advances) {
+      if (!isPositiveMoney(remaining)) break;
+      const { allocations } = allocateInOrder(advance.unapplied, [{ id: payableId, outstanding: remaining }]);
+      for (const a of allocations) {
+        drawn.push({ paymentId: advance.id, payableId, amount: a.amount });
+        remaining = subtractMoney(remaining, a.amount);
+      }
+    }
+    await this.payables.insertAllocationsWithClient(client, tenantId, drawn);
+    return { fromAdvance: sumMoney(drawn.map((d) => d.amount)), remaining };
+  }
+
+  // ---- Opening balance (the client, 20 Nov 2026) ----
+
+  /**
+   * What was already owed to a farmer when the business moved onto Morbeez:
+   * a payable with no lot — one per farmer — paid like any other, oldest
+   * first. It was never a purchase here: no stock, no TDS (the old books
+   * settled that), and it stays out of purchase totals.
+   *   Dr Opening balances            the amount
+   *   Cr Farmer advances             up to what the farmer was paid ahead
+   *   Cr Accounts payable — farmer   the rest
+   */
+  async openingBalanceWithClient(
+    client: PoolClient,
+    tenantId: string,
+    actorUserId: string,
+    input: { farmerId: string; amount: string; accruedAt: Date; dueDate: string; note: string | null },
+  ): Promise<{ payableId: string; amount: string; fromAdvance: string; outstanding: string }> {
+    const name = await this.payables.farmerNameWithClient(client, input.farmerId);
+    if (name === null) throw new NotFoundException('Farmer not found');
+    const farmer = { id: input.farmerId, name };
+    await this.payables.lockFarmerWithClient(client, farmer.id);
+    if (await this.payables.openingPayableWithClient(client, farmer.id)) {
+      throw new ConflictException(`${farmer.name} already has an opening balance — it's entered once`);
+    }
+    const payableId = await this.payables.insertOpeningPayableWithClient(client, {
+      tenantId,
+      farmerId: farmer.id,
+      amount: input.amount,
+      accruedAt: input.accruedAt,
+      dueDate: input.dueDate,
+      createdBy: actorUserId,
+    });
+    const { fromAdvance, remaining } = await this.drawDownAdvancesWithClient(client, tenantId, farmer.id, payableId, input.amount);
+    await this.ledger.postWithClient(client, {
+      tenantId,
+      entryType: 'opening_balance',
+      sourceType: PAYABLE_ENTITY,
+      sourceId: payableId,
+      occurredAt: input.accruedAt,
+      memo: `Opening balance owed to ${farmer.name}${input.note ? ` — ${input.note}` : ''}${isPositiveMoney(fromAdvance) ? ` (${fromAdvance} met from advance)` : ''}`,
+      createdBy: actorUserId,
+      lines: [
+        { account: 'opening_balances', debit: input.amount },
+        { account: 'farmer_advance', party: { type: 'farmer', id: farmer.id }, credit: fromAdvance },
+        { account: 'accounts_payable_farmer', party: { type: 'farmer', id: farmer.id }, credit: remaining },
+      ],
+    });
+    await this.audit.record(client, {
+      tenantId,
+      actorUserId,
+      action: 'create',
+      entityType: PAYABLE_ENTITY,
+      entityId: payableId,
+      after: { kind: 'opening', farmerId: farmer.id, amount: input.amount, dueDate: input.dueDate, note: input.note, fromAdvance },
+    });
+    return { payableId, amount: input.amount, fromAdvance, outstanding: remaining };
   }
 
   // ---- Payments ----
@@ -226,7 +294,8 @@ export class PayablesService {
 
       const paidLots = allocations
         .filter((a) => compareMoney(a.amount, open.find((o) => o.id === a.id)?.outstanding ?? '0') === 0)
-        .map((a) => open.find((o) => o.id === a.id)?.lotId as string);
+        .map((a) => open.find((o) => o.id === a.id)?.lotId)
+        .filter((lotId): lotId is string => !!lotId); // an opening balance has no lot to close
       return {
         payment: (await this.payables.findPaymentWithClient(client, paymentId)) as FarmerPaymentRecord,
         fullyPaidLots: paidLots,
@@ -282,7 +351,8 @@ export class PayablesService {
     });
     const fullyPaidLots = allocations
       .filter((a) => compareMoney(a.amount, open.find((o) => o.id === a.id)?.outstanding ?? '0') === 0)
-      .map((a) => open.find((o) => o.id === a.id)?.lotId as string);
+      .map((a) => open.find((o) => o.id === a.id)?.lotId)
+      .filter((lotId): lotId is string => !!lotId);
     return { entryId, deductions: allocations.map((a) => ({ payableId: a.id, amount: a.amount })), fullyPaidLots };
   }
 
@@ -322,18 +392,21 @@ export class PayablesService {
   private explicitAllocations(
     open: OpenPayable[],
     amount: string,
-    requested: { lotId: string; amount: number }[],
+    requested: { lotId?: string; payableId?: string; amount: number }[],
   ): { id: string; amount: string }[] {
     const seen = new Set<string>();
     const allocations = requested.map((r) => {
-      if (seen.has(r.lotId)) throw new BadRequestException('Each lot may appear only once in allocations');
-      seen.add(r.lotId);
-      const payable = open.find((p) => p.lotId === r.lotId);
-      if (!payable) throw new BadRequestException(`Lot ${r.lotId} has nothing owed to this farmer`);
+      // A lot by its id; what's owed without a lot (an opening balance) by its payable's.
+      if (!r.lotId === !r.payableId) throw new BadRequestException('Each allocation names a lot, or a payable without one (an opening balance)');
+      const payable = r.lotId ? open.find((p) => p.lotId === r.lotId) : open.find((p) => p.id === r.payableId);
+      const what = r.lotId ? `lot ${r.lotId}` : 'that payable';
+      if (!payable) throw new BadRequestException(r.lotId ? `Lot ${r.lotId} has nothing owed to this farmer` : 'That payable has nothing owed to this farmer');
+      if (seen.has(payable.id)) throw new BadRequestException('Each lot may appear only once in allocations');
+      seen.add(payable.id);
       const value = moneyFromNumber(r.amount);
       if (!isPositiveMoney(value)) throw new BadRequestException('Allocation amounts must be positive');
       if (compareMoney(value, payable.outstanding) > 0) {
-        throw new BadRequestException(`Only ${payable.outstanding} is owed on lot ${r.lotId}`);
+        throw new BadRequestException(`Only ${payable.outstanding} is owed on ${what}`);
       }
       return { id: payable.id, amount: value };
     });

@@ -23,7 +23,10 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // Geolocation for this app's own pages only: "Use my location" when taking a
+  // new customer's shop down (customer onboarding, 20 Nov 2026). The shop
+  // photo comes through the file picker, which needs no camera permission.
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(self)' },
 ];
 
 /** @type {import('next').NextConfig} */

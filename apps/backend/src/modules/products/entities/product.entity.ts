@@ -30,6 +30,8 @@ export interface ProductRecord {
   packSize: number | null;
   /** Shrinkage (live birds) or breakage (eggs) the owner accepts, %; null = the business default. */
   lossTolerancePct: string | null;
+  /** What one unit weighs (kg), for a product not sold by weight; null when sold by weight or not set. */
+  unitWeightKg: string | null;
   status: ProductStatus;
   version: number;
   createdAt: Date;

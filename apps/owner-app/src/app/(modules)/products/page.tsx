@@ -142,6 +142,7 @@ function ProductDialog({ product, currency, onClose }: { product: ProductRecord 
   const [packSize, setPackSize] = useState(String(product?.packSize ?? 30));
   const [tolerance, setTolerance] = useState(product?.lossTolerancePct !== null && product?.lossTolerancePct !== undefined ? String(Number(product.lossTolerancePct)) : '');
   const [reference, setReference] = useState(product?.basePrice ?? '');
+  const [unitWeight, setUnitWeight] = useState(product?.unitWeightKg ? String(Number(product.unitWeightKg)) : '');
   const [problem, setProblem] = useState<string | null>(null);
   const save = useAction(
     (body: Record<string, unknown>) => (product ? apiSend('PATCH', `products/${product.id}`, body) : apiSend('POST', 'products', body)),
@@ -157,6 +158,10 @@ function ProductDialog({ product, currency, onClose }: { product: ProductRecord 
     if (kind === 'egg' && !(Number.isInteger(tray) && tray >= 2)) return setProblem('A tray holds a whole number of eggs, 2 or more.');
     const ref = reference.trim() === '' ? null : Number(reference.replace(/,/g, ''));
     if (ref !== null && !(ref >= 0)) return setProblem('The reference price is an amount, or blank.');
+    const effectiveUom = kind === 'standard' ? uom : kind === 'egg' ? 'piece' : 'kg';
+    const byWeight = effectiveUom === 'kg' || effectiveUom === 'g';
+    const weight = byWeight || unitWeight.trim() === '' ? null : Number(unitWeight);
+    if (weight !== null && !(weight > 0 && weight <= 1000)) return setProblem('The weight of one unit is in kg — more than 0, up to 1000 — or blank.');
     setProblem(null);
     const body: Record<string, unknown> = {
       name: name.trim(),
@@ -164,6 +169,7 @@ function ProductDialog({ product, currency, onClose }: { product: ProductRecord 
       basePrice: ref,
       ...(kind !== 'standard' ? { lossTolerancePct: tol } : {}),
       ...(kind === 'egg' ? { packSize: tray } : {}),
+      ...(byWeight ? {} : { unitWeightKg: weight }),
     };
     if (product) save.mutate({ version: product.version, ...body, ...(kind === 'standard' ? { baseUom: uom } : {}) });
     else save.mutate({ ...body, kind, baseUom: kind === 'standard' ? uom : kind === 'egg' ? 'piece' : 'kg' });
@@ -208,6 +214,11 @@ function ProductDialog({ product, currency, onClose }: { product: ProductRecord 
               ))}
             </select>
           )}
+        </Field>
+      )}
+      {!(kind === 'live_bird' || (kind === 'standard' && (uom === 'kg' || uom === 'g'))) && (
+        <Field label="Weight of one unit (kg, optional)" hint="An egg is about 0.06 kg. It gives the product its share of trip costs by weight.">
+          {(p) => <input {...p} inputMode="decimal" value={unitWeight} onChange={(e) => setUnitWeight(e.target.value)} />}
         </Field>
       )}
       {kind === 'egg' && (

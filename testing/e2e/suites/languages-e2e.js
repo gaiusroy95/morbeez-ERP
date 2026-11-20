@@ -88,7 +88,8 @@ async function signIn(browser, cookieLang) {
     check('switching to Tamil in the top bar saves it', switched.body.language === 'ta', switched.body.language);
     await fresh.page.goto(`${BASE}/customers`);
     await fresh.page.waitForSelector('.page-title');
-    check('…and the next page is Tamil', (await fresh.page.locator('.page-title').innerText()).includes('வாடிக்கையாளர்கள்'));
+    // The aliases table (client, 20 Nov 2026): "Customers" is the English word in Tamil script.
+    check('…and the next page is Tamil — Customers as people say it, கஸ்டமர்ஸ்', (await fresh.page.locator('.page-title').innerText()).includes('கஸ்டமர்ஸ்'));
     await fresh.ctx.close();
   } finally {
     await browser.close();

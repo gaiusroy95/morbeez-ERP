@@ -17,6 +17,7 @@ const mockProduct: ProductRecord = {
   kind: 'standard',
   packSize: null,
   lossTolerancePct: null,
+  unitWeightKg: null,
   status: 'active',
   version: 1,
   createdAt: new Date(),
@@ -96,5 +97,30 @@ describe('ProductsService', () => {
     ).rejects.toThrow(conflict);
     // And critically: no audit entry for a change that never actually happened.
     expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  describe('weight per unit (P5 rule C4: KG-equivalent for allocation)', () => {
+    it('is kept for a product counted in units', async () => {
+      repo.createWithClient.mockResolvedValue({ ...mockProduct, baseUom: 'piece', kind: 'egg', unitWeightKg: '0.0600' });
+      await service.create('tenant-1', 'user-1', { name: 'Eggs', baseUom: 'unit', kind: 'egg', unitWeightKg: 0.06 });
+      expect(repo.createWithClient).toHaveBeenCalledWith(fakeClient, 'tenant-1', 'user-1', expect.objectContaining({ baseUom: 'piece', unitWeightKg: 0.06 }));
+    });
+
+    it('is refused for a product sold by weight, on create and on update', async () => {
+      await expect(service.create('tenant-1', 'user-1', { name: 'Onion', baseUom: 'kg', unitWeightKg: 1 })).rejects.toThrow(/needs no weight per unit/);
+      await expect(service.create('tenant-1', 'user-1', { name: 'Chilli', baseUom: 'g', unitWeightKg: 0.5 })).rejects.toThrow(/needs no weight per unit/);
+      repo.findByIdWithClient.mockResolvedValue(mockProduct);
+      await expect(service.update('tenant-1', 'user-1', 'product-1', { version: 1, unitWeightKg: 1 })).rejects.toThrow(/needs no weight per unit/);
+      expect(repo.createWithClient).not.toHaveBeenCalled();
+      expect(repo.updateWithClient).not.toHaveBeenCalled();
+    });
+
+    it('may be cleared on a product sold by weight, and set when it moves to units', async () => {
+      repo.findByIdWithClient.mockResolvedValue(mockProduct);
+      repo.updateWithClient.mockResolvedValue({ ...mockProduct, baseUom: 'bag', unitWeightKg: '25.0000' });
+      await service.update('tenant-1', 'user-1', 'product-1', { version: 1, unitWeightKg: null });
+      await service.update('tenant-1', 'user-1', 'product-1', { version: 1, baseUom: 'bag', unitWeightKg: 25 });
+      expect(repo.updateWithClient).toHaveBeenLastCalledWith(fakeClient, 'product-1', 1, expect.objectContaining({ baseUom: 'bag', unitWeightKg: 25 }));
+    });
   });
 });
